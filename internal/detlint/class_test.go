@@ -2,6 +2,7 @@ package detlint
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,34 @@ func TestMessages(t *testing.T) {
 		if !found {
 			t.Errorf("%s line %d: no finding %q in\n  %s", c.fixture, c.line, c.msg, findingLines(fs))
 		}
+	}
+}
+
+// AT-DET-02: directive messages.
+func TestDirectiveMessages(t *testing.T) {
+	fs, err := LintDir("testdata/src/directives", "fixture/directives", ClassCore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"a.go:13:21: DL000: //faultline:maporder needs a reason",
+		"a.go:14:2: DL006: range over map map[string]int has random order; range over sorted keys or annotate //faultline:maporder <reason>",
+		"a.go:18:2: DL006: range over map map[string]int has random order; range over sorted keys or annotate //faultline:maporder <reason>",
+		"a.go:21:19: DL000: unknown directive //faultline:sorted",
+		"a.go:23:19: DL000: //faultline:maporder suppresses no finding",
+		"a.go:28:25: DL000: //faultline:wallclock is not allowed in core packages",
+		"a.go:29:11: DL001: wall-clock time: time.Now is forbidden; use Sim.Now, Node.Now or Node.After",
+		"b.go:7:3: DL006: range over map map[string]int has random order; range over sorted keys or annotate //faultline:maporder <reason>",
+		"b.go:14:19: DL000: //faultline:maporder suppresses no finding",
+		"b.go:15:11: DL001: wall-clock time: time.Now is forbidden; use Sim.Now, Node.Now or Node.After",
+		"b.go:21:4: DL000: //faultline:maporder suppresses no finding",
+		"b.go:22:2: DL006: range over map map[string]int has random order; range over sorted keys or annotate //faultline:maporder <reason>",
+	}
+	var got []string
+	for _, f := range fs {
+		got = append(got, f.String())
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("findings:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 }
