@@ -25,6 +25,11 @@ type Sim struct {
 
 	observers []func() // OnEvent, in registration order
 	ctx       guardCtx // what the current guarded call runs
+
+	nodes      []*Node          // by ID - 1
+	byName     map[string]*Node // lookups only
+	bootHooks  []func(*Node)    // OnBoot, in registration order
+	crashHooks []func(*Node)    // OnCrash, in registration order
 }
 
 // New validates cfg, creates a Sim at time 0 and emits the kernel.start record.
@@ -36,6 +41,7 @@ func New(cfg Config) *Sim {
 		streams: map[string]*rand.Rand{},
 		tr:      newTrace(cfg.Trace),
 		pending: map[EventID]*entry{},
+		byName:  map[string]*Node{},
 	}
 	s.sched = s.stream("kernel/sched")
 	s.emit(Record{
@@ -110,4 +116,22 @@ func (s *Sim) OnEvent(fn func()) {
 		panic("kernel: nil function passed to OnEvent")
 	}
 	s.observers = append(s.observers, fn)
+}
+
+// OnBoot registers a subsystem hook that runs at every boot of every node, before the node's
+// BootFunc, in registration order.
+func (s *Sim) OnBoot(fn func(n *Node)) {
+	if fn == nil {
+		panic("kernel: nil function passed to OnBoot")
+	}
+	s.bootHooks = append(s.bootHooks, fn)
+}
+
+// OnCrash registers a subsystem hook that runs at every crash of every node, after the node is
+// down, in registration order.
+func (s *Sim) OnCrash(fn func(n *Node)) {
+	if fn == nil {
+		panic("kernel: nil function passed to OnCrash")
+	}
+	s.crashHooks = append(s.crashHooks, fn)
 }

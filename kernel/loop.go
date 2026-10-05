@@ -149,11 +149,18 @@ func (s *Sim) execute(e *entry) {
 	s.now = e.at
 	s.executed++
 	nobs := len(s.observers)
-	id, label, cause, fn := e.id, e.label, e.cause, e.fn
+	id, label, cause, fn, node, inc := e.id, e.label, e.cause, e.fn, e.node, e.inc
 	delete(s.pending, id)
+	if e.kind == entryBoot {
+		node.bootEv = nil
+	}
 	s.release(e)
-	s.emitEvent("kernel.event", id, label, 0, 0, cause)
-	s.ctx = guardCtx{event: id, label: label}
+	var nid NodeID
+	if node != nil {
+		nid = node.id
+	}
+	s.emitEvent("kernel.event", id, label, nid, inc, cause)
+	s.ctx = guardCtx{event: id, label: label, node: node, inc: inc}
 	s.guard(fn)
 	if s.err == nil && nobs > 0 {
 		s.ctx.observer = true
@@ -164,4 +171,19 @@ func (s *Sim) execute(e *entry) {
 			}
 		}
 	}
+}
+
+// call runs fn for a lifecycle operation on n: the OnCrash hooks of Crash (label "crash") or the
+// boot procedure of Restart (label "restart"). Inside the loop or another guarded call it runs fn
+// directly, so a panic reaches the enclosing guard. Otherwise it runs fn as a guarded call with
+// the Sim marked running and active (KRN-045).
+func (s *Sim) call(n *Node, label string, fn func()) {
+	if s.running {
+		fn()
+		return
+	}
+	prev := s.enter()
+	defer s.leave(prev)
+	s.ctx = guardCtx{label: label, node: n}
+	s.guard(fn)
 }
