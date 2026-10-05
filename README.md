@@ -43,8 +43,8 @@ After v0.1.0, faultline will add support for existing Go code that uses goroutin
 files, then tools that find bugs faster and shrink failing runs, a web UI for exploring a failing
 run, and ready-made setups for more systems such as hashicorp/raft and CometBFT.
 
-You can see the plan for each phase and its progress on the
-[roadmap](https://github.com/users/hmdsefi/projects/1/views/2).
+You can see the plan for each phase and its progress in the
+[roadmap issue](https://github.com/hmdsefi/faultline/issues/167).
 
 ## Why the name
 
