@@ -3,6 +3,7 @@ package kernel
 import (
 	"math"
 	"math/bits"
+	"strconv"
 	"time"
 )
 
@@ -60,4 +61,37 @@ func localToGlobal(d time.Duration, ppm int32) time.Duration {
 		return math.MaxInt64
 	}
 	return time.Duration(q)
+}
+
+// LocalTime returns the node's local clock reading as a virtual Time (KRN-074).
+func (n *Node) LocalTime() Time { return n.clk.at(n.sim.now) }
+
+// Now returns the node's local wall time: n.LocalTime().Std().
+func (n *Node) Now() time.Time { return n.LocalTime().Std() }
+
+// Drift returns the node's current drift in parts per million.
+func (n *Node) Drift() int32 { return n.clk.ppm }
+
+// JumpClock steps the local clock by d (may be negative). Scheduled timers keep their global
+// times (KRN-071).
+func (n *Node) JumpClock(d time.Duration) {
+	now := n.sim.now
+	n.clk = clock{g0: now, l0: n.clk.at(now).Add(d), ppm: n.clk.ppm}
+	n.sim.emit(Record{Kind: "kernel.clock_jump", Node: n.id, Inc: n.inc, Text: "clock jump", Attrs: []Attr{
+		{Key: "delta_ns", Value: strconv.FormatInt(int64(d), 10)},
+		{Key: "local_ns", Value: strconv.FormatInt(int64(n.clk.l0), 10)},
+	}})
+}
+
+// SetDrift changes the drift from now on. Scheduled timers keep their global times (KRN-071). It
+// panics if ppm is outside [MinDriftPPM, MaxDriftPPM].
+func (n *Node) SetDrift(ppm int32) {
+	checkDrift(ppm)
+	now := n.sim.now
+	prev := n.clk.ppm
+	n.clk = clock{g0: now, l0: n.clk.at(now), ppm: ppm}
+	n.sim.emit(Record{Kind: "kernel.clock_drift", Node: n.id, Inc: n.inc, Text: "clock drift", Attrs: []Attr{
+		{Key: "ppm", Value: strconv.FormatInt(int64(ppm), 10)},
+		{Key: "prev_ppm", Value: strconv.FormatInt(int64(prev), 10)},
+	}})
 }
