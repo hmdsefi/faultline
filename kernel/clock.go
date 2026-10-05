@@ -24,12 +24,11 @@ type clock struct {
 // at returns the local reading at global time now (now >= g0) (KRN-070).
 func (c clock) at(now Time) Time {
 	delta := int64(now - c.g0)
-	q, r := delta/1_000_000, delta%1_000_000
-	drift := q*int64(c.ppm) + floorDiv(r*int64(c.ppm), 1_000_000) // floor(delta*ppm/1e6), exact
-	if drift < 0 {
-		return c.l0.Add(time.Duration(delta + drift)) // delta+drift in [delta/2, delta]: no overflow
+	d := drift(delta, c.ppm)
+	if d < 0 {
+		return c.l0.Add(time.Duration(delta + d)) // delta+d in [delta/2, delta]: no overflow
 	}
-	return c.l0.Add(time.Duration(delta)).Add(time.Duration(drift))
+	return c.l0.Add(time.Duration(delta)).Add(time.Duration(d))
 }
 
 // floorDiv returns a/b rounded toward negative infinity, for b > 0.
@@ -94,4 +93,11 @@ func (n *Node) SetDrift(ppm int32) {
 		{Key: "ppm", Value: strconv.FormatInt(int64(ppm), 10)},
 		{Key: "prev_ppm", Value: strconv.FormatInt(int64(prev), 10)},
 	}})
+}
+
+// drift returns floor(delta*ppm/1e6) exactly and without overflow, for ppm in
+// [MinDriftPPM, MaxDriftPPM] (KRN-070).
+func drift(delta int64, ppm int32) int64 {
+	q, r := delta/1_000_000, delta%1_000_000
+	return q*int64(ppm) + floorDiv(r*int64(ppm), 1_000_000)
 }
