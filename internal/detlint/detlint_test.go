@@ -100,3 +100,64 @@ func findingLines(fs []Finding) string {
 	}
 	return b.String()
 }
+
+// moduleRoot returns the root of the faultline module.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := FindRoot(".", "github.com/hmdsefi/faultline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// report fails t with one error: prefix, the number of findings, and one finding per line.
+func report(t testing.TB, prefix string, fs []Finding) {
+	t.Helper()
+	if len(fs) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %d finding(s):", prefix, len(fs))
+	for _, f := range fs {
+		b.WriteString("\n" + f.String())
+	}
+	t.Error(b.String())
+}
+
+// AT-DET-05, AT-KRN-45 (DET-016)
+func TestDeterminismLint(t *testing.T) {
+	fs, err := Lint(Faultline(moduleRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report(t, "determinism lint", fs)
+}
+
+// reportTB records the errors that report sends to it.
+type reportTB struct {
+	testing.TB
+	errs []string
+}
+
+func (r *reportTB) Helper()           {}
+func (r *reportTB) Error(args ...any) { r.errs = append(r.errs, fmt.Sprint(args...)) }
+
+// DET-016: report fails once per call with findings, with the count and one finding per line, and
+// not at all without findings.
+func TestReport(t *testing.T) {
+	var tb reportTB
+	report(&tb, "determinism lint", nil)
+	report(&tb, "determinism lint", []Finding{{File: "a.go", Line: 1, Col: 2, Rule: RuleGo, Msg: "m"}})
+	report(&tb, "determinism lint", []Finding{
+		{File: "a.go", Line: 1, Col: 2, Rule: RuleGo, Msg: "m"},
+		{File: "b", Rule: RuleMeta, Msg: "n"},
+	})
+	want := []string{
+		"determinism lint: 1 finding(s):\na.go:1:2: DL004: m",
+		"determinism lint: 2 finding(s):\na.go:1:2: DL004: m\nb:0:0: DL000: n",
+	}
+	if !slices.Equal(tb.errs, want) {
+		t.Fatalf("errors %q, want %q", tb.errs, want)
+	}
+}
