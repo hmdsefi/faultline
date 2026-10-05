@@ -281,3 +281,32 @@ func (s *Sim) bootProc(n *Node) {
 func (n *Node) Logf(format string, args ...any) {
 	n.sim.emit(Record{Kind: "kernel.log", Node: n.id, Inc: n.inc, Text: fmt.Sprintf(format, args...)})
 }
+
+// Pause stops running the node's events (KRN-060): they are deferred when due and run after
+// Resume in their original order. It is a no-op unless the node is up.
+func (n *Node) Pause() {
+	if n.state != NodeUp {
+		return
+	}
+	n.state = NodePaused
+	n.sim.emit(Record{Kind: "kernel.pause", Node: n.id, Inc: n.inc, Text: "pause"})
+}
+
+// Resume makes a paused node up again (KRN-063). Its deferred events run at Now(), in the order they
+// were deferred: under TieBreakSeeded before the seeded events at Now(), under TieBreakFIFO after the
+// events already queued for Now(). It is a no-op unless the node is paused.
+func (n *Node) Resume() {
+	if n.state != NodePaused {
+		return
+	}
+	s := n.sim
+	n.state = NodeUp
+	s.emit(Record{Kind: "kernel.resume", Node: n.id, Inc: n.inc, Text: "resume",
+		Attrs: []Attr{{Key: "deferred", Value: strconv.Itoa(len(n.deferred))}}})
+	for _, e := range n.deferred {
+		s.nextSeq++
+		e.at, e.tb, e.seq = s.now, 0, s.nextSeq
+		s.q.push(e)
+	}
+	n.deferred = nil
+}
