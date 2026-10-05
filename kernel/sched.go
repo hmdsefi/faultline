@@ -95,3 +95,14 @@ func (s *Sim) release(e *entry) {
 	*e = entry{idx: -1}
 	s.free = append(s.free, e)
 }
+
+// AtFront schedules fn at time t like At, but with tie-break 0 and no draw from the
+// "kernel/sched" stream, so under TieBreakSeeded it runs before every seeded event at t (KRN-026,
+// KRN-027). It is for the fault injector and planners (FLT). It panics like At.
+func (s *Sim) AtFront(t Time, label string, fn func()) EventID {
+	if t < s.now {
+		panic(fmt.Sprintf("kernel: AtFront(%s, %q) is before Now() %s", t, label, s.now))
+	}
+	checkEvent(label, fn)
+	return s.schedule(t, label, fn, true).id
+}
