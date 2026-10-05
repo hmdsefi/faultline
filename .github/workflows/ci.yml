@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  root:
+    name: root (${{ matrix.os }}, go ${{ matrix.go }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        go: ['1.26.x', '1.27.x']
+    runs-on: ${{ matrix.os }}
+    env:
+      GOWORK: 'off'
+      FAULTLINE_CHECK_DETERMINISM: '1'
+      FAULTLINE_GOLDEN_OUT: ${{ github.workspace }}/golden-${{ matrix.os }}-go${{ matrix.go }}.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: gofmt
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - name: go mod tidy
+        run: go mod tidy -diff
+      - name: vet
+        run: go vet ./...
+      - name: test (race, determinism checks, lint, golden)
+        run: go test -race -count=1 ./...
+      - name: kernel allocations and benchmarks (no race detector)
+        run: go test -count=1 -run '^TestLoopAllocs$' -bench . -benchtime 100x ./kernel/...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.os }}-go${{ matrix.go }}
+          path: golden-${{ matrix.os }}-go${{ matrix.go }}.txt
+
+  golden-compare:
+    needs: root
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: golden-*
+          merge-multiple: true
+          path: golden
+      - name: compare golden hashes across platforms and Go versions
+        run: |
+          set -e
+          if [ ! -f internal/golden/golden_test.go ]; then
+            echo "TestGolden (internal/golden/golden_test.go) does not exist yet; nothing to compare."
+            exit 0
+          fi
+          files=$(ls golden/*.txt)
+          first=$(echo "$files" | head -n 1)
+          for f in $files; do
+            diff -u "$first" "$f"
+          done
+
+  nested:
+    name: nested modules (${{ matrix.os }}, go ${{ matrix.go }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        go: ['1.26.x', '1.27.x']
+    runs-on: ${{ matrix.os }}
+    env:
+      FAULTLINE_CHECK_DETERMINISM: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: workspace with the root and all nested modules
+        run: |
+          go work init
+          go work use -r .
+      - name: vet and test each nested module
+        run: |
+          set -e
+          for mod in $(git ls-files '*/go.mod' | xargs -n 1 dirname | sort); do
+            echo "::group::$mod"
+            go -C "$mod" vet ./...
+            go -C "$mod" test -race -count=1 ./...
+            echo "::endgroup::"
+          done
+
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: fuzz smoke
+        run: |
+          set -e
+          for target in FuzzQueueOrder FuzzStreamSeeds FuzzRecordEncoding FuzzClock; do
+            go test -run '^$' -fuzz "^${target}\$" -fuzztime 10s ./kernel
+          done
+
+  golden-trailer:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: hash changes need an explanation
+        run: |
+          base=${{ github.event.pull_request.base.sha }}
+          if git diff --name-only "$base"...HEAD | grep -qx 'internal/golden/testdata/hashes.txt'; then
+            if ! git log --format=%B "$base"..HEAD | grep -Eq '^Golden-Update: .+'; then
+              echo "internal/golden/testdata/hashes.txt changed: add a 'Golden-Update: <reason>' line to a commit message"
+              exit 1
+            fi
+          fi
