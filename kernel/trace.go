@@ -1,6 +1,9 @@
 package kernel
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"strconv"
+)
 
 // Attr is one key/value pair of a record. Keys are snake_case.
 type Attr struct{ Key, Value string }
@@ -113,4 +116,31 @@ func (s *Sim) Records() []Record {
 	out := make([]Record, 0, len(tr.kept))
 	out = append(out, tr.kept[tr.next:]...)
 	return append(out, tr.kept[:tr.next]...)
+}
+
+// emitEvent emits a kernel.event or kernel.defer record for an entry. In TraceHash mode it folds
+// the encoding into the hash without building a Record, an []Attr or an ID string (KRN-120).
+func (s *Sim) emitEvent(kind string, id EventID, label string, node NodeID, inc uint32, cause uint64) {
+	tr := &s.tr
+	tr.seq++
+	var idBuf [20]byte
+	ids := strconv.AppendUint(idBuf[:0], uint64(id), 10)
+	b := tr.buf[:0]
+	b = binary.AppendUvarint(b, tr.seq)
+	b = binary.AppendVarint(b, int64(s.now))
+	b = binary.AppendVarint(b, int64(node))
+	b = binary.AppendUvarint(b, uint64(inc))
+	b = appendString(b, kind)
+	b = binary.AppendUvarint(b, cause)
+	b = appendString(b, label)
+	b = binary.AppendUvarint(b, 1) // one attribute: id
+	b = appendString(b, "id")
+	b = binary.AppendUvarint(b, uint64(len(ids)))
+	b = append(b, ids...)
+	tr.buf = b
+	tr.hash = fnvFold(tr.hash, b)
+	if tr.level == TraceFull {
+		tr.keep(Record{Seq: tr.seq, At: s.now, Node: node, Inc: inc, Kind: kind, Cause: cause, Text: label,
+			Attrs: []Attr{{Key: "id", Value: string(ids)}}})
+	}
 }

@@ -15,6 +15,13 @@ type Sim struct {
 	streams  map[string]*rand.Rand // lookups only (KRN-115)
 	sched    *rand.Rand            // the "kernel/sched" stream
 	tr       trace
+
+	nextID  uint64             // last EventID handed out
+	nextSeq uint64             // last queue seq handed out
+	q       queue              // pending entries
+	pending map[EventID]*entry // pending entries by ID, for Cancel (lookups only)
+	free    []*entry           // recycled entries
+	running bool               // inside Step, Run, RunUntil, RunFor or a guarded call
 }
 
 // New validates cfg, creates a Sim at time 0 and emits the kernel.start record.
@@ -25,6 +32,7 @@ func New(cfg Config) *Sim {
 		cfg:     cfg,
 		streams: map[string]*rand.Rand{},
 		tr:      newTrace(cfg.Trace),
+		pending: map[EventID]*entry{},
 	}
 	s.sched = s.stream("kernel/sched")
 	s.emit(Record{
