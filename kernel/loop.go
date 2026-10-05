@@ -116,7 +116,8 @@ func (s *Sim) loop(deadline Time, hasDeadline bool) StopReason {
 }
 
 // ready runs steps 1-7 of KRN-036: it returns the queue head if it may execute now, or nil and the
-// reason to stop. The caller pops the returned entry and executes it (step 8).
+// reason to stop. On the way it defers the heads of paused nodes (step 6), which moves Now. The
+// caller pops the returned entry and executes it (step 8).
 func (s *Sim) ready(deadline Time, hasDeadline bool) (*entry, StopReason) {
 	for {
 		if s.err != nil {
@@ -135,6 +136,10 @@ func (s *Sim) ready(deadline Time, hasDeadline bool) (*entry, StopReason) {
 		}
 		if s.cfg.MaxTime != 0 && e.at > s.cfg.MaxTime {
 			return nil, StopMaxTime
+		}
+		if e.kind == entryNode && e.node.state == NodePaused {
+			s.deferHead(e)
+			continue
 		}
 		if s.cfg.MaxEvents != 0 && s.executed >= s.cfg.MaxEvents {
 			return nil, StopMaxEvents
@@ -186,4 +191,14 @@ func (s *Sim) call(n *Node, label string, fn func()) {
 	defer s.leave(prev)
 	s.ctx = guardCtx{label: label, node: n}
 	s.guard(fn)
+}
+
+// deferHead moves e, the head returned by peek and an entry of a paused node, to the node's deferred
+// list: it pops e, sets Now to e.at and emits kernel.defer (KRN-036 step 6).
+func (s *Sim) deferHead(e *entry) {
+	s.q.pop()
+	s.now = e.at
+	n := e.node
+	n.deferred = append(n.deferred, e)
+	s.emitEvent("kernel.defer", e.id, e.label, n.id, e.inc, e.cause)
 }
