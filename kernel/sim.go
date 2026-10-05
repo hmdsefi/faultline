@@ -22,6 +22,9 @@ type Sim struct {
 	pending map[EventID]*entry // pending entries by ID, for Cancel (lookups only)
 	free    []*entry           // recycled entries
 	running bool               // inside Step, Run, RunUntil, RunFor or a guarded call
+
+	observers []func() // OnEvent, in registration order
+	ctx       guardCtx // what the current guarded call runs
 }
 
 // New validates cfg, creates a Sim at time 0 and emits the kernel.start record.
@@ -100,3 +103,11 @@ func (s *Sim) Err() error { return s.err }
 
 // Executed returns the number of events executed so far (callbacks run, including panicking ones).
 func (s *Sim) Executed() uint64 { return s.executed }
+
+// OnEvent registers an observer that runs after every executed event, in registration order.
+func (s *Sim) OnEvent(fn func()) {
+	if fn == nil {
+		panic("kernel: nil function passed to OnEvent")
+	}
+	s.observers = append(s.observers, fn)
+}
