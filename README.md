@@ -37,6 +37,15 @@ step. Everything happens inside `go test`.
 - Failure reports you can read and replay
 - A ready-made test setup for [etcd/raft](https://github.com/etcd-io/raft)
 
+## Roadmap
+
+After v0.1.0, faultline will add support for existing Go code that uses goroutines, `net` and
+files, then tools that find bugs faster and shrink failing runs, a web UI for exploring a failing
+run, and ready-made setups for more systems such as hashicorp/raft and CometBFT.
+
+You can see the plan for each phase and its progress on the
+[roadmap](https://github.com/users/hmdsefi/projects/1/views/2).
+
 ## Why the name
 
 A fault line is a crack in the earth's crust. Stress builds up there for years without any sign,
