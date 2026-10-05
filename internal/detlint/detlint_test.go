@@ -161,3 +161,12 @@ func TestReport(t *testing.T) {
 		t.Fatalf("errors %q, want %q", tb.errs, want)
 	}
 }
+
+// AT-KRN-45 (DET-021)
+func TestImportBoundaries(t *testing.T) {
+	fs, err := CheckImports(Faultline(moduleRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report(t, "import boundaries", fs)
+}
