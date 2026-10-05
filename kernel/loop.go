@@ -143,13 +143,25 @@ func (s *Sim) ready(deadline Time, hasDeadline bool) (*entry, StopReason) {
 	}
 }
 
-// execute runs a popped entry (KRN-040).
+// execute runs a popped entry (KRN-040): it advances the clock, emits kernel.event, runs the
+// callback and then the observers registered before the event started, all as guarded calls.
 func (s *Sim) execute(e *entry) {
 	s.now = e.at
 	s.executed++
+	nobs := len(s.observers)
 	id, label, cause, fn := e.id, e.label, e.cause, e.fn
 	delete(s.pending, id)
 	s.release(e)
 	s.emitEvent("kernel.event", id, label, 0, 0, cause)
-	fn()
+	s.ctx = guardCtx{event: id, label: label}
+	s.guard(fn)
+	if s.err == nil && nobs > 0 {
+		s.ctx.observer = true
+		for _, o := range s.observers[:nobs] {
+			s.guard(o)
+			if s.err != nil {
+				break
+			}
+		}
+	}
 }
