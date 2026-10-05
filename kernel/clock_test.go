@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +77,97 @@ func TestFloorDiv(t *testing.T) {
 		if got := floorDiv(c.a, c.b); got != c.want {
 			t.Errorf("floorDiv(%d, %d) = %d, want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+// AT-KRN-32
+func TestNodeClock(t *testing.T) {
+	s := fullSim(1)
+	var firedAt Time = -1
+	c1 := s.AddNode("c1", func(n *Node) { n.After(time.Second, "t", func() { firedAt = s.Now() }) },
+		WithClock(5*time.Second, 100))
+	s.RunUntil(sec(10))
+	if firedAt != 999900010 {
+		t.Fatalf("timer fired at %d, want 999900010", firedAt)
+	}
+	if got := c1.LocalTime(); got != Time(15001*time.Millisecond) {
+		t.Fatalf("LocalTime = %v, want 15.001s", got)
+	}
+	if got := c1.Now().Format(time.RFC3339Nano); got != "2000-01-01T00:00:15.001Z" {
+		t.Fatalf("Now() = %s", got)
+	}
+	if c1.Drift() != 100 {
+		t.Fatalf("Drift = %d", c1.Drift())
+	}
+	c1.JumpClock(-2 * time.Second)
+	if got := c1.LocalTime(); got != Time(13001*time.Millisecond) {
+		t.Fatalf("after JumpClock: %v", got)
+	}
+	if got := recLine(lastRecord(s)); !strings.HasSuffix(got, `1/1 kernel.clock_jump cause=5 "clock jump" [delta_ns=-2000000000 local_ns=13001000000]`) {
+		t.Fatalf("clock_jump record %s", got)
+	}
+	c1.SetDrift(-200)
+	if got := recLine(lastRecord(s)); !strings.HasSuffix(got, `kernel.clock_drift cause=6 "clock drift" [ppm=-200 prev_ppm=100]`) {
+		t.Fatalf("clock_drift record %s", got)
+	}
+	s.RunUntil(sec(20))
+	if got := c1.LocalTime(); got != Time(22999*time.Millisecond) {
+		t.Fatalf("LocalTime at 20s = %v, want 22.999s", got)
+	}
+	mustPanic(t, "kernel: drift 1000001 ppm out of range [-500000, 1000000]", func() { c1.SetDrift(1_000_001) })
+	before := c1.LocalTime()
+	c1.Crash()
+	c1.Restart()
+	c1.Pause()
+	c1.Resume()
+	if c1.LocalTime() != before {
+		t.Fatalf("lifecycle changed the clock: %v -> %v", before, c1.LocalTime())
+	}
+}
+
+// KRN-071: changing the drift does not retime scheduled timers.
+func TestSetDriftKeepsTimers(t *testing.T) {
+	s := New(Config{Seed: 1})
+	var firedAt Time = -1
+	n := s.AddNode("n", func(n *Node) { n.After(time.Second, "t", func() { firedAt = s.Now() }) })
+	s.RunUntil(0)
+	n.SetDrift(1_000_000)
+	n.JumpClock(time.Hour)
+	s.Run()
+	if firedAt != sec(1) {
+		t.Fatalf("timer fired at %v, want 1s", firedAt)
+	}
+}
+
+// KRN-071, KRN-073: SetDrift keeps the reading continuous, a rejected SetDrift changes nothing, the
+// lifecycle leaves the clock alone, and JumpClock saturates (KRN-001).
+func TestClockRebase(t *testing.T) {
+	s := fullSim(1)
+	n := s.AddNode("n", func(*Node) {}, WithClock(0, 100))
+	s.RunUntil(sec(10))
+	n.SetDrift(-200)
+	if got := n.LocalTime(); got != Time(10001*time.Millisecond) {
+		t.Fatalf("SetDrift moved the reading: %v", got)
+	}
+	if r := lastRecord(s); r.Node != n.ID() || r.Inc != 1 {
+		t.Fatalf("clock_drift record %s", recLine(r))
+	}
+	mustPanic(t, "kernel: drift -500001 ppm out of range [-500000, 1000000]", func() { n.SetDrift(MinDriftPPM - 1) })
+	if n.Drift() != -200 || lastRecord(s).Kind != "kernel.clock_drift" {
+		t.Fatalf("rejected SetDrift changed the node: drift %d, last %s", n.Drift(), recLine(lastRecord(s)))
+	}
+	s.RunUntil(sec(20))
+	n.Crash()
+	n.Restart()
+	n.Pause()
+	n.Resume()
+	s.RunUntil(sec(30))
+	if n.Drift() != -200 || n.LocalTime() != Time(29997*time.Millisecond) {
+		t.Fatalf("after lifecycle: drift %d, LocalTime %v, want -200 and 29.997s", n.Drift(), n.LocalTime())
+	}
+	n.JumpClock(math.MaxInt64)
+	n.JumpClock(math.MaxInt64)
+	if n.LocalTime() != math.MaxInt64 {
+		t.Fatalf("JumpClock did not saturate: %v", n.LocalTime())
 	}
 }
