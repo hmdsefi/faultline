@@ -2,7 +2,9 @@ package kernel
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Attr is one key/value pair of a record. Keys are snake_case.
@@ -82,7 +84,9 @@ func (s *Sim) emit(r Record) uint64 {
 	tr.buf = AppendRecord(tr.buf[:0], r)
 	tr.hash = fnvFold(tr.hash, tr.buf)
 	if tr.level == TraceFull {
-		if len(r.Attrs) > 0 {
+		if len(r.Attrs) == 0 {
+			r.Attrs = nil
+		} else {
 			r.Attrs = append([]Attr(nil), r.Attrs...)
 		}
 		tr.keep(r)
@@ -143,4 +147,32 @@ func (s *Sim) emitEvent(kind string, id EventID, label string, node NodeID, inc 
 		tr.keep(Record{Seq: tr.seq, At: s.now, Node: node, Inc: inc, Kind: kind, Cause: cause, Text: label,
 			Attrs: []Attr{{Key: "id", Value: string(ids)}}})
 	}
+}
+
+// Emit assigns Seq and At, defaults Cause and Inc (KRN-090), hashes the record, keeps a copy when
+// tracing fully, and returns its Seq. Attrs is copied, so the caller may reuse it. It panics on an
+// empty or "kernel."-prefixed Kind, an empty attribute key, an unknown Node, or a Cause after
+// Cause().
+func (s *Sim) Emit(r Record) uint64 {
+	if r.Kind == "" {
+		panic("kernel: Emit: empty Kind")
+	}
+	if strings.HasPrefix(r.Kind, "kernel.") {
+		panic(fmt.Sprintf("kernel: Emit: kind %q is reserved for the kernel", r.Kind))
+	}
+	for _, a := range r.Attrs {
+		if a.Key == "" {
+			panic(fmt.Sprintf("kernel: Emit: empty attribute key in %q", r.Kind))
+		}
+	}
+	if r.Node != 0 && s.Node(r.Node) == nil {
+		panic(fmt.Sprintf("kernel: Emit: unknown node %d in %q", r.Node, r.Kind))
+	}
+	if r.Cause > s.tr.seq {
+		panic(fmt.Sprintf("kernel: Emit: cause %d is not an earlier record (next seq %d)", r.Cause, s.tr.seq+1))
+	}
+	if r.Node != 0 && r.Inc == 0 {
+		r.Inc = s.Node(r.Node).inc
+	}
+	return s.emit(r)
 }
