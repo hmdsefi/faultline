@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -52,19 +53,27 @@ func (s *Sim) schedule(at Time, label string, fn func(), front bool) *entry {
 }
 
 // Cancel removes a pending event. It reports whether the call prevented the event from running.
+// The initial boot event of a node cannot be cancelled; a stale node-bound entry is removed and
+// false is returned (KRN-024).
 func (s *Sim) Cancel(id EventID) bool {
 	e, ok := s.pending[id]
-	if !ok {
+	if !ok || e.kind == entryBoot {
 		return false
 	}
-	delete(s.pending, id)
-	s.q.remove(e.idx)
-	s.release(e)
-	return true
+	stale := e.stale()
+	if e.idx >= 0 {
+		s.q.remove(e.idx)
+	} else {
+		n := e.node
+		k := slices.Index(n.deferred, e)
+		n.deferred = slices.Delete(n.deferred, k, k+1)
+	}
+	s.discard(e)
+	return !stale
 }
 
 // NextAt returns the time of the next entry the loop would process and true, or 0 and false if
-// the queue is empty.
+// the queue is empty. Stale entries at the head of the queue are discarded first.
 func (s *Sim) NextAt() (Time, bool) {
 	if e := s.peek(); e != nil {
 		return e.at, true
@@ -72,12 +81,18 @@ func (s *Sim) NextAt() (Time, bool) {
 	return 0, false
 }
 
-// peek returns the head of the queue, or nil if the queue is empty (KRN-032).
+// peek discards stale entries at the head of the queue, without a record and without moving the
+// clock, and returns the head, or nil if the queue is empty (KRN-032).
 func (s *Sim) peek() *entry {
-	if len(s.q) == 0 {
-		return nil
+	for len(s.q) > 0 {
+		e := s.q[0]
+		if !e.stale() {
+			return e
+		}
+		s.q.pop()
+		s.discard(e)
 	}
-	return s.q[0]
+	return nil
 }
 
 // newEntry returns a cleared entry from the free list, or a new one.
@@ -105,4 +120,13 @@ func (s *Sim) AtFront(t Time, label string, fn func()) EventID {
 	}
 	checkEvent(label, fn)
 	return s.schedule(t, label, fn, true).id
+}
+
+// discard forgets an entry that has left the queue or a deferred list without running.
+func (s *Sim) discard(e *entry) {
+	delete(s.pending, e.id)
+	if e.kind == entryBoot && e.node.bootEv == e {
+		e.node.bootEv = nil
+	}
+	s.release(e)
 }

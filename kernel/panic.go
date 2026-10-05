@@ -17,7 +17,7 @@ type PanicError struct {
 	Label    string  // event label, or "crash"/"restart" for a guarded call outside the loop
 	Node     NodeID  // node of the event or operation; 0 for global events
 	NodeName string  // name of Node; "" if Node is 0
-	Inc      uint32  // incarnation as recorded in the event's kernel.event record
+	Inc      uint32  // incarnation of the event, or of the node at the panic outside the loop
 	Observer bool    // the panic happened in an OnEvent observer
 	Seed     uint64
 }
@@ -58,10 +58,13 @@ func panicText(v any, goexit bool) string {
 	return Describe(v)
 }
 
-// guardCtx describes the code that the current guarded call runs (KRN-043).
+// guardCtx describes the code that the current guarded call runs (KRN-043). event is 0 for a
+// guarded call outside the loop; node is nil for global events.
 type guardCtx struct {
 	event    EventID
 	label    string
+	node     *Node
+	inc      uint32 // the incarnation in the event's kernel.event record
 	observer bool
 }
 
@@ -95,9 +98,17 @@ func (s *Sim) recordPanic(v any) {
 		Observer: c.observer,
 		Seed:     s.cfg.Seed,
 	}
+	if c.node != nil {
+		pe.Node, pe.NodeName, pe.Inc = c.node.id, c.node.name, c.inc
+		if c.event == 0 {
+			pe.Inc = c.node.inc // outside the loop: the incarnation at the time of the panic
+		}
+	}
 	s.err = pe
 	s.emit(Record{
 		Kind: "kernel.panic",
+		Node: pe.Node,
+		Inc:  pe.Inc,
 		Text: panicText(v, pe.Goexit),
 		Attrs: []Attr{
 			{Key: "event_id", Value: strconv.FormatUint(uint64(c.event), 10)},

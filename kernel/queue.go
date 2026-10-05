@@ -9,6 +9,9 @@ type entry struct {
 	cause uint64 // Cause() when the event was scheduled
 	fn    func()
 	label string
+	node  *Node  // nil for global entries
+	inc   uint32 // node incarnation captured at scheduling
+	kind  entryKind
 	idx   int // index in the heap; -1 when not in the heap
 }
 
@@ -95,4 +98,24 @@ func (q queue) swap(i, j int) {
 	q[i], q[j] = q[j], q[i]
 	q[i].idx = i
 	q[j].idx = j
+}
+
+// entryKind tells what an entry is bound to.
+type entryKind uint8
+
+const (
+	entryGlobal entryKind = iota // Sim.At, Sim.After, Sim.AtFront: never stale
+	entryNode                    // Node.After, Node.Post: bound to an incarnation
+	entryBoot                    // the initial boot event of AddNode
+)
+
+// stale reports whether the entry must be discarded instead of run (KRN-031).
+func (e *entry) stale() bool {
+	switch e.kind {
+	case entryNode:
+		return e.node.state == NodeDown || e.node.inc != e.inc
+	case entryBoot:
+		return e.node.inc != 0 || e.node.state != NodeDown
+	}
+	return false
 }
