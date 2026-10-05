@@ -1,0 +1,148 @@
+pkg github.com/hmdsefi/faultline/kernel, const MaxDriftPPM = 1000000
+pkg github.com/hmdsefi/faultline/kernel, const MaxDriftPPM int32
+pkg github.com/hmdsefi/faultline/kernel, const MinDriftPPM = -500000
+pkg github.com/hmdsefi/faultline/kernel, const MinDriftPPM int32
+pkg github.com/hmdsefi/faultline/kernel, const NodeDown = 2
+pkg github.com/hmdsefi/faultline/kernel, const NodeDown NodeState
+pkg github.com/hmdsefi/faultline/kernel, const NodePaused = 3
+pkg github.com/hmdsefi/faultline/kernel, const NodePaused NodeState
+pkg github.com/hmdsefi/faultline/kernel, const NodeUp = 1
+pkg github.com/hmdsefi/faultline/kernel, const NodeUp NodeState
+pkg github.com/hmdsefi/faultline/kernel, const StopDeadline = 1
+pkg github.com/hmdsefi/faultline/kernel, const StopDeadline StopReason
+pkg github.com/hmdsefi/faultline/kernel, const StopFailed = 4
+pkg github.com/hmdsefi/faultline/kernel, const StopFailed StopReason
+pkg github.com/hmdsefi/faultline/kernel, const StopIdle = 0
+pkg github.com/hmdsefi/faultline/kernel, const StopIdle StopReason
+pkg github.com/hmdsefi/faultline/kernel, const StopMaxEvents = 3
+pkg github.com/hmdsefi/faultline/kernel, const StopMaxEvents StopReason
+pkg github.com/hmdsefi/faultline/kernel, const StopMaxTime = 2
+pkg github.com/hmdsefi/faultline/kernel, const StopMaxTime StopReason
+pkg github.com/hmdsefi/faultline/kernel, const TieBreakFIFO = 1
+pkg github.com/hmdsefi/faultline/kernel, const TieBreakFIFO TieBreak
+pkg github.com/hmdsefi/faultline/kernel, const TieBreakSeeded = 0
+pkg github.com/hmdsefi/faultline/kernel, const TieBreakSeeded TieBreak
+pkg github.com/hmdsefi/faultline/kernel, const TraceFull = 1
+pkg github.com/hmdsefi/faultline/kernel, const TraceFull TraceLevel
+pkg github.com/hmdsefi/faultline/kernel, const TraceHash = 0
+pkg github.com/hmdsefi/faultline/kernel, const TraceHash TraceLevel
+pkg github.com/hmdsefi/faultline/kernel, func Active() *Sim
+pkg github.com/hmdsefi/faultline/kernel, func AppendRecord([]byte, Record) []byte
+pkg github.com/hmdsefi/faultline/kernel, func Chance(*rand.Rand, uint32) bool
+pkg github.com/hmdsefi/faultline/kernel, func Describe(any) string
+pkg github.com/hmdsefi/faultline/kernel, func HashRecords([]Record) uint64
+pkg github.com/hmdsefi/faultline/kernel, func New(Config) *Sim
+pkg github.com/hmdsefi/faultline/kernel, func Uniform(*rand.Rand, time.Duration, time.Duration) time.Duration
+pkg github.com/hmdsefi/faultline/kernel, func WithClock(time.Duration, int32) NodeOption
+pkg github.com/hmdsefi/faultline/kernel, func WithTags(...string) NodeOption
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) After(time.Duration, string, func()) EventID
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Cancel(EventID) bool
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Crash()
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Drift() int32
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) HasTag(string) bool
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) ID() NodeID
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Incarnation() uint32
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) JumpClock(time.Duration)
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) LocalTime() Time
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Logf(string, ...any)
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Name() string
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Now() time.Time
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Pause()
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Post(string, func()) EventID
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Rand() *rand.Rand
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Restart()
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Resume()
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) SetDrift(int32)
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Sim() *Sim
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) State() NodeState
+pkg github.com/hmdsefi/faultline/kernel, method (*Node) Tags() []string
+pkg github.com/hmdsefi/faultline/kernel, method (*PanicError) Error() string
+pkg github.com/hmdsefi/faultline/kernel, method (*PanicError) Unwrap() error
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) AddNode(string, BootFunc, ...NodeOption) *Node
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) AdvanceTo(Time)
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) After(time.Duration, string, func()) EventID
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) At(Time, string, func()) EventID
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) AtFront(Time, string, func()) EventID
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Cancel(EventID) bool
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Cause() uint64
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Config() Config
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Emit(Record) uint64
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Err() error
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Executed() uint64
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Fail(error)
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Logf(string, ...any)
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Lookup(string) *Node
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) NextAt() (Time, bool)
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Node(NodeID) *Node
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Nodes() []*Node
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Now() Time
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) OnBoot(func(*Node))
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) OnCrash(func(*Node))
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) OnEvent(func())
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Rand(string) *rand.Rand
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Records() []Record
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Run() StopReason
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) RunFor(time.Duration) StopReason
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) RunUntil(Time) StopReason
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Seed() uint64
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) Step() bool
+pkg github.com/hmdsefi/faultline/kernel, method (*Sim) TraceHash() uint64
+pkg github.com/hmdsefi/faultline/kernel, method (NodeState) String() string
+pkg github.com/hmdsefi/faultline/kernel, method (StopReason) String() string
+pkg github.com/hmdsefi/faultline/kernel, method (TieBreak) String() string
+pkg github.com/hmdsefi/faultline/kernel, method (Time) Add(time.Duration) Time
+pkg github.com/hmdsefi/faultline/kernel, method (Time) Std() time.Time
+pkg github.com/hmdsefi/faultline/kernel, method (Time) String() string
+pkg github.com/hmdsefi/faultline/kernel, method (Time) Sub(Time) time.Duration
+pkg github.com/hmdsefi/faultline/kernel, method (TraceLevel) String() string
+pkg github.com/hmdsefi/faultline/kernel, type Attr struct
+pkg github.com/hmdsefi/faultline/kernel, type Attr struct, Key string
+pkg github.com/hmdsefi/faultline/kernel, type Attr struct, Value string
+pkg github.com/hmdsefi/faultline/kernel, type BootFunc func(*Node)
+pkg github.com/hmdsefi/faultline/kernel, type Config struct
+pkg github.com/hmdsefi/faultline/kernel, type Config struct, MaxEvents uint64
+pkg github.com/hmdsefi/faultline/kernel, type Config struct, MaxTime Time
+pkg github.com/hmdsefi/faultline/kernel, type Config struct, Seed uint64
+pkg github.com/hmdsefi/faultline/kernel, type Config struct, TieBreak TieBreak
+pkg github.com/hmdsefi/faultline/kernel, type Config struct, Trace TraceConfig
+pkg github.com/hmdsefi/faultline/kernel, type Describer interface { Describe }
+pkg github.com/hmdsefi/faultline/kernel, type Describer interface, Describe() string
+pkg github.com/hmdsefi/faultline/kernel, type EventID uint64
+pkg github.com/hmdsefi/faultline/kernel, type Node struct
+pkg github.com/hmdsefi/faultline/kernel, type NodeConfig struct
+pkg github.com/hmdsefi/faultline/kernel, type NodeConfig struct, ClockOffset time.Duration
+pkg github.com/hmdsefi/faultline/kernel, type NodeConfig struct, DriftPPM int32
+pkg github.com/hmdsefi/faultline/kernel, type NodeConfig struct, Tags []string
+pkg github.com/hmdsefi/faultline/kernel, type NodeID int32
+pkg github.com/hmdsefi/faultline/kernel, type NodeOption func(*NodeConfig)
+pkg github.com/hmdsefi/faultline/kernel, type NodeState uint8
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, At Time
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Event EventID
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Goexit bool
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Inc uint32
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Label string
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Node NodeID
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, NodeName string
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Observer bool
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Seed uint64
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Stack []byte
+pkg github.com/hmdsefi/faultline/kernel, type PanicError struct, Value any
+pkg github.com/hmdsefi/faultline/kernel, type Record struct
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, At Time
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Attrs []Attr
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Cause uint64
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Inc uint32
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Kind string
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Node NodeID
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Seq uint64
+pkg github.com/hmdsefi/faultline/kernel, type Record struct, Text string
+pkg github.com/hmdsefi/faultline/kernel, type Sim struct
+pkg github.com/hmdsefi/faultline/kernel, type StopReason uint8
+pkg github.com/hmdsefi/faultline/kernel, type TieBreak uint8
+pkg github.com/hmdsefi/faultline/kernel, type Time int64
+pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct
+pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Buffer int
+pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Level TraceLevel
+pkg github.com/hmdsefi/faultline/kernel, type TraceLevel uint8
+pkg github.com/hmdsefi/faultline/kernel, var Epoch time.Time

@@ -1,6 +1,7 @@
 package detlint
 
 import (
+	"flag"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -169,4 +170,71 @@ func TestImportBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	report(t, "import boundaries", fs)
+}
+
+var update = flag.Bool("update", false, "rewrite api/kernel.txt")
+
+// snapshotDiff returns "" if the snapshot file content equals generated, otherwise the failure
+// message of DET-027.
+func snapshotDiff(file, generated string) string {
+	split := func(s string) []string {
+		var out []string
+		for _, l := range strings.Split(s, "\n") {
+			if l != "" {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	have, want := split(file), split(generated)
+	var removed, added []string
+	for _, l := range have {
+		if !slices.Contains(want, l) {
+			removed = append(removed, "-"+l)
+		}
+	}
+	for _, l := range want {
+		if !slices.Contains(have, l) {
+			added = append(added, "+"+l)
+		}
+	}
+	if len(removed) == 0 && len(added) == 0 && file == generated {
+		return ""
+	}
+	slices.Sort(removed)
+	slices.Sort(added)
+	lines := append([]string{"api/kernel.txt is out of date (run: go test ./internal/detlint -run TestAPISnapshot -update)"}, removed...)
+	return strings.Join(append(lines, added...), "\n")
+}
+
+// AT-DET-09 (DET-027)
+func TestAPISnapshot(t *testing.T) {
+	root := moduleRoot(t)
+	got, err := API(Faultline(root), APIPackages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSnapshot(t, filepath.Join(root, "api", "kernel.txt"), got, *update)
+}
+
+// checkSnapshot fails t if the snapshot file at path differs from generated (DET-027); with write
+// it writes the file instead.
+func checkSnapshot(t testing.TB, path, generated string, write bool) {
+	t.Helper()
+	if write {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(generated), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if msg := snapshotDiff(string(data), generated); msg != "" {
+		t.Error(msg)
+	}
 }
