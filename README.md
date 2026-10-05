@@ -1,77 +1,66 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme-dark.svg">
-    <img alt="faultline — deterministic simulation testing for Go" src=".github/assets/readme-light.svg" width="640">
+    <img alt="faultline: deterministic simulation testing for Go" src=".github/assets/readme-light.svg" width="640">
   </picture>
 </p>
 
 <p align="center">
-  Find the fault lines in your distributed system — before production does.
+  Find the bugs in your distributed system before production does.
 </p>
 
 > [!WARNING]
-> **Heavily under progress.** faultline is not ready for use yet. APIs, file formats and behavior
-> change without notice until the first release.
+> faultline is under heavy development and is not ready to use yet. Anything can change until the
+> first release.
 >
-> | First version | Scope | Milestone | Release date |
-> |---|---|---|---|
-> | **v0.1.0** | Phase 1 MVP: simulation kernel, simulated network and disk, fault injection and exact replay, the `go test` API, failure artifacts, and the etcd/raft harness | [v0.1.0 — Phase 1 MVP](https://github.com/hmdsefi/faultline/milestone/1) | **2026-10-19** |
+> The first version, **v0.1.0**, is planned for **October 19, 2026**. You can follow the work on the
+> [v0.1.0 milestone](https://github.com/hmdsefi/faultline/milestone/1).
 
-faultline runs your distributed Go code inside a simulated world: virtual time,
-a seeded scheduler, and a fake network and disk that inject partitions, delays,
-reordering, crashes, and fsync failures. When a seed fails, you replay it exactly
-and shrink it to the smallest failing schedule — all from `go test`.
+## What it does
 
-## What "faultline" means here
+Some bugs in distributed systems only show up under rare conditions, for example a network split
+during a leader election, or a crash right after a write that never reached the disk. Normal tests
+almost never hit these cases, and when production does, the bug is very hard to reproduce.
 
-The name has two meanings, and both are the point.
+faultline runs your Go code in a simulated world. Time, the network and the disk are all simulated,
+and every random choice comes from one number: the seed. faultline uses the seed to inject faults,
+such as delayed or dropped messages, network partitions, crashes and failed disk writes. When a
+test fails, you run the same seed again and get exactly the same run, so you can debug it step by
+step. Everything happens inside `go test`.
 
-**1. Geology.** A fault line is a fracture in the earth's crust. Stress builds
-there silently for years, nothing looks wrong, and then it releases all at once
-as an earthquake. Distributed-system bugs behave the same way: they sit hidden
-until a rare combination of conditions (a partition during leader election, a
-lost fsync right before a crash) breaks the system. faultline exists to find
-those fractures in a test, not in production.
+## What v0.1.0 will include
 
-**2. Distributed systems.** A *fault* is the standard term for something going
-wrong: a crashed node, a dropped message, a failed disk write. *Fault tolerance*
-is what you're trying to build; *fault injection* is how you check it. faultline
-injects faults along a seeded timeline (a line of faults) and lets you replay
-that exact line.
+- A simulation kernel with virtual time and a seeded scheduler
+- A simulated network and disk
+- Fault injection, with exact replay of any failing seed
+- A test API you call from `go test`
+- Failure reports you can read and replay
+- A ready-made test setup for [etcd/raft](https://github.com/etcd-io/raft)
 
-| Earthquake fault line | faultline (this project) |
-|---|---|
-| Stress builds invisibly | Latent bugs hide behind rare timing and failures |
-| A specific trigger releases it | A specific fault schedule exposes the bug |
-| Geologists map faults before the big one | faultline maps where your system breaks before production does |
-| Earthquakes can't be replayed | A failing run replays exactly from its seed (`FAULTLINE_SEED=…`) |
+## Why the name
 
-**What it doesn't mean:** faultline is **not** a chaos-engineering tool for live
-clusters (like Chaos Monkey or Chaos Mesh). It doesn't break real infrastructure.
-Everything runs in-process inside `go test`, on simulated time, network, and disk,
-so failures are cheap, fast, and exactly reproducible. Fault injection is half of
-it; the other half is **determinism**: the same seed always produces the same run.
+A fault line is a crack in the earth's crust. Stress builds up there for years without any sign,
+and then it is released all at once in an earthquake. Bugs in distributed systems often behave the
+same way. In software, a "fault" is also the usual word for something going wrong, like a crashed
+server or a lost message. faultline helps you find those weak spots in a test instead of in
+production.
 
-## Relationship with lockstep
+## What it is not
 
-[lockstep](https://github.com/hmdsefi/lockstep) (deterministic actors for Go) **imports** faultline's
-simulation kernel. It isn't part of this repo.
+faultline is not a chaos engineering tool like Chaos Monkey. It never touches real servers or real
+networks. Everything runs inside your test process, so failures are quick to find and easy to
+reproduce.
 
-```
-github.com/hmdsefi/faultline         testing tool
-├── kernel/     clock · scheduler · simulated network & disk · faults · replay
-├── shims/      adapters for existing Go code
-└── harness/    etcd/raft, CometBFT, ...
+## Related projects
 
-github.com/hmdsefi/lockstep          actor runtime
-└── simulation mode ──imports──▶ github.com/hmdsefi/faultline/kernel
-```
-
-The dependency goes one way: lockstep → `faultline/kernel`. faultline never imports
+[lockstep](https://github.com/hmdsefi/lockstep) is a separate project for writing deterministic
+actors in Go. Its simulation mode uses faultline's `kernel` package. faultline does not depend on
 lockstep.
 
-## Built with
+faultline itself depends only on the Go standard library and
+[gograph](https://github.com/hmdsefi/gograph), which it uses for network topology and partitions,
+cycle detection, and diagrams of failing runs.
 
-[gograph](https://github.com/hmdsefi/gograph) is faultline's only dependency outside
-the standard library. It handles network topology and partitions, cycle detection
-in the isolation checker, and diagrams of failing runs.
+## License
+
+faultline is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
