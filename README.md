@@ -1,14 +1,26 @@
-# faultline
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme-dark.svg">
+    <img alt="faultline — deterministic simulation testing for Go" src=".github/assets/readme-light.svg" width="640">
+  </picture>
+</p>
 
-**Deterministic simulation testing for Go.**
-Find the fault lines in your distributed system — before production does.
+<p align="center">
+  Find the fault lines in your distributed system — before production does.
+</p>
+
+> [!WARNING]
+> **Heavily under progress.** faultline is not ready for use yet. APIs, file formats and behavior
+> change without notice until the first release.
+>
+> | First version | Scope | Milestone | Release date |
+> |---|---|---|---|
+> | **v0.1.0** | Phase 1 MVP: simulation kernel, simulated network and disk, fault injection and exact replay, the `go test` API, failure artifacts, and the etcd/raft harness | [v0.1.0 — Phase 1 MVP](https://github.com/hmdsefi/faultline/milestone/1) | **2026-10-19** |
 
 faultline runs your distributed Go code inside a simulated world: virtual time,
 a seeded scheduler, and a fake network and disk that inject partitions, delays,
 reordering, crashes, and fsync failures. When a seed fails, you replay it exactly
 and shrink it to the smallest failing schedule — all from `go test`.
-
-> Status: **design phase**.
 
 ## What "faultline" means here
 
