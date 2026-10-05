@@ -202,3 +202,27 @@ func (s *Sim) deferHead(e *entry) {
 	n.deferred = append(n.deferred, e)
 	s.emitEvent("kernel.defer", e.id, e.label, n.id, e.inc, e.cause)
 }
+
+// AdvanceTo sets Now() to t without executing any event (KRN-039). First it defers, in queue
+// order, the heads that belong to paused nodes and are due at or before t. It stops at the first
+// other head, so a paused entry queued behind an executable entry at t stays queued. It panics if
+// the Sim is running, if t < Now(), or if an executable entry is due before t; the deferrals made
+// before that last panic stay done. It ignores Err, MaxTime and MaxEvents, so Now() can pass
+// Config.MaxTime. It exists for goroutine mode (GOR).
+func (s *Sim) AdvanceTo(t Time) {
+	if s.running {
+		panic("kernel: AdvanceTo called while the simulation is running")
+	}
+	if t < s.now {
+		panic(fmt.Sprintf("kernel: AdvanceTo(%s) is before Now() %s", t, s.now))
+	}
+	e := s.peek()
+	for e != nil && e.at <= t && e.kind == entryNode && e.node.state == NodePaused {
+		s.deferHead(e)
+		e = s.peek()
+	}
+	if e != nil && e.at < t {
+		panic(fmt.Sprintf("kernel: AdvanceTo(%s): event %d %q at %s is due", t, e.id, e.label, e.at))
+	}
+	s.now = t
+}
