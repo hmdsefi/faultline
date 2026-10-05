@@ -51,6 +51,7 @@ func (l *linter) lintPackage(base, dir, importPath string, c Class) ([]Finding, 
 		return nil, err
 	}
 	var findings []Finding
+	var dirs []*directive
 	var host []*ast.File
 	for _, e := range entries {
 		name := e.Name()
@@ -78,6 +79,7 @@ func (l *linter) lintPackage(base, dir, importPath string, c Class) ([]Finding, 
 			return nil, err
 		}
 		host = append(host, f)
+		dirs = append(dirs, l.directives(f)...)
 	}
 	if len(host) > 0 {
 		info := &types.Info{
@@ -103,6 +105,7 @@ func (l *linter) lintPackage(base, dir, importPath string, c Class) ([]Finding, 
 			findings = append(findings, l.floats(info, qual)...)
 		}
 	}
+	findings = applyDirectives(findings, dirs, c)
 	for i := range findings {
 		rel, err := filepath.Rel(base, findings[i].File)
 		if err != nil {

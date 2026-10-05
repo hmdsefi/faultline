@@ -69,6 +69,7 @@ func TestFixtures(t *testing.T) {
 		{"dl010", []Class{ClassCore}},
 		{"dl011", []Class{ClassCore}},
 		{"clean", []Class{ClassCore}},
+		{"directives", []Class{ClassCore, ClassTool}},
 	}
 	for _, tc := range cases {
 		for _, c := range tc.classes {
