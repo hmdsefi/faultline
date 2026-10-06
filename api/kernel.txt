@@ -279,10 +279,13 @@ pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Handle(*kernel
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Heal()
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) HealLink(kernel.NodeID, kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Isolate(kernel.NodeID)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Link(kernel.NodeID, kernel.NodeID) Link
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) LinkStats(kernel.NodeID, kernel.NodeID) Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Partition(...[]kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) QuorumHubs([]kernel.NodeID, int) []kernel.NodeID
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) ResetLink(kernel.NodeID, kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Send(*kernel.Node, kernel.NodeID, any)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) SetLink(kernel.NodeID, kernel.NodeID, Link)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Sim() *kernel.Sim
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Stats() Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Topology() gograph.Graph[kernel.NodeID]
