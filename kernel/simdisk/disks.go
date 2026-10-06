@@ -14,8 +14,8 @@ type Disks struct {
 	vols []*Volume // index: NodeID-1; nil until Volume(n) is first called for the node
 }
 
-// New creates the disks of s. It panics if s is nil or cfg is invalid. Create at most one Disks
-// per Sim.
+// New creates the disks of s and registers the crash hook with s.OnCrash. It panics if s is nil
+// or cfg is invalid. Create at most one Disks per Sim.
 func New(s *kernel.Sim, cfg Config) *Disks {
 	if s == nil {
 		panic("simdisk: New: nil *kernel.Sim")
@@ -26,7 +26,9 @@ func New(s *kernel.Sim, cfg Config) *Disks {
 	if cfg.SectorSize == 0 {
 		cfg.SectorSize = DefaultSectorSize
 	}
-	return &Disks{s: s, cfg: cfg}
+	d := &Disks{s: s, cfg: cfg}
+	s.OnCrash(d.onCrash)
+	return d
 }
 
 // Config returns the configuration passed to New, with SectorSize defaulted.
