@@ -128,3 +128,43 @@ jobs:
               exit 1
             fi
           fi
+
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: 'off'
+    outputs:
+      total: ${{ steps.total.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: test with coverage
+        run: go test -count=1 -covermode=atomic -coverprofile=cover.out ./...
+      - name: total coverage
+        id: total
+        run: |
+          total=$(go tool cover -func=cover.out | awk '/^total:/ { sub(/%/, "", $3); printf "%.0f", $3 }')
+          test -n "$total"
+          echo "Total coverage of the root module: $total%" >> "$GITHUB_STEP_SUMMARY"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+
+  coverage-badge:
+    needs: coverage
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # the README coverage badge shows the title of issue #172
+    steps:
+      - name: update the coverage badge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOTAL: ${{ needs.coverage.outputs.total }}
+        run: |
+          test -n "$TOTAL"
+          title="$TOTAL%"
+          current=$(gh issue view 172 --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          if [ "$current" != "$title" ]; then
+            gh issue edit 172 --repo "$GITHUB_REPOSITORY" --title "$title"
+          fi
