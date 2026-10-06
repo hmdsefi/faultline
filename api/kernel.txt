@@ -258,6 +258,8 @@ pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxPPM = 1000000
 pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxPPM uint32
 pkg github.com/hmdsefi/faultline/kernel/simnet, func DefaultConfig() Config
 pkg github.com/hmdsefi/faultline/kernel/simnet, func New(*kernel.Sim, Config) *Network
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Cliques([]kernel.NodeID) [][]kernel.NodeID
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Components([]kernel.NodeID) [][]kernel.NodeID
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Config() Config
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Connected(kernel.NodeID, kernel.NodeID) bool
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Cut(kernel.NodeID, kernel.NodeID)
@@ -267,6 +269,7 @@ pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) HealLink(kerne
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Isolate(kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) LinkStats(kernel.NodeID, kernel.NodeID) Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Partition(...[]kernel.NodeID)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) QuorumHubs([]kernel.NodeID, int) []kernel.NodeID
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Sim() *kernel.Sim
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Stats() Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Topology() gograph.Graph[kernel.NodeID]
