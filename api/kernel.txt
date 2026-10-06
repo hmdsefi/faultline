@@ -191,20 +191,24 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Close() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Name() string
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) ReadAt([]byte, int64) (int, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Size() int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Sync() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Truncate(int64) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) WriteAt([]byte, int64) (int, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Capacity() int64
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Create(string) (*File, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) FailSyncs(int)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Mkdir(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) MkdirAll(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Node() *kernel.Node
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Open(string) (*File, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadDir(string) ([]Info, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadDurable(string) ([]byte, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadFile(string) ([]byte, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Remove(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Rename(string, string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SetCapacity(int64)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Stat(string) (Info, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SyncDir(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Usage() int64
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (Config) Validate() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (CrashModel) String() string
