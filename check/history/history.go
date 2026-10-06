@@ -44,7 +44,7 @@ func (s Status) String() string {
 //
 // In every Op returned by this package (Recorder.Ops), Input and Output hold a
 // json.RawMessage with the compact JSON encoding of the recorded value ("null" for nil and for
-// the Output of a pending op).
+// the Output of a pending op). Use DecodeInput and DecodeOutput to get typed values.
 type Op struct {
 	ID      int64       // 1-based, dense, in invocation order
 	Process string      // process name
