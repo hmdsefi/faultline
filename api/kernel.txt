@@ -237,8 +237,13 @@ pkg github.com/hmdsefi/faultline/kernel/simnet, func DefaultConfig() Config
 pkg github.com/hmdsefi/faultline/kernel/simnet, func New(*kernel.Sim, Config) *Network
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Config() Config
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Connected(kernel.NodeID, kernel.NodeID) bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Cut(kernel.NodeID, kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Handle(*kernel.Node, Handler)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Heal()
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) HealLink(kernel.NodeID, kernel.NodeID)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Isolate(kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) LinkStats(kernel.NodeID, kernel.NodeID) Stats
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Partition(...[]kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Sim() *kernel.Sim
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Stats() Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Topology() gograph.Graph[kernel.NodeID]
