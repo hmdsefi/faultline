@@ -28,6 +28,9 @@ var inventory = []struct {
 		"internal/toys",
 		"kernel",
 	}},
+	{"1.2", []string{
+		"kernel/simdisk",
+	}},
 }
 
 // TestPackageInventory pins the package directories that exist in this phase.
