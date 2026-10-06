@@ -1,0 +1,132 @@
+---
+language: en-US
+tone_instructions: >-
+  Be direct and specific. For each finding, say what breaks, in which case, and
+  how to fix it. Skip praise, and skip style points that gofmt or go vet already
+  enforce.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  # The pull request description is written by hand; keep the summary in the
+  # walkthrough comment.
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  collapse_walkthrough: true
+  poem: false
+  in_progress_fortune: false
+  suggested_labels: false
+  suggested_reviewers: false
+  auto_review:
+    enabled: true
+    drafts: false
+  # Each pull request is one signed commit by its author, so CodeRabbit must not
+  # push commits.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        The title becomes the squash commit subject, so it must follow
+        Conventional Commits: `type(scope): summary` or `type: summary`, where
+        type is one of feat, fix, docs, test, refactor, perf, build, ci or
+        chore. The summary starts with a lowercase imperative verb, has no
+        trailing period, and the whole title is at most 72 characters.
+  path_filters:
+    - "!**/go.sum"
+    - "!.github/assets/**"
+  path_instructions:
+    - path: "**/*.go"
+      instructions: >-
+        faultline is a deterministic simulation testing library. One seed must
+        always give the same run, trace and trace hash on Linux and macOS, amd64
+        and arm64, and Go 1.26 and 1.27. Treat anything that makes a result
+        depend on more than the seed as a bug: wall-clock time or real timers,
+        the package-level functions of math/rand and math/rand/v2, crypto/rand,
+        goroutines or select statements whose scheduling reaches a result, map
+        iteration order (range over a map, maps.All, maps.Keys, maps.Values,
+        reflect map iteration, sync.Map.Range) that reaches output, a trace or a
+        hash, environment variables, floating point, and GOOS- or
+        GOARCH-specific files. The internal/detlint tests enforce these rules
+        for the core packages (kernel, internal/toys, and later kernel/simnet,
+        kernel/simdisk, kernel/fault and check/history). An exception needs a
+        `//faultline:maporder <reason>` or `//faultline:wallclock <reason>`
+        comment, and the reason must hold. Comments cite specification IDs such
+        as DET-055, KRN-090 or AT-DET-17; keep them. Tests often pin error
+        messages and report lines as exact text, so a wording change must update
+        those tests in the same pull request.
+    - path: "kernel/**/*.go"
+      instructions: >-
+        The kernel imports only the standard library and
+        github.com/hmdsefi/gograph; the import-boundary test in internal/detlint
+        enforces this. A change to the exported API must regenerate
+        api/kernel.txt in the same pull request with `go test ./internal/detlint
+        -run TestAPISnapshot -update`. A behavior change that alters event
+        order, trace records or the trace hash must regenerate
+        internal/golden/testdata/hashes.txt with `go test ./internal/golden -run
+        TestGolden -update` and explain the change in a `Golden-Update:` commit
+        trailer. Point out new allocations on the event loop, Emit and
+        trace-hash paths; CI runs the kernel benchmarks.
+    - path: "**/*_test.go"
+      instructions: >-
+        Tests must be deterministic: fixed seeds, no sleeps or wall-clock
+        timeouts, and no dependence on test order. Golden values (trace hashes,
+        executed-event counts, exact messages) are pinned on purpose; do not
+        suggest loosening them to substring or approximate checks. Tests that
+        use t.Setenv or an -update flag cannot run in parallel. Prefer a failing
+        case that names the input and both values over a bare boolean check.
+    - path: "internal/detlint/testdata/**"
+      instructions: >-
+        These are lint fixtures. They break the determinism rules on purpose,
+        and a `// want DLnnn` comment marks each expected finding. Review only
+        whether the expectations match the rule, not the violations themselves.
+    - path: "internal/golden/testdata/hashes.txt"
+      instructions: >-
+        Pinned golden trace hashes: a version header, a column line, then one
+        `scenario seed hash stop executed` line per scenario and seed, sorted.
+        The file changes only through `go test ./internal/golden -run TestGolden
+        -update`, and a commit in the pull request needs a `Golden-Update:
+        <reason>` line (the golden-trailer job checks this). Check that the
+        reason explains every changed line and that lines of unrelated scenarios
+        did not change.
+    - path: "api/kernel.txt"
+      instructions: >-
+        Generated snapshot of the exported kernel API (`go test
+        ./internal/detlint -run TestAPISnapshot -update`); do not suggest hand
+        edits. Treat every removed or changed line as a breaking change and
+        check that the pull request description says so.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Keep the default token permissions read-only and grant write scopes per
+        job only when the job needs them. The root job's matrix (ubuntu-latest
+        and macos-14, Go 1.26.x and 1.27.x) with FAULTLINE_CHECK_DETERMINISM=1
+        is what proves cross-platform determinism, and golden-compare compares
+        the FAULTLINE_GOLDEN_OUT files of all its cells; flag any change that
+        drops a cell, the variable or the comparison.
+    - path: "**/*.md"
+      instructions: >-
+        Readers may be new to deterministic simulation testing. Prefer short,
+        plain sentences, and check that commands, paths and claims match the
+        code.
+
+chat:
+  auto_reply: true
+  art: false
+
+issue_enrichment:
+  planning:
+    auto_planning:
+      enabled: false
