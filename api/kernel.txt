@@ -219,3 +219,60 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNotEmpty error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNotExist error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrStale error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrTooLarge error
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropDown = 4
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropDown DropReason
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropLoss = 2
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropLoss DropReason
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropNoHandler = 5
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropNoHandler DropReason
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropPartition = 1
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropPartition DropReason
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropPartitionInFlight = 3
+pkg github.com/hmdsefi/faultline/kernel/simnet, const DropPartitionInFlight DropReason
+pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxDelay = 86400000000000
+pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxDelay time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxPPM = 1000000
+pkg github.com/hmdsefi/faultline/kernel/simnet, const MaxPPM uint32
+pkg github.com/hmdsefi/faultline/kernel/simnet, func DefaultConfig() Config
+pkg github.com/hmdsefi/faultline/kernel/simnet, func New(*kernel.Sim, Config) *Network
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Config() Config
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Connected(kernel.NodeID, kernel.NodeID) bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Handle(*kernel.Node, Handler)
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) LinkStats(kernel.NodeID, kernel.NodeID) Stats
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Sim() *kernel.Sim
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Stats() Stats
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Topology() gograph.Graph[kernel.NodeID]
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) TopologyVersion() uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (DropReason) String() string
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (Link) Validate() error
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (Stats) Dropped() uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Config struct
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Config struct, Default Link
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Config struct, NoDeliveryCheck bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Decision struct
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Decision struct, Delay time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Decision struct, Drop bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Decision struct, Dup bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Decision struct, DupDelay time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, type DropReason uint8
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Handler func(kernel.NodeID, any)
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, DropPPM uint32
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, DupPPM uint32
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, FIFO bool
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, Jitter time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, Latency time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, Tail time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Link struct, TailPPM uint32
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Network struct
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, Deferred uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, Delivered uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, DroppedDown uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, DroppedInFlight uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, DroppedLoss uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, DroppedNoHandler uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, DroppedPartition uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, Duplicated uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, InFlight uint64
+pkg github.com/hmdsefi/faultline/kernel/simnet, type Stats struct, Sent uint64
