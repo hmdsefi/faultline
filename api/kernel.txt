@@ -146,3 +146,76 @@ pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Buffer int
 pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Level TraceLevel
 pkg github.com/hmdsefi/faultline/kernel, type TraceLevel uint8
 pkg github.com/hmdsefi/faultline/kernel, var Epoch time.Time
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny = 0
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepPrefix = 2
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepPrefix CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepSubset = 3
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepSubset CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashLoseUnsynced = 1
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashLoseUnsynced CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashTorn = 4
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashTorn CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const DefaultSectorSize = 512
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const DefaultSectorSize ideal-int
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const FailedSyncDropDirty = 0
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const FailedSyncDropDirty FailedSyncModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const FailedSyncKeepDirty = 1
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const FailedSyncKeepDirty FailedSyncModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxFileSize = 1073741824
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxFileSize int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxLatency = 3600000000000
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxLatency time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxSectorSize = 1048576
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MaxSectorSize ideal-int
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MetadataImmediate = 1
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MetadataImmediate MetadataModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MetadataStrict = 0
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const MetadataStrict MetadataModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpMeta = 4
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpMeta Op
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpRead = 1
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpRead Op
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpSync = 3
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpSync Op
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpWrite = 2
+pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpWrite Op
+pkg github.com/hmdsefi/faultline/kernel/simdisk, func DefaultConfig() Config
+pkg github.com/hmdsefi/faultline/kernel/simdisk, func DefaultLatency() LatencyConfig
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (Config) Validate() error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (CrashModel) String() string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (FailedSyncModel) String() string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (MetadataModel) String() string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (Op) String() string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Capacity int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Crash CrashModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, FailedSync FailedSyncModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Latency LatencyConfig
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Metadata MetadataModel
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, SectorSize int
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type CrashModel uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type FailedSyncModel uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct, Base time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct, Jitter time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Meta Latency
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Read Latency
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Slow time.Duration
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, SlowPPM uint32
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Sync Latency
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Write Latency
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type MetadataModel uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Op uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrClosed error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrExist error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrIO error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrInvalid error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrIsDir error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNoSpace error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNotDir error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNotEmpty error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrNotExist error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrStale error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrTooLarge error
