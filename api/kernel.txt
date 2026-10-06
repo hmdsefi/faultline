@@ -278,6 +278,7 @@ pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Isolate(kernel
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) LinkStats(kernel.NodeID, kernel.NodeID) Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Partition(...[]kernel.NodeID)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) QuorumHubs([]kernel.NodeID, int) []kernel.NodeID
+pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Send(*kernel.Node, kernel.NodeID, any)
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Sim() *kernel.Sim
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Stats() Stats
 pkg github.com/hmdsefi/faultline/kernel/simnet, method (*Network) Topology() gograph.Graph[kernel.NodeID]
