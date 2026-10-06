@@ -30,6 +30,7 @@ var inventory = []struct {
 	}},
 	{"1.2", []string{
 		"kernel/simdisk",
+		"kernel/simnet",
 	}},
 }
 
