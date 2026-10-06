@@ -29,6 +29,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
+      - name: throughput (temporary, AT-KRN-44 numbers)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          FAULTLINE_PERF: '1'
+        run: go test -count=1 -run '^TestThroughput$' -v ./kernel/
       - name: gofmt
         run: test -z "$(gofmt -l $(git ls-files '*.go'))"
       - name: go mod tidy
