@@ -182,6 +182,22 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpWrite = 2
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const OpWrite Op
 pkg github.com/hmdsefi/faultline/kernel/simdisk, func DefaultConfig() Config
 pkg github.com/hmdsefi/faultline/kernel/simdisk, func DefaultLatency() LatencyConfig
+pkg github.com/hmdsefi/faultline/kernel/simdisk, func New(*kernel.Sim, Config) *Disks
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Disks) Config() Config
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Disks) Lookup(*kernel.Node) (*Volume, bool)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Disks) Volume(*kernel.Node) *Volume
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Close() error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Name() string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Size() int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Create(string) (*File, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Mkdir(string) error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) MkdirAll(string) error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Node() *kernel.Node
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Open(string) (*File, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadDir(string) ([]Info, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Remove(string) error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Rename(string, string) error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Stat(string) (Info, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (Config) Validate() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (CrashModel) String() string
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (FailedSyncModel) String() string
@@ -195,7 +211,13 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Latency Lat
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, Metadata MetadataModel
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Config struct, SectorSize int
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type CrashModel uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Disks struct
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type FailedSyncModel uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type File struct
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Info struct
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Info struct, IsDir bool
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Info struct, Name string
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Info struct, Size int64
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct, Base time.Duration
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Latency struct, Jitter time.Duration
@@ -208,6 +230,7 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Sync
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type LatencyConfig struct, Write Latency
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type MetadataModel uint8
 pkg github.com/hmdsefi/faultline/kernel/simdisk, type Op uint8
+pkg github.com/hmdsefi/faultline/kernel/simdisk, type Volume struct
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrClosed error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrExist error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, var ErrIO error
