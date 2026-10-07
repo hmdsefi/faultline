@@ -146,6 +146,61 @@ pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Buffer int
 pkg github.com/hmdsefi/faultline/kernel, type TraceConfig struct, Level TraceLevel
 pkg github.com/hmdsefi/faultline/kernel, type TraceLevel uint8
 pkg github.com/hmdsefi/faultline/kernel, var Epoch time.Time
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindClockDrift = "clock-drift"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindClockDrift Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindClockJump = "clock-jump"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindClockJump Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCorrupt = "corrupt"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCorrupt Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCrash = "crash"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCrash Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCut = "cut"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindCut Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindDiskCapacity = "disk-capacity"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindDiskCapacity Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindHeal = "heal"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindHeal Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindHealLink = "heal-link"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindHealLink Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindIsolate = "isolate"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindIsolate Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindLink = "link"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindLink Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindLinkReset = "link-reset"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindLinkReset Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindPartition = "partition"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindPartition Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindPause = "pause"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindPause Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindRestart = "restart"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindRestart Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindResume = "resume"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindResume Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindSyncFail = "sync-fail"
+pkg github.com/hmdsefi/faultline/kernel/fault, const KindSyncFail Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, const MaxRuleDuration = 36000000000000000
+pkg github.com/hmdsefi/faultline/kernel/fault, const MaxRuleDuration time.Duration
+pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion = 1
+pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion ideal-int
+pkg github.com/hmdsefi/faultline/kernel/fault, func Kinds() []Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Durable() bool
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) String() string
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Validate() error
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, At kernel.Time
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Groups [][]string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, ID int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Kind Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Len int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Link *simnet.Link
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, N int64
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Node string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Off int64
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Path string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Peer string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Role string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Undoes []int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Kind string
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny = 0
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny CrashModel
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepPrefix = 2
