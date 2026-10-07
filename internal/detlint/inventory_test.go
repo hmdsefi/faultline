@@ -33,6 +33,7 @@ var inventory = []struct {
 		"kernel/simnet",
 	}},
 	{"1.3", []string{"check/history"}},
+	{"1.3", []string{"kernel/fault"}},
 }
 
 // TestPackageInventory pins the package directories that exist in this phase.
