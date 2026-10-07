@@ -36,9 +36,10 @@ func checkLast(t *testing.T, k *disk, want ...string) {
 	if len(recs) < len(want) {
 		t.Fatalf("%d records, want at least %d", len(recs), len(want))
 	}
-	for i, r := range recs[len(recs)-len(want):] {
-		if s := summary(r); s != want[i] {
-			t.Errorf("record %d of the last %d = %s, want %s", i, len(want), s, want[i])
+	last := recs[len(recs)-len(want):]
+	for i, w := range want {
+		if s := summary(last[i]); s != w {
+			t.Errorf("record %d of the last %d = %s, want %s", i, len(want), s, w)
 		}
 	}
 }
@@ -423,10 +424,10 @@ func TestFileNodeState(t *testing.T) {
 	f, err := k.v.Create("/f")
 	must(t, err)
 	k.a.Pause()
-	mustPanic(t, "simdisk: WriteAt on a (id 1): node is paused", func() { f.WriteAt([]byte("2"), 0) })
-	mustPanic(t, "simdisk: ReadAt on a (id 1): node is paused", func() { f.ReadAt(make([]byte, 1), 0) })
-	mustPanic(t, "simdisk: Append on a (id 1): node is paused", func() { f.Append([]byte("2")) })
-	mustPanic(t, "simdisk: Truncate on a (id 1): node is paused", func() { f.Truncate(0) })
+	mustPanic(t, "simdisk: WriteAt on a (id 1): node is paused", func() { _, _ = f.WriteAt([]byte("2"), 0) })
+	mustPanic(t, "simdisk: ReadAt on a (id 1): node is paused", func() { _, _ = f.ReadAt(make([]byte, 1), 0) })
+	mustPanic(t, "simdisk: Append on a (id 1): node is paused", func() { _, _ = f.Append([]byte("2")) })
+	mustPanic(t, "simdisk: Truncate on a (id 1): node is paused", func() { _ = f.Truncate(0) })
 	if f.Size() != 0 {
 		t.Fatalf("Size on a paused node = %d", f.Size())
 	}

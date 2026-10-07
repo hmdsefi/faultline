@@ -30,7 +30,7 @@ func TestSendRawAndDecide(t *testing.T) {
 		t.Fatalf("%d net.send_raw records, want 3", len(raws))
 	}
 	checkRecord(t, raws[0], 1, "send_raw #1 a -> b: r", "msg=1, from=a, to=b, payload=r, delay_ns=7000000, fifo=false")
-	if !untouched(w.s.Rand("net/link/a/b"), 1, "net/link/a/b") {
+	if !untouched(w.s, "net/link/a/b") {
 		t.Fatalf("SendRaw drew from net/link/a/b")
 	}
 
@@ -225,7 +225,7 @@ func TestSendRawNoDraws(t *testing.T) {
 	}
 	checkRecord(t, dels[0], 1, "deliver #2.1 a -> a", "msg=2, copy=1, from=a, to=a, latency_ns=1000000")
 	checkRecord(t, dels[1], 2, "deliver #1.1 a -> b", "msg=1, copy=1, from=a, to=b, latency_ns=3000000")
-	if !untouched(w.s.Rand("net/link/a/b"), 1, "net/link/a/b") {
+	if !untouched(w.s, "net/link/a/b") {
 		t.Fatalf("SendRaw drew from net/link/a/b")
 	}
 }

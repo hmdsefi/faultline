@@ -53,7 +53,7 @@ func streamSeeds(seed uint64, label string) (seed1, seed2 uint64) {
 // newStream returns the PCG stream of label under seed. Creating it draws nothing.
 func newStream(seed uint64, label string) *rand.Rand {
 	s1, s2 := streamSeeds(seed, label)
-	return rand.New(rand.NewPCG(s1, s2))
+	return rand.New(rand.NewPCG(s1, s2)) //nolint:gosec // seeded on purpose: a deterministic simulator needs reproducible streams
 }
 
 // Chance reports true with probability ppm/1_000_000. It draws exactly one value from r.
@@ -70,10 +70,10 @@ func Uniform(r *rand.Rand, min, max time.Duration) time.Duration {
 		panic(fmt.Sprintf("kernel: Uniform: min %s > max %s", min, max))
 	}
 	x := r.Uint64()
-	span := uint64(max) - uint64(min) + 1 // number of values in [min, max]; 0 means 2^64
+	span := uint64(max) - uint64(min) + 1 //nolint:gosec // number of values in [min, max], mod 2^64; 0 means 2^64
 	if span == 0 {
-		return min + time.Duration(x) // wrapping add: the full int64 range
+		return min + time.Duration(x) //nolint:gosec // wrapping add: the full int64 range
 	}
-	hi, _ := bits.Mul64(x, span) // hi in [0, span)
-	return time.Duration(uint64(min) + hi)
+	hi, _ := bits.Mul64(x, span)           // hi in [0, span)
+	return time.Duration(uint64(min) + hi) //nolint:gosec // wrapping add: the result is in [min, max]
 }

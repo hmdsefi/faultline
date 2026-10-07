@@ -104,7 +104,7 @@ func (s *Sim) AddNode(name string, boot BootFunc, opts ...NodeOption) *Node {
 	}
 	n := &Node{
 		sim:   s,
-		id:    NodeID(len(s.nodes) + 1),
+		id:    NodeID(len(s.nodes) + 1), //nolint:gosec // not checked: KRN-056 sets no limit, but 2^31 nodes need over 300 GB
 		name:  name,
 		tags:  tags,
 		boot:  boot,

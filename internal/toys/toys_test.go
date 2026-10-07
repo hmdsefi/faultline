@@ -60,8 +60,8 @@ func mustPanic(t *testing.T, want string, fn func()) {
 	fn()
 }
 
-func fullSim(seed uint64) *kernel.Sim {
-	return kernel.New(kernel.Config{Seed: seed, Trace: kernel.TraceConfig{Level: kernel.TraceFull}})
+func fullSim() *kernel.Sim {
+	return kernel.New(kernel.Config{Seed: 1, Trace: kernel.TraceConfig{Level: kernel.TraceFull}})
 }
 
 // AT-DET-14
@@ -133,7 +133,7 @@ func toyRecords(s *kernel.Sim, kernelKinds ...string) []string {
 // twoNodes returns a TraceFull Sim (seed 1), a Wire with a fixed 1ms latency, a sender x and a
 // receiver y whose boot func is yBoot; both have booted.
 func twoNodes(yBoot func(w *toys.Wire, n *kernel.Node)) (*kernel.Sim, *toys.Wire, *kernel.Node, *kernel.Node) {
-	s := fullSim(1)
+	s := fullSim()
 	w := toys.NewWire(s, ms, ms)
 	x := s.AddNode("x", func(*kernel.Node) {})
 	y := s.AddNode("y", func(n *kernel.Node) { yBoot(w, n) })
@@ -150,7 +150,7 @@ func expectRecords(t *testing.T, got []string, want ...string) {
 
 // AT-DET-16
 func TestWireEdgeCases(t *testing.T) {
-	s := fullSim(1)
+	s := fullSim()
 	mustPanic(t, "toys: invalid latency [2ms, 1ms]", func() { toys.NewWire(s, 2*ms, ms) })
 	mustPanic(t, "toys: invalid latency [-1ns, 1ms]", func() { toys.NewWire(s, -1, ms) })
 
@@ -158,7 +158,7 @@ func TestWireEdgeCases(t *testing.T) {
 	const send = `1/1 toys.send "\"m\"" [to=y latency_ns=1000000]`
 
 	t.Run("send from down or paused", func(t *testing.T) {
-		s := fullSim(1)
+		s := fullSim()
 		w := toys.NewWire(s, ms, ms)
 		x := s.AddNode("x", func(*kernel.Node) {})
 		y := s.AddNode("y", func(*kernel.Node) {})
@@ -212,7 +212,7 @@ func TestWireEdgeCases(t *testing.T) {
 	t.Run("paused at delivery", func(t *testing.T) {
 		got := ""
 		s, w, x, y := twoNodes(func(w *toys.Wire, n *kernel.Node) {
-			w.Handle(n, func(_ kernel.NodeID, m any) { got = m.(string) })
+			w.Handle(n, func(_ kernel.NodeID, m any) { got, _ = m.(string) })
 		})
 		y.Pause()
 		w.Send(x, y.ID(), "m")
@@ -451,7 +451,7 @@ func TestRegisterNoStaleRead(t *testing.T) {
 // DET-042: the messages of one small run, which show the increment, the peer choice, the max merge
 // and the copy of the counts that is sent.
 func TestGossipMessages(t *testing.T) {
-	s := fullSim(1)
+	s := fullSim()
 	toys.Gossip(s, toys.NewWire(s, ms, 5*ms), toys.GossipConfig{Nodes: 3, Ticks: 5, Interval: 10 * ms})
 	if stop := s.Run(); stop != kernel.StopIdle {
 		t.Fatalf("stop %v, want idle", stop)

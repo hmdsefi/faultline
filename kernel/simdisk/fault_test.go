@@ -196,7 +196,7 @@ func TestCorruptAfterFailedSync(t *testing.T) {
 func TestNodeStateRules(t *testing.T) {
 	k := newDisk(1, simdisk.Config{})
 	k.crash()
-	mustPanic(t, "simdisk: Create on a (id 1): node is down", func() { k.v.Create("/x") })
+	mustPanic(t, "simdisk: Create on a (id 1): node is down", func() { _, _ = k.v.Create("/x") })
 	if _, err := k.v.ReadFile("/nope"); err == nil {
 		t.Fatalf("ReadFile of a missing file succeeded")
 	}
@@ -218,13 +218,13 @@ func TestNodeStateRules(t *testing.T) {
 	if content(t, k.v, "/cfg/x") != "1" || durable(t, k.v, "/cfg/x") != "1" {
 		t.Fatalf("WriteFileDurable content lost")
 	}
-	mustPanic(t, "simdisk: WriteFileDurable on a (id 1): node is up", func() { k.v.WriteFileDurable("/y", nil) })
+	mustPanic(t, "simdisk: WriteFileDurable on a (id 1): node is up", func() { _ = k.v.WriteFileDurable("/y", nil) })
 	f, err := k.v.Open("/cfg/x")
 	must(t, err)
 	k.a.Pause()
-	mustPanic(t, "simdisk: WriteAt on a (id 1): node is paused", func() { f.WriteAt([]byte("2"), 0) })
-	mustPanic(t, "simdisk: Mkdir on a (id 1): node is paused", func() { k.v.Mkdir("/z") })
-	mustPanic(t, "simdisk: WriteFileDurable on a (id 1): node is paused", func() { k.v.WriteFileDurable("/y", nil) })
+	mustPanic(t, "simdisk: WriteAt on a (id 1): node is paused", func() { _, _ = f.WriteAt([]byte("2"), 0) })
+	mustPanic(t, "simdisk: Mkdir on a (id 1): node is paused", func() { _ = k.v.Mkdir("/z") })
+	mustPanic(t, "simdisk: WriteFileDurable on a (id 1): node is paused", func() { _ = k.v.WriteFileDurable("/y", nil) })
 	must(t, f.Close())
 }
 

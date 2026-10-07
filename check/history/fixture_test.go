@@ -1,6 +1,7 @@
 package history_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,16 @@ func mustPanic(t *testing.T, want string, f func()) {
 		}
 	}()
 	f()
+}
+
+// rawString returns v, which must be a json.RawMessage, as a string.
+func rawString(t *testing.T, v any) string {
+	t.Helper()
+	m, ok := v.(json.RawMessage)
+	if !ok {
+		t.Fatalf("%T is not a json.RawMessage", v)
+	}
+	return string(m)
 }
 
 // ms converts milliseconds to kernel.Time.

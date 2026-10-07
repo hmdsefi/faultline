@@ -26,7 +26,7 @@ func PingPong(s *kernel.Sim, t Transport, rounds int) (a, b *kernel.Node) {
 	}
 	a = s.AddNode("a", func(n *kernel.Node) {
 		t.Handle(n, func(from kernel.NodeID, msg any) {
-			p := msg.(Pong)
+			p := msg.(Pong) //nolint:errcheck // a gets only Pong, from b; another type is a bug and panics
 			if p.N == rounds {
 				n.Logf("done %d", p.N)
 				return
@@ -37,7 +37,7 @@ func PingPong(s *kernel.Sim, t Transport, rounds int) (a, b *kernel.Node) {
 	})
 	b = s.AddNode("b", func(n *kernel.Node) {
 		t.Handle(n, func(from kernel.NodeID, msg any) {
-			t.Send(n, from, Pong{N: msg.(Ping).N})
+			t.Send(n, from, Pong{N: msg.(Ping).N}) //nolint:errcheck // b gets only Ping, from a; another type is a bug and panics
 		})
 	})
 	return a, b

@@ -29,7 +29,7 @@ func (v *Volume) crash() {
 	// 1. Metadata
 	pending, kept := len(v.nslog), 0
 	if v.d.cfg.Metadata == MetadataStrict && pending > 0 {
-		kept = int(r.Uint64N(uint64(pending) + 1))
+		kept = int(r.Uint64N(uint64(pending) + 1)) //nolint:gosec // at most pending, an int
 		for _, op := range v.nslog[:kept] {
 			for _, m := range op.muts {
 				m.applyTo(true)
@@ -124,13 +124,13 @@ func traverse(root *inode, durable bool) []entry {
 // the four concrete models, never CrashAny: CrashTorn is the final case, the code after the
 // switch, so any other value runs it. P must not be empty (Torn draws Uint64N(len(P))); crash, the
 // only caller, skips files with no pending ops.
-func applyModel(model CrashModel, dur []byte, P []dataOp, r *rand.Rand, sector int64) ([]byte, int, int) {
+func applyModel(model CrashModel, dur []byte, P []dataOp, r *rand.Rand, sector int64) ([]byte, int, int) { //nolint:gocritic // P is the pending-op list as DSK-027 names it
 	m := len(P)
 	switch model {
 	case CrashLoseUnsynced:
 		return dur, 0, 0
 	case CrashKeepPrefix:
-		k := int(r.Uint64N(uint64(m) + 1))
+		k := int(r.Uint64N(uint64(m) + 1)) //nolint:gosec // at most m = len(P)
 		for _, op := range P[:k] {
 			dur = apply(dur, op)
 		}
@@ -146,7 +146,7 @@ func applyModel(model CrashModel, dur []byte, P []dataOp, r *rand.Rand, sector i
 		return dur, kept, 0
 	}
 	// CrashTorn
-	k := int(r.Uint64N(uint64(m)))
+	k := int(r.Uint64N(uint64(m))) //nolint:gosec // below m = len(P)
 	for _, op := range P[:k] {
 		dur = apply(dur, op)
 	}

@@ -105,7 +105,7 @@ func TestNewIsSilent(t *testing.T) {
 	if got := simnet.New(kernel.New(kernel.Config{Seed: 1}), cfg).Config(); got != cfg {
 		t.Fatalf("Config() = %+v, want %+v", got, cfg)
 	}
-	if !untouched(s.Rand("net/link/a/a"), 1, "net/link/a/a") {
+	if !untouched(s, "net/link/a/a") {
 		t.Fatalf("New drew from the self link stream")
 	}
 }

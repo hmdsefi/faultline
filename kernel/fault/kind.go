@@ -82,7 +82,7 @@ func fieldSet(k Kind) (uint16, bool) {
 }
 
 // isNet reports whether k needs the network (FLT-031).
-func isNet(k Kind) bool {
+func isNet(k Kind) bool { //nolint:unused // the schedule and injector code that comes next uses it
 	switch k {
 	case KindPartition, KindIsolate, KindCut, KindHeal, KindHealLink, KindLink, KindLinkReset:
 		return true
@@ -91,6 +91,6 @@ func isNet(k Kind) bool {
 }
 
 // isDisk reports whether k needs the disks (FLT-031).
-func isDisk(k Kind) bool {
+func isDisk(k Kind) bool { //nolint:unused // the schedule and injector code that comes next uses it
 	return k == KindSyncFail || k == KindDiskCapacity || k == KindCorrupt
 }

@@ -42,7 +42,7 @@ func Gossip(s *kernel.Sim, t Transport, cfg GossipConfig) []*kernel.Node {
 			counts := make([]uint64, cfg.Nodes)
 			done := 0
 			t.Handle(n, func(_ kernel.NodeID, msg any) {
-				m := msg.(GossipMsg)
+				m := msg.(GossipMsg) //nolint:errcheck // gossip nodes send only GossipMsg; another type is a bug and panics
 				for j := range counts {
 					counts[j] = max(counts[j], m.Counts[j])
 				}
@@ -57,7 +57,7 @@ func Gossip(s *kernel.Sim, t Transport, cfg GossipConfig) []*kernel.Node {
 				}
 				done++
 				counts[self]++
-				k := int(n.Rand().Uint64N(uint64(cfg.Nodes - 1)))
+				k := int(n.Rand().Uint64N(uint64(cfg.Nodes - 1))) //nolint:gosec // cfg.Nodes >= 2, checked above
 				if k >= self {
 					k++
 				}

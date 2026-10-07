@@ -251,7 +251,7 @@ func TestNodeRand(t *testing.T) {
 	if got := n1.Rand().Uint64(); got != 0x5f9d802d8bdde2bf {
 		t.Fatalf("first value %#016x", got)
 	}
-	if n1.Rand() != n1.Rand() {
+	if n1.Rand() != n1.Rand() { //nolint:staticcheck // two calls must return the same pointer
 		t.Fatal("Rand() pointers differ within one incarnation")
 	}
 	old := n1.Rand()
@@ -260,7 +260,7 @@ func TestNodeRand(t *testing.T) {
 	if n1.Rand() == old {
 		t.Fatal("Rand() reused the old incarnation's stream")
 	}
-	want := rand.New(rand.NewPCG(streamSeeds(seed, "node/n1/2"))).Uint64()
+	want := rand.New(rand.NewPCG(streamSeeds(seed, "node/n1/2"))).Uint64() //nolint:gosec // the PCG stream that Node.Rand must match
 	if got := n1.Rand().Uint64(); got != want {
 		t.Fatalf("incarnation 2 first value %#016x, want %#016x", got, want)
 	}

@@ -60,7 +60,7 @@ func TestPanicRecovery(t *testing.T) {
 	s3 := fullSim(7)
 	s3.After(0, "nilmap", func() {
 		var m map[string]int
-		m["x"] = 1
+		m["x"] = 1 //nolint:staticcheck // the nil-map write is the panic under test
 	})
 	s3.Run()
 	rs := s3.Records()

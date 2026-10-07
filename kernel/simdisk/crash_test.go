@@ -34,13 +34,13 @@ func replayAny(r *rand.Rand, path, b string) (model, rec, content string) {
 	kept, torn := 0, 0
 	switch model {
 	case "keep_prefix":
-		kept = int(r.Uint64N(2))
+		kept = int(r.Uint64N(2)) //nolint:gosec // below 2: replays crash's draw
 	case "keep_subset":
 		if kernel.Chance(r, 500000) {
 			kept = 1
 		}
 	case "torn":
-		r.Uint64N(1) // k = 0
+		r.Uint64N(1) //nolint:staticcheck // k = 0: replays the draw to keep the stream aligned
 		if kernel.Chance(r, 500000) {
 			torn = 1
 		}
@@ -115,7 +115,7 @@ func TestKeepPrefix(t *testing.T) {
 			}
 		}
 		k.crash()
-		kept := int(replay(seed, "disk/a").Uint64N(6))
+		kept := int(replay(seed, "disk/a").Uint64N(6)) //nolint:gosec // below 6: replays crash's draw
 		checkLast(t, k, applyRec("/f", "keep_prefix", 5, kept, 0, kept))
 		k.restart()
 		want := "12345"[:kept]
@@ -225,9 +225,7 @@ func TestTornWrites(t *testing.T) {
 		}{{0, 1536, 0x22, chunks}, {300, 1000, 0x33, unaligned}} {
 			got, rec := tornCase(t, seed, c.off, c.n, c.fill)
 			r := replay(seed, "disk/a")
-			if k := r.Uint64N(1); k != 0 {
-				t.Fatalf("Uint64N(1) = %d", k)
-			}
+			r.Uint64N(1) //nolint:staticcheck // k = 0: replays the draw to keep the stream aligned
 			want := bytes.Repeat([]byte{0x11}, 1536)
 			torn := 0
 			for _, ch := range c.chunks {
@@ -264,7 +262,7 @@ func TestTornSectorSize(t *testing.T) {
 		write(t, f, string(bytes.Repeat([]byte{0x22}, 8192)), 0)
 		k.crash()
 		r := replay(seed, "disk/a")
-		r.Uint64N(1) // k = 0
+		r.Uint64N(1) //nolint:staticcheck // k = 0: replays the draw to keep the stream aligned
 		want := bytes.Repeat([]byte{0x11}, 8192)
 		torn := 0
 		for _, ch := range [][2]int{{0, 4096}, {4096, 8192}} {
@@ -295,7 +293,7 @@ func TestTornPrefix(t *testing.T) {
 		appendAll(t, f, "1", "2", "3")
 		k.crash()
 		r := replay(seed, "disk/a")
-		kept := int(r.Uint64N(3))
+		kept := int(r.Uint64N(3)) //nolint:gosec // below 3: replays crash's draw
 		want, torn := "123"[:kept], 0
 		if kernel.Chance(r, 500000) { // P[kept] is one byte: one chunk
 			want, torn = "123"[:kept+1], 1
@@ -320,7 +318,7 @@ func TestTornPrefix(t *testing.T) {
 		must(t, f.Truncate(2))
 		k.crash()
 		r := replay(seed, "disk/a")
-		r.Uint64N(1) // k = 0
+		r.Uint64N(1) //nolint:staticcheck // k = 0: replays the draw to keep the stream aligned
 		want, torn := "abcdef", 0
 		if kernel.Chance(r, 500000) {
 			want, torn = "ab", 1
@@ -391,7 +389,7 @@ func TestCrashTraversalOrder(t *testing.T) {
 		paths := []string{"/d/a", "/d/b", "/e"}
 		kept, want := make([]int, len(paths)), make([]string, len(paths))
 		for i, p := range paths {
-			kept[i] = int(r.Uint64N(3))
+			kept[i] = int(r.Uint64N(3)) //nolint:gosec // below 3: replays crash's draw
 			want[i] = applyRec(p, "keep_prefix", 2, kept[i], 0, kept[i])
 		}
 		if got := k.crashApply(); strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -494,7 +492,7 @@ func TestStrictMetadataCrash(t *testing.T) {
 		must(t, k.v.Remove("/f"))
 		must(t, k.v.Mkdir("/d"))
 		k.crash()
-		kept := int(replay(seed, "disk/a").Uint64N(4))
+		kept := int(replay(seed, "disk/a").Uint64N(4)) //nolint:gosec // below 4: replays crash's draw
 		seen[kept] = true
 		want := fmt.Sprintf("disk.crash_meta{model=strict, pending=3, kept=%d}", kept)
 		meta := k.recordsOf("disk.crash_meta")
@@ -519,7 +517,7 @@ func TestStrictMetadataCrash(t *testing.T) {
 		must(t, k.v.SyncDir("/"))
 		appendAll(t, f, "1", "2", "3")
 		k.crash()
-		kept := int(replay(seed, "disk/a").Uint64N(4))
+		kept := int(replay(seed, "disk/a").Uint64N(4)) //nolint:gosec // below 4: replays crash's draw
 		checkLast(t, k, "disk.crash_meta{model=strict, pending=0, kept=0}", applyRec("/f", "keep_prefix", 3, kept, 0, kept))
 		if got := content(t, k.v, "/f"); got != "123"[:kept] {
 			t.Fatalf("seed %d: ReadFile = %q, want %q", seed, got, "123"[:kept])
@@ -551,7 +549,7 @@ func TestLostCreateDropsData(t *testing.T) {
 			lost++
 			continue
 		}
-		kept := int(r.Uint64N(2))
+		kept := int(r.Uint64N(2)) //nolint:gosec // below 2: replays crash's draw
 		checkLast(t, k, applyRec("/f", "keep_prefix", 1, kept, 0, kept))
 		if got := content(t, k.v, "/f"); got != "x"[:kept] {
 			t.Fatalf("seed %d: ReadFile = %q, want %q", seed, got, "x"[:kept])

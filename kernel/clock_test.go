@@ -54,10 +54,10 @@ func TestClockReading(t *testing.T) {
 	if got := (clock{ppm: MinDriftPPM}).at(math.MaxInt64); got != 4611686018427387903 {
 		t.Errorf("min drift at MaxInt64 = %d, want 4611686018427387903", got)
 	}
-	r := rand.New(rand.NewPCG(3, 4))
+	r := rand.New(rand.NewPCG(3, 4)) //nolint:gosec // fixed seed: repeatable test inputs
 	for i := 0; i < 10000; i++ {
-		delta := int64(r.Uint64N(math.MaxInt64 / 2))
-		ppm := MinDriftPPM + int32(r.Uint32N(uint32(MaxDriftPPM-MinDriftPPM+1)))
+		delta := r.Int64N(math.MaxInt64 / 2)
+		ppm := MinDriftPPM + r.Int32N(MaxDriftPPM-MinDriftPPM+1)
 		c := clock{ppm: ppm}
 		want := new(big.Int).Mul(big.NewInt(delta), big.NewInt(int64(ppm)))
 		want.Div(want, big.NewInt(1_000_000)) // big.Int.Div rounds toward negative infinity for a positive divisor

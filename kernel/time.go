@@ -31,7 +31,7 @@ func (t Time) Std() time.Time {
 // String formats t as decimal seconds with exactly nine fractional digits and the suffix "s",
 // for example "0.000000000s", "41.207000000s", "-0.000000001s". See KRN-002.
 func (t Time) String() string {
-	u := uint64(t)
+	u := uint64(t) //nolint:gosec // negated below when t < 0, which also covers math.MinInt64
 	if t < 0 {
 		u = -u
 	}

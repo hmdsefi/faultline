@@ -296,7 +296,7 @@ func groupsAttr(groups [][]string) string {
 }
 
 // clone returns a deep copy of e: Groups, Link and Undoes are copied.
-func (e Event) clone() Event {
+func (e Event) clone() Event { //nolint:unused // the schedule and injector code that comes next uses it
 	if e.Groups != nil {
 		g := make([][]string, len(e.Groups))
 		for i, x := range e.Groups {
@@ -315,7 +315,7 @@ func (e Event) clone() Event {
 }
 
 // cloneEvents deep-copies events; nil stays nil.
-func cloneEvents(events []Event) []Event {
+func cloneEvents(events []Event) []Event { //nolint:unused // the schedule and injector code that comes next uses it
 	if events == nil {
 		return nil
 	}
@@ -327,7 +327,7 @@ func cloneEvents(events []Event) []Event {
 }
 
 // names returns the node names of e in resolution order: Node, Peer, then Groups (FLT-030).
-func (e Event) names() []string {
+func (e Event) names() []string { //nolint:unused // the schedule and injector code that comes next uses it
 	var out []string
 	if e.Node != "" {
 		out = append(out, e.Node)

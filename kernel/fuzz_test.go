@@ -115,7 +115,7 @@ func FuzzQueueOrder(f *testing.F) {
 		if fifo {
 			cfg.TieBreak = TieBreakFIFO
 		} else {
-			m.sched = rand.New(rand.NewPCG(streamSeeds(seed, "kernel/sched")))
+			m.sched = rand.New(rand.NewPCG(streamSeeds(seed, "kernel/sched"))) //nolint:gosec // the model replays the kernel's seeded sched stream
 		}
 		s := New(cfg)
 		n := s.AddNode("n", func(*Node) {})
@@ -280,7 +280,7 @@ func FuzzStreamSeeds(f *testing.F) {
 		}
 		if label != "" && !reservedLabel(label) {
 			got := New(Config{Seed: seed}).Rand(label)
-			want := rand.New(rand.NewPCG(a1, a2))
+			want := rand.New(rand.NewPCG(a1, a2)) //nolint:gosec // the PCG stream that Sim.Rand must match
 			for i := 0; i < 4; i++ {
 				if g, w := got.Uint64(), want.Uint64(); g != w {
 					t.Fatalf("seed %d label %q output %d: Sim.Rand %#x, PCG %#x", seed, label, i, g, w)
@@ -331,19 +331,20 @@ func decodeRecord(b []byte) (Record, []byte, error) {
 	func() {
 		defer func() {
 			if v := recover(); v != nil {
-				if v != errShort && v != errRange {
+				e, ok := v.(error)
+				if !ok || (e != errShort && e != errRange) {
 					panic(v)
 				}
-				err = v.(error)
+				err = e
 			}
 		}()
 		r.Seq = uv()
 		r.At = Time(sv())
 		node := sv()
-		if node != int64(NodeID(node)) {
+		if node != int64(NodeID(node)) { //nolint:gosec // the round trip is the range check
 			panic(errRange)
 		}
-		r.Node = NodeID(node)
+		r.Node = NodeID(node) //nolint:gosec // in range: checked above
 		inc := uv()
 		if inc > math.MaxUint32 {
 			panic(errRange)
@@ -417,7 +418,7 @@ func FuzzClock(f *testing.F) {
 	f.Add(int64(time.Second), int32(-100), int64(1), int64(math.MinInt64))
 	f.Fuzz(func(t *testing.T, d int64, ppm int32, delta int64, l0 int64) {
 		if ppm < MinDriftPPM || ppm > MaxDriftPPM {
-			ppm = MinDriftPPM + int32(uint32(ppm)%uint32(MaxDriftPPM-MinDriftPPM+1))
+			ppm = MinDriftPPM + int32(uint32(ppm)%uint32(MaxDriftPPM-MinDriftPPM+1)) //nolint:gosec // wraps on purpose: folds any fuzz input into the drift range
 		}
 		g := localToGlobal(time.Duration(d), ppm)
 		if d <= 0 {

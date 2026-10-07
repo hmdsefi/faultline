@@ -168,12 +168,12 @@ func runGolden(t testing.TB, list []scenario, path, out string, rewrite bool) {
 	got := produce(t, list)
 	content := formatGolden(got)
 	if out != "" {
-		if err := os.WriteFile(out, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(out, []byte(content), 0o600); err != nil { //nolint:gosec // out is FAULTLINE_GOLDEN_OUT, a path CI chooses
 			t.Fatal(err)
 		}
 	}
 	if rewrite {
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -296,7 +296,7 @@ func TestGoldenReportsChanges(t *testing.T) {
 // listed twice and, with FAULTLINE_CHECK_DETERMINISM=1, on a scenario whose two runs differ.
 func TestGoldenFailures(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hashes.txt")
-	if err := os.WriteFile(path, []byte(goldenHeader+"\nx\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(goldenHeader+"\nx\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	msgs := failures(func(tb testing.TB) { runGolden(tb, scenarios[:1], path, "", false) })
@@ -329,7 +329,7 @@ func TestGoldenUpdate(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path, out := filepath.Join(dir, "hashes.txt"), filepath.Join(dir, "out.txt")
-	if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if msgs := failures(func(tb testing.TB) { runGolden(tb, scenarios, path, out, true) }); len(msgs) != 0 {

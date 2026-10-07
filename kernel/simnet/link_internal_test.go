@@ -18,9 +18,9 @@ func TestDecideEdgesDrawNothing(t *testing.T) {
 		{TailPPM: MaxPPM},
 	}
 	for _, l := range links {
-		r := rand.New(rand.NewPCG(1, 2))
+		r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // fixed seed: compared with a fresh copy below
 		d := decide(l, r)
-		if got, want := r.Uint64(), rand.New(rand.NewPCG(1, 2)).Uint64(); got != want {
+		if got, want := r.Uint64(), rand.New(rand.NewPCG(1, 2)).Uint64(); got != want { //nolint:gosec // a fresh copy of r's stream
 			t.Errorf("decide(%+v) drew from the stream", l)
 		}
 		switch {
@@ -37,8 +37,8 @@ func TestDecideEdgesDrawNothing(t *testing.T) {
 func TestDecideDrawOrder(t *testing.T) {
 	l := Link{Latency: time.Millisecond, Jitter: 4 * time.Millisecond, TailPPM: 100000,
 		Tail: 50 * time.Millisecond, DropPPM: 300000, DupPPM: 200000}
-	r1 := rand.New(rand.NewPCG(7, 7))
-	r2 := rand.New(rand.NewPCG(7, 7))
+	r1 := rand.New(rand.NewPCG(7, 7)) //nolint:gosec // fixed seed: r2 replays r1's draws
+	r2 := rand.New(rand.NewPCG(7, 7)) //nolint:gosec // same seed as r1
 	delay2 := func() time.Duration {
 		x := l.Latency + kernel.Uniform(r2, 0, l.Jitter)
 		if kernel.Chance(r2, l.TailPPM) {

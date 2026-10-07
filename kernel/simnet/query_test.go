@@ -162,7 +162,7 @@ func TestQueriesHaveNoSideEffects(t *testing.T) {
 	names := []string{"a", "b", "c"}
 	for _, x := range names {
 		for _, y := range names {
-			if l := "net/link/" + x + "/" + y; !untouched(w.s.Rand(l), 1, l) {
+			if l := "net/link/" + x + "/" + y; !untouched(w.s, l) {
 				t.Errorf("queries drew from %s", l)
 			}
 		}

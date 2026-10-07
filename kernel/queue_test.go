@@ -8,7 +8,7 @@ import (
 
 // KRN-030: the heap pops entries in (at, tiebreak, seq) order under random pushes and removals.
 func TestQueueOrder(t *testing.T) {
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // fixed seed: repeatable test inputs
 	var q queue
 	var model []*entry
 	seq := uint64(0)
@@ -16,7 +16,7 @@ func TestQueueOrder(t *testing.T) {
 		switch op := r.IntN(10); {
 		case op < 5:
 			seq++
-			e := &entry{at: Time(r.IntN(50)), tb: uint64(r.IntN(4)), seq: seq, idx: -1}
+			e := &entry{at: Time(r.IntN(50)), tb: r.Uint64N(4), seq: seq, idx: -1}
 			q.push(e)
 			model = append(model, e)
 		case op < 7 && len(model) > 0:

@@ -117,7 +117,7 @@ func BenchmarkReadAt4K(b *testing.B) {
 	if _, err := f.WriteAt(make([]byte, size), 0); err != nil {
 		b.Fatal(err)
 	}
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // fixed seed: repeatable read offsets
 	p := make([]byte, 4096)
 	b.SetBytes(4096)
 	b.ReportAllocs()
