@@ -327,7 +327,7 @@ func cloneEvents(events []Event) []Event {
 }
 
 // names returns the node names of e in resolution order: Node, Peer, then Groups (FLT-030).
-func (e Event) names() []string { //nolint:unused // Script, which comes next, uses it
+func (e Event) names() []string {
 	var out []string
 	if e.Node != "" {
 		out = append(out, e.Node)
