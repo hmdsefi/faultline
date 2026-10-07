@@ -1,5 +1,5 @@
 // Package history records client operations of a simulation run: invocations, completions,
-// virtual times and their exact order.
+// virtual times and their exact order. It writes and reads the history.jsonl format.
 //
 // A Recorder must be used from the simulation goroutine only; it is not safe for concurrent use.
 package history
@@ -42,7 +42,7 @@ func (s Status) String() string {
 
 // Op is one operation.
 //
-// In every Op returned by this package (Recorder.Ops), Input and Output hold a
+// In every Op returned by this package (Recorder.Ops, Read), Input and Output hold a
 // json.RawMessage with the compact JSON encoding of the recorded value ("null" for nil and for
 // the Output of a pending op). Use DecodeInput and DecodeOutput to get typed values.
 type Op struct {
