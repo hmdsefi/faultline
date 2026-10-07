@@ -38,7 +38,7 @@ func newW5(cfg kernel.Config, client bool) *world {
 }
 
 // full is kernel.Config{Seed: seed} with TraceFull.
-func full(seed uint64) kernel.Config { //nolint:unparam // the Random planner tests that come next pass other seeds
+func full(seed uint64) kernel.Config {
 	return kernel.Config{Seed: seed, Trace: kernel.TraceConfig{Level: kernel.TraceFull}}
 }
 
