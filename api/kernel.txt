@@ -195,6 +195,7 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Sync() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) Truncate(int64) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) WriteAt([]byte, int64) (int, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Capacity() int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Corrupt(string, int64, int) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Create(string) (*File, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) FailSyncs(int)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Mkdir(string) error
@@ -210,6 +211,7 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SetCapacity(in
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Stat(string) (Info, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SyncDir(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Usage() int64
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) WriteFileDurable(string, []byte) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (Config) Validate() error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (CrashModel) String() string
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (FailedSyncModel) String() string
