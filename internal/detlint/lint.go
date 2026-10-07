@@ -157,7 +157,7 @@ func (l *linter) lintFile(f *ast.File, info *types.Info, has func(Rule) bool, qu
 				return true
 			}
 			pkg, name := fn.Pkg().Path(), fn.Name()
-			method := fn.Type().(*types.Signature).Recv() != nil
+			method := fn.Signature().Recv() != nil
 			switch {
 			case method:
 				if slices.Contains(unorderedFuncs, fn.FullName()) {

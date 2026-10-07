@@ -20,7 +20,7 @@ func TestFIFO(t *testing.T) {
 		t.Fatalf("%d deliveries, want 1000", len(w.got))
 	}
 	for k, d := range w.got {
-		if d.payload.(int) != k {
+		if payloadInt(t, d) != k {
 			t.Fatalf("delivery %d has payload %v: FIFO order broken", k, d.payload)
 		}
 		if k > 0 && d.at <= w.got[k-1].at {
@@ -156,7 +156,7 @@ func TestOverridesDrawNothing(t *testing.T) {
 	w.nw.SetLink(1, 3, simnet.Link{Latency: ms, Jitter: ms})
 	w.nw.Link(1, 3)
 	w.nw.ResetLink(1, 3)
-	if !untouched(w.s.Rand("net/link/a/c"), 1, "net/link/a/c") {
+	if !untouched(w.s, "net/link/a/c") {
 		t.Fatalf("SetLink, ResetLink or Link drew from net/link/a/c")
 	}
 }

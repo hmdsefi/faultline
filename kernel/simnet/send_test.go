@@ -144,7 +144,7 @@ func TestJitterBounds(t *testing.T) {
 		if d.at < kernel.Time(ms) || d.at > kernel.Time(5*ms) {
 			t.Fatalf("delivery at %v outside [1ms, 5ms]", d.at)
 		}
-		if d.payload.(int) != k {
+		if payloadInt(t, d) != k {
 			reordered = true
 		}
 	}
@@ -213,7 +213,7 @@ func TestLossAndDuplicationAtTheEdges(t *testing.T) {
 			t.Fatalf("(a) drop record %+v", r)
 		}
 	}
-	if !untouched(w.s.Rand("net/link/a/b"), 1, "net/link/a/b") {
+	if !untouched(w.s, "net/link/a/b") {
 		t.Fatalf("(c) DropPPM = MaxPPM drew from the link stream")
 	}
 
@@ -234,7 +234,7 @@ func TestLossAndDuplicationAtTheEdges(t *testing.T) {
 			t.Fatalf("(b) message %s: copies 1 and 2 not both delivered", msg)
 		}
 	}
-	if !untouched(w.s.Rand("net/link/a/b"), 1, "net/link/a/b") {
+	if !untouched(w.s, "net/link/a/b") {
 		t.Fatalf("(c) DupPPM = MaxPPM drew from the link stream")
 	}
 }
@@ -299,7 +299,7 @@ func TestPartitionAtSendAndInFlight(t *testing.T) {
 	if d := w.records("net.drop"); len(d) != 1 || attr(d[0], "reason") != "partition" {
 		t.Fatalf("(d) drops %+v, want one partition drop", d)
 	}
-	if !untouched(w.s.Rand("net/link/a/b"), 1, "net/link/a/b") {
+	if !untouched(w.s, "net/link/a/b") {
 		t.Fatalf("(d) a partition drop drew from the link stream")
 	}
 }
@@ -475,7 +475,8 @@ func TestHandlerCalls(t *testing.T) {
 	seen := -1
 	w.nw.Handle(w.b, func(from kernel.NodeID, p any) {
 		seen = len(w.records("net.deliver"))
-		w.nw.Send(w.b, from, tmsg("re: "+string(p.(tmsg))))
+		m, _ := p.(tmsg) // a wrong type fails the check below
+		w.nw.Send(w.b, from, "re: "+m)
 	})
 	w.nw.Send(w.a, 2, tmsg("ping"))
 	w.s.Run()

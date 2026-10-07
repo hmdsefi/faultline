@@ -177,11 +177,21 @@ func freshStream(seed uint64, label string) *rand.Rand {
 	return kernel.New(kernel.Config{Seed: seed}).Rand(label)
 }
 
-// untouched reports whether stream r of the world has not been drawn from: its next value equals
-// the first value of the same stream in a fresh Sim. It consumes one value from r, which the
-// network shares, so call it last for that stream.
-func untouched(r *rand.Rand, seed uint64, label string) bool {
-	return r.Uint64() == freshStream(seed, label).Uint64()
+// untouched reports whether stream label of s has not been drawn from: its next value equals the
+// first value of the same stream in a fresh Sim with the same seed. It consumes one value from the
+// stream, which the network shares, so call it last for that stream.
+func untouched(s *kernel.Sim, label string) bool {
+	return s.Rand(label).Uint64() == freshStream(s.Seed(), label).Uint64()
+}
+
+// payloadInt returns the int payload of d and fails the test if the payload has another type.
+func payloadInt(t *testing.T, d delivery) int {
+	t.Helper()
+	v, ok := d.payload.(int)
+	if !ok {
+		t.Fatalf("payload %v has type %T, want int", d.payload, d.payload)
+	}
+	return v
 }
 
 func ns(d time.Duration) string { return fmt.Sprint(int64(d)) }

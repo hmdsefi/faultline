@@ -133,8 +133,8 @@ func TestFailSyncsConsumption(t *testing.T) {
 	checkPathErr(t, f.Sync(), "sync", "/f", simdisk.ErrIO)
 	k.a.Pause()
 	k.v.FailSyncs(1) // every node state
-	mustPanic(t, "simdisk: SyncDir on a (id 1): node is paused", func() { k.v.SyncDir("/") })
-	mustPanic(t, "simdisk: Sync on a (id 1): node is paused", func() { f.Sync() })
+	mustPanic(t, "simdisk: SyncDir on a (id 1): node is paused", func() { _ = k.v.SyncDir("/") })
+	mustPanic(t, "simdisk: Sync on a (id 1): node is paused", func() { _ = f.Sync() })
 }
 
 // AT-DSK-24
@@ -285,9 +285,9 @@ func TestSyncDirChecks(t *testing.T) {
 		t.Fatalf("disk.sync_dir_fail records %v, disk.sync_dir records %v", sf, sd)
 	}
 	k.a.Pause()
-	mustPanic(t, "simdisk: SyncDir on a (id 1): node is paused", func() { k.v.SyncDir("rel") })
+	mustPanic(t, "simdisk: SyncDir on a (id 1): node is paused", func() { _ = k.v.SyncDir("rel") })
 	k.crash()
-	mustPanic(t, "simdisk: SyncDir on a (id 1): node is down", func() { k.v.SyncDir("") })
+	mustPanic(t, "simdisk: SyncDir on a (id 1): node is down", func() { _ = k.v.SyncDir("") })
 }
 
 // DSK-034, DSK-008, DSK-037: ReadDurable works in every node state, returns a new slice, emits no

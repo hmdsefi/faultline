@@ -98,7 +98,7 @@ func (nw *Network) Config() Config { return nw.cfg }
 // order (NET-002).
 func (nw *Network) register() {
 	for {
-		n := nw.s.Node(kernel.NodeID(len(nw.nodes) + 1))
+		n := nw.s.Node(kernel.NodeID(len(nw.nodes) + 1)) //nolint:gosec // at most one past the last NodeID; a wrap gives an ID < 1, and Node returns nil
 		if n == nil {
 			return
 		}

@@ -83,7 +83,7 @@ func apiLines(pkg *types.Package) []string {
 			}
 			t := s.Params().At(i).Type()
 			if s.Variadic() && i == s.Params().Len()-1 {
-				b.WriteString("..." + T(t.(*types.Slice).Elem()))
+				b.WriteString("..." + T(t.(*types.Slice).Elem())) //nolint:errcheck // go/types: a variadic parameter is always a slice
 			} else {
 				b.WriteString(T(t))
 			}
@@ -121,13 +121,13 @@ func apiLines(pkg *types.Package) []string {
 		case *types.Var:
 			out = append(out, prefix+"var "+name+" "+T(o.Type()))
 		case *types.Func:
-			out = append(out, prefix+"func "+name+sig(o.Type().(*types.Signature)))
+			out = append(out, prefix+"func "+name+sig(o.Signature()))
 		case *types.TypeName:
 			if o.IsAlias() {
 				out = append(out, prefix+"type "+name+" = "+T(types.Unalias(o.Type())))
 				continue
 			}
-			named := o.Type().(*types.Named)
+			named := o.Type().(*types.Named) //nolint:errcheck // go/types: a non-alias type name in package scope is always Named
 			tname := name
 			if tps := named.TypeParams(); tps.Len() > 0 {
 				parts := make([]string, tps.Len())
@@ -160,7 +160,7 @@ func apiLines(pkg *types.Package) []string {
 						continue
 					}
 					names = append(names, m.Name())
-					out = append(out, prefix+"type "+tname+" interface, "+m.Name()+sig(m.Type().(*types.Signature)))
+					out = append(out, prefix+"type "+tname+" interface, "+m.Name()+sig(m.Signature()))
 				}
 				if unexported {
 					names = append(names, "unexported methods")
@@ -175,7 +175,7 @@ func apiLines(pkg *types.Package) []string {
 				if !m.Exported() {
 					continue
 				}
-				s := m.Type().(*types.Signature)
+				s := m.Signature()
 				recv := "(" + name + ")"
 				if _, ok := s.Recv().Type().(*types.Pointer); ok {
 					recv = "(*" + name + ")"

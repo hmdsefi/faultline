@@ -225,7 +225,7 @@ func checkSnapshot(t testing.TB, path, generated string, write bool) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(generated), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(generated), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		return

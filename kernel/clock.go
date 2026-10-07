@@ -47,7 +47,7 @@ func localToGlobal(d time.Duration, ppm int32) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	den := uint64(1_000_000 + int64(ppm)) // in [500_000, 2_000_000]
+	den := uint64(1_000_000 + int64(ppm)) //nolint:gosec // in [500_000, 2_000_000]: ppm is in [MinDriftPPM, MaxDriftPPM]
 	hi, lo := bits.Mul64(uint64(d), 1_000_000)
 	if hi >= den {
 		return math.MaxInt64 // quotient does not fit: saturate

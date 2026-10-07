@@ -28,11 +28,11 @@ func reportEvents(b *testing.B) {
 // benchLoop runs b.N events of loopSim at level in the timed region.
 func benchLoop(b *testing.B, level TraceLevel) {
 	b.ReportAllocs()
-	s := loopSim(uint64(b.N), level)
+	s := loopSim(uint64(b.N), level) //nolint:gosec // b.N is positive
 	b.ResetTimer()
 	s.Run()
 	reportEvents(b)
-	if got := s.Executed(); got != uint64(b.N) {
+	if got := s.Executed(); got != uint64(b.N) { //nolint:gosec // b.N is positive
 		b.Fatalf("executed %d events, want %d", got, b.N)
 	}
 }
@@ -45,7 +45,7 @@ func BenchmarkLoop(b *testing.B) {
 func BenchmarkNodeTimers(b *testing.B) {
 	b.ReportAllocs()
 	const nodes = 16
-	s := New(Config{Seed: 1, MaxEvents: uint64(b.N) + nodes}) // the boot events are not timed
+	s := New(Config{Seed: 1, MaxEvents: uint64(b.N) + nodes}) //nolint:gosec // b.N is positive; the boot events are not timed
 	for i := 0; i < nodes; i++ {
 		s.AddNode("n"+strconv.Itoa(i), func(n *Node) {
 			for j := 0; j < 64; j++ {

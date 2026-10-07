@@ -42,7 +42,7 @@ func benchSend(b *testing.B, cfg simnet.Config, isolate bool) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "messages/s")
 	// Every copy is delivered or dropped by the configured partition or loss.
 	st := nw.Stats()
-	if st.Sent != uint64(warm+b.N) || st.InFlight != 0 || st.DroppedInFlight+st.DroppedDown+st.DroppedNoHandler != 0 {
+	if st.Sent != uint64(warm+b.N) || st.InFlight != 0 || st.DroppedInFlight+st.DroppedDown+st.DroppedNoHandler != 0 { //nolint:gosec // warm and b.N are positive
 		b.Fatalf("Stats() = %+v after %d sends", st, warm+b.N)
 	}
 }

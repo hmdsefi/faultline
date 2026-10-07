@@ -111,7 +111,7 @@ func TestChanceAndUniform(t *testing.T) {
 	r = testStream()
 	probe := testStream()
 	x := probe.Uint64()
-	if got, want := Uniform(r, math.MinInt64, math.MaxInt64), time.Duration(math.MinInt64)+time.Duration(x); got != want {
+	if got, want := Uniform(r, math.MinInt64, math.MaxInt64), time.Duration(math.MinInt64)+time.Duration(x); got != want { //nolint:gosec // wrapping add, as in Uniform
 		t.Errorf("Uniform(full range) = %d, want %d", got, want)
 	}
 }

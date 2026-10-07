@@ -61,7 +61,7 @@ func TestSimRandVector(t *testing.T) {
 // AT-KRN-06 (identity and reservation; the tie-break part is in loop_test.go)
 func TestRandIdentityAndReservation(t *testing.T) {
 	s := New(Config{Seed: 1})
-	if s.Rand("x") != s.Rand("x") {
+	if s.Rand("x") != s.Rand("x") { //nolint:staticcheck // two calls must return the same pointer
 		t.Error("Rand(x) returned different pointers")
 	}
 	if s.Rand("x") == s.Rand("y") {

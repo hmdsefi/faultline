@@ -224,8 +224,8 @@ func TestNodeStatePanics(t *testing.T) {
 	f, err := k.v.Create("/f")
 	must(t, err)
 	k.a.Pause()
-	mustPanic(t, "simdisk: Mkdir on a (id 1): node is paused", func() { k.v.Mkdir("/z") })
-	mustPanic(t, "simdisk: Create on a (id 1): node is paused", func() { k.v.Create("not even a valid path") })
+	mustPanic(t, "simdisk: Mkdir on a (id 1): node is paused", func() { _ = k.v.Mkdir("/z") })
+	mustPanic(t, "simdisk: Create on a (id 1): node is paused", func() { _, _ = k.v.Create("not even a valid path") })
 	must(t, f.Close()) // Close skips the node check
 	k.a.Resume()
 	k.a.Crash()
@@ -233,12 +233,12 @@ func TestNodeStatePanics(t *testing.T) {
 		method string
 		call   func()
 	}{
-		{"Create", func() { k.v.Create("x") }},
-		{"Open", func() { k.v.Open("f") }},
-		{"Remove", func() { k.v.Remove("f") }},
-		{"Rename", func() { k.v.Rename("f", "g") }},
-		{"Mkdir", func() { k.v.Mkdir("d") }},
-		{"MkdirAll", func() { k.v.MkdirAll("d/e") }},
+		{"Create", func() { _, _ = k.v.Create("x") }},
+		{"Open", func() { _, _ = k.v.Open("f") }},
+		{"Remove", func() { _ = k.v.Remove("f") }},
+		{"Rename", func() { _ = k.v.Rename("f", "g") }},
+		{"Mkdir", func() { _ = k.v.Mkdir("d") }},
+		{"MkdirAll", func() { _ = k.v.MkdirAll("d/e") }},
 	} {
 		mustPanic(t, "simdisk: "+c.method+" on a (id 1): node is down", c.call)
 	}

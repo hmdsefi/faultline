@@ -113,7 +113,7 @@ func faultWorkload(t testing.TB, seed uint64, trace kernel.TraceConfig) (*kernel
 		tick = func() {
 			count++
 			for _, f := range files {
-				if _, err := f.Append([]byte{byte(n.Rand().Uint64())}); failed(err) {
+				if _, err := f.Append([]byte{byte(n.Rand().Uint64())}); failed(err) { //nolint:gosec // any byte will do: truncation is intended
 					return
 				}
 			}

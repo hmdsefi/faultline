@@ -125,7 +125,7 @@ func TestCompleteMisuse(t *testing.T) {
 	// op 2 is still pending, so c2 cannot invoke yet (HIS-005, HIS-012 item 5).
 	mustPanic(t, `history: Invoke: process "c2" has pending op 2 (read)`, func() { h.r.Invoke("c2", "read", nil) })
 	h.r.Complete(2, history.Info, "timeout")
-	if op := h.r.Ops()[1]; op.ReturnIndex != 4 || string(op.Output.(json.RawMessage)) != `"timeout"` {
+	if op := h.r.Ops()[1]; op.ReturnIndex != 4 || rawString(t, op.Output) != `"timeout"` {
 		t.Fatalf("op 2 = %+v", op)
 	}
 	h.r.Invoke("c2", "read", nil) // HIS-008: a process may invoke again after Info
@@ -142,7 +142,7 @@ func TestSnapshot(t *testing.T) {
 	h.r.Complete(1, history.OK, out)
 	out[0] = 9
 	op := h.r.Ops()[0]
-	if string(op.Input.(json.RawMessage)) != `{"key":"x"}` || string(op.Output.(json.RawMessage)) != `[1]` {
+	if rawString(t, op.Input) != `{"key":"x"}` || rawString(t, op.Output) != `[1]` {
 		t.Fatalf("Input %s Output %s", op.Input, op.Output)
 	}
 }
@@ -180,8 +180,8 @@ func TestTraceRecords(t *testing.T) {
 	// HIS-002: json.Marshal escapes <, > and & in the stored bytes, which the records carry.
 	h.r.Invoke("c2", "write", "<&>")
 	h.r.Complete(5, history.OK, "<&>")
-	if op := h.r.Ops()[4]; string(op.Input.(json.RawMessage)) != `"\u003c\u0026\u003e"` ||
-		string(op.Output.(json.RawMessage)) != `"\u003c\u0026\u003e"` {
+	if op := h.r.Ops()[4]; rawString(t, op.Input) != `"\u003c\u0026\u003e"` ||
+		rawString(t, op.Output) != `"\u003c\u0026\u003e"` {
 		t.Fatalf("Input %s Output %s", op.Input, op.Output)
 	}
 	// Cause is KRN's default: the record emitted just before (KRN-090).

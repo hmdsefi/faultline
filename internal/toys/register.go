@@ -64,8 +64,8 @@ func Register(s *kernel.Sim, t Transport, cfg RegisterConfig) []*kernel.Node {
 			switch m := msg.(type) {
 			case Write:
 				value = max(value, m.V)
-				t.Send(n, r1.ID(), Replicate{Op: m.Op, V: m.V})
-				t.Send(n, r2.ID(), Replicate{Op: m.Op, V: m.V})
+				t.Send(n, r1.ID(), Replicate(m))
+				t.Send(n, r2.ID(), Replicate(m))
 				if cfg.EarlyAck {
 					t.Send(n, c.ID(), WriteAck{Op: m.Op})
 				}
@@ -77,7 +77,7 @@ func Register(s *kernel.Sim, t Transport, cfg RegisterConfig) []*kernel.Node {
 				if was := acks[m.Op]; was&bit == 0 {
 					acks[m.Op] = was | bit
 					if was|bit == 3 && !cfg.EarlyAck {
-						t.Send(n, c.ID(), WriteAck{Op: m.Op})
+						t.Send(n, c.ID(), WriteAck(m))
 					}
 				}
 			case Read:

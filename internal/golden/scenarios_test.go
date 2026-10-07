@@ -61,7 +61,7 @@ var scenarios = []scenario{
 		s := kernel.New(kernel.Config{Seed: seed, Trace: trace})
 		s.After(time.Second, "boom", func() {
 			var m map[string]int
-			m["x"] = 1
+			m["x"] = 1 //nolint:staticcheck // the nil-map write is the panic under test
 		})
 		return s, s.Run()
 	}},

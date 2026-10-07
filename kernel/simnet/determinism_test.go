@@ -88,8 +88,8 @@ func TestStreamIndependence(t *testing.T) {
 			}
 		}
 		slices.SortFunc(toC, func(x, y delivery) int {
-			if x.payload.(int) != y.payload.(int) {
-				return x.payload.(int) - y.payload.(int)
+			if xp, yp := payloadInt(t, x), payloadInt(t, y); xp != yp {
+				return xp - yp
 			}
 			return int(x.at - y.at)
 		})
