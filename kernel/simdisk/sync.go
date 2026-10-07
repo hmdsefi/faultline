@@ -12,6 +12,8 @@ func (f *File) Sync() error {
 	}
 	v, n := f.v, f.f
 	m := len(n.pending)
+	// Each value is converted once: DSK §9 budgets these allocations.
+	ops := strconv.Itoa(m)
 	if v.failSyncs > 0 {
 		v.failSyncs--
 		model := v.d.cfg.FailedSync
@@ -21,8 +23,8 @@ func (f *File) Sync() error {
 			}
 			n.pending = nil // cur unchanged: dropped ops stay readable until a crash
 		}
-		v.emit("disk.sync_fail", "sync "+f.name+" failed: "+model.String()+" ops="+strconv.Itoa(m),
-			attr("path", f.name), attr("model", model.String()), attr("ops", strconv.Itoa(m)),
+		v.emit("disk.sync_fail", "sync "+f.name+" failed: "+model.String()+" ops="+ops,
+			attr("path", f.name), attr("model", model.String()), attr("ops", ops),
 			attr("left", strconv.Itoa(v.failSyncs)))
 		return pathErr("sync", f.name, ErrIO)
 	}
@@ -30,8 +32,9 @@ func (f *File) Sync() error {
 		n.dur = apply(n.dur, op)
 	}
 	n.pending = nil
-	v.emit("disk.sync", "sync "+f.name+" ops="+strconv.Itoa(m)+" size="+strconv.Itoa(len(n.dur)),
-		attr("path", f.name), attr("ops", strconv.Itoa(m)), attr("size", strconv.Itoa(len(n.dur))))
+	size := strconv.Itoa(len(n.dur))
+	v.emit("disk.sync", "sync "+f.name+" ops="+ops+" size="+size,
+		attr("path", f.name), attr("ops", ops), attr("size", size))
 	return nil
 }
 
@@ -70,7 +73,10 @@ func (v *Volume) SyncDir(path string) error {
 }
 
 // syncDir applies the durability closure of DSK-024 for directory d and returns the number of
-// namespace ops made durable.
+// namespace ops made durable. It marks the selected ops in a slice of one flag per logged op and
+// returns early when none is selected. Otherwise it applies them to the durable namespace in log
+// order and compacts the log in place: the ops it keeps stay in order and are not copied to a new
+// slice, and the slots past them are cleared so that the dropped ops release their inodes.
 func (v *Volume) syncDir(d *inode) int {
 	selected := make([]bool, len(v.nslog))
 	dirs := []*inode{d} // a set; small, searched linearly
@@ -94,7 +100,10 @@ func (v *Volume) syncDir(d *inode) int {
 			}
 		}
 	}
-	kept := v.nslog[:0:0]
+	if count == 0 {
+		return 0
+	}
+	kept := v.nslog[:0]
 	for i, op := range v.nslog {
 		if !selected[i] {
 			kept = append(kept, op)
@@ -104,6 +113,7 @@ func (v *Volume) syncDir(d *inode) int {
 			m.applyTo(true)
 		}
 	}
+	clear(v.nslog[len(kept):]) // the dropped ops release their inodes
 	v.nslog = kept
 	return count
 }
