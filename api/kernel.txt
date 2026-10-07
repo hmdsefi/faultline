@@ -186,6 +186,8 @@ pkg github.com/hmdsefi/faultline/kernel/fault, func Kinds() []Kind
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Durable() bool
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) String() string
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Validate() error
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Schedule) Normalize() (Schedule, error)
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Schedule) Validate() error
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, At kernel.Time
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Groups [][]string
@@ -201,6 +203,11 @@ pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Peer string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Role string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Undoes []int
 pkg github.com/hmdsefi/faultline/kernel/fault, type Kind string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct
+pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, End kernel.Time
+pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Events []Event
+pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Recovery kernel.Time
+pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Version int
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny = 0
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny CrashModel
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepPrefix = 2

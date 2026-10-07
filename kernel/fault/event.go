@@ -296,7 +296,7 @@ func groupsAttr(groups [][]string) string {
 }
 
 // clone returns a deep copy of e: Groups, Link and Undoes are copied.
-func (e Event) clone() Event { //nolint:unused // the schedule and injector code that comes next uses it
+func (e Event) clone() Event {
 	if e.Groups != nil {
 		g := make([][]string, len(e.Groups))
 		for i, x := range e.Groups {
@@ -315,7 +315,7 @@ func (e Event) clone() Event { //nolint:unused // the schedule and injector code
 }
 
 // cloneEvents deep-copies events; nil stays nil.
-func cloneEvents(events []Event) []Event { //nolint:unused // the schedule and injector code that comes next uses it
+func cloneEvents(events []Event) []Event {
 	if events == nil {
 		return nil
 	}
