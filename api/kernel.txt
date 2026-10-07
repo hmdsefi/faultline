@@ -183,11 +183,13 @@ pkg github.com/hmdsefi/faultline/kernel/fault, const MaxRuleDuration time.Durati
 pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion = 1
 pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion ideal-int
 pkg github.com/hmdsefi/faultline/kernel/fault, func Kinds() []Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, func ReadSchedule(io.Reader) (Schedule, error)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Durable() bool
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) String() string
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Validate() error
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Schedule) Normalize() (Schedule, error)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Schedule) Validate() error
+pkg github.com/hmdsefi/faultline/kernel/fault, method (Schedule) Write(io.Writer) error
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, At kernel.Time
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Groups [][]string
