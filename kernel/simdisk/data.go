@@ -70,8 +70,10 @@ func (f *File) write(op string, p []byte, off int64) (int, error) {
 		if n.linked {
 			v.used += max(size, off+w) - size
 		}
-		v.emit("disk.write", op+" "+f.name+" off="+i64(off)+" len="+i64(w),
-			attr("path", f.name), attr("op", op), attr("off", i64(off)), attr("len", i64(w)))
+		// Each value is converted once: DSK §9 budgets these allocations.
+		offText, lenText := i64(off), i64(w)
+		v.emit("disk.write", op+" "+f.name+" off="+offText+" len="+lenText,
+			attr("path", f.name), attr("op", op), attr("off", offText), attr("len", lenText))
 	}
 	if w < int64(len(p)) {
 		v.emit("disk.nospace", op+" "+f.name+": no space (need "+i64(grow)+", avail "+i64(avail)+")",

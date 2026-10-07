@@ -207,6 +207,7 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadDurable(st
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) ReadFile(string) ([]byte, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Remove(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Rename(string, string) error
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SampleLatency(Op) time.Duration
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SetCapacity(int64)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Stat(string) (Info, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) SyncDir(string) error
