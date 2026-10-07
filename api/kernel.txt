@@ -183,7 +183,10 @@ pkg github.com/hmdsefi/faultline/kernel/fault, const MaxRuleDuration time.Durati
 pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion = 1
 pkg github.com/hmdsefi/faultline/kernel/fault, const ScheduleVersion ideal-int
 pkg github.com/hmdsefi/faultline/kernel/fault, func Kinds() []Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, func NewInjector(*kernel.Sim, *simnet.Network, *simdisk.Disks) *Injector
 pkg github.com/hmdsefi/faultline/kernel/fault, func ReadSchedule(io.Reader) (Schedule, error)
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Applied() Schedule
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Inject(Event)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Durable() bool
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) String() string
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Validate() error
@@ -204,6 +207,7 @@ pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Path string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Peer string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Role string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Event struct, Undoes []int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Injector struct
 pkg github.com/hmdsefi/faultline/kernel/fault, type Kind string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, End kernel.Time
