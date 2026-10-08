@@ -406,3 +406,23 @@ func TestBundleIsClassicScript(t *testing.T) {
 		t.Fatalf("bundles that do not parse as a classic script or do not behave as the modules: %v\n%s", err, out)
 	}
 }
+
+// AT-ART-13
+func TestBundleTimelineEntry(t *testing.T) {
+	js, err := Bundle(TimelineEntry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "// ---- "
+	last := js[strings.LastIndex(js, marker)+len(marker):]
+	if !strings.HasPrefix(last, TimelineEntry+" ----\n") {
+		t.Fatalf("last module is not %s: %q", TimelineEntry, last[:min(80, len(last))])
+	}
+	css, err := fs.ReadFile(FS, ThemeCSS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(js) + len(css); n > 196_608 {
+		t.Fatalf("bundle plus theme.css is %d bytes, budget 196608", n)
+	}
+}
