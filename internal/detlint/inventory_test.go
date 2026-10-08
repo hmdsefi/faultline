@@ -34,6 +34,7 @@ var inventory = []struct {
 	}},
 	{"1.3", []string{"check/history"}},
 	{"1.3", []string{"kernel/fault"}},
+	{"1.4", []string{"ui"}},
 }
 
 // TestPackageInventory pins the package directories that exist in this phase.
