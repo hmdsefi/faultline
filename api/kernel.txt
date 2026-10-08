@@ -189,7 +189,10 @@ pkg github.com/hmdsefi/faultline/kernel/fault, func ReadSchedule(io.Reader) (Sch
 pkg github.com/hmdsefi/faultline/kernel/fault, func Script(...Event) Planner
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Applied() Schedule
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Inject(Event)
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Load(Schedule)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) NewPlanContext(Planner, []*kernel.Node, Roles, kernel.Time) *PlanContext
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Replay(Schedule) error
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Replaying() bool
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) Name() string
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) RecoverAt() kernel.Time
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) Start(*PlanContext)
