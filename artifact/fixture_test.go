@@ -1,6 +1,10 @@
 package artifact
 
-import "github.com/hmdsefi/faultline/kernel"
+import (
+	"encoding/json"
+
+	"github.com/hmdsefi/faultline/kernel"
+)
 
 // fixtureTraceText is the trace.jsonl example of ART §5.4, byte for byte.
 const fixtureTraceText = `{"faultline_trace":1,"faultline_version":"(devel)","go_version":"go1.26.0","package":"example.com/toy","test":"TestToy","subtest":"TestToy/seed=0x0000000000000001","seed":"0x0000000000000001","trace_hash":"0x00000000000000aa","records":12,"dropped":0,"nodes":[{"id":1,"name":"n1","tags":["server"]},{"id":2,"name":"n2","tags":["server"]}]}
@@ -64,5 +68,52 @@ func fixtureTrace() *Trace {
 			Nodes:            fixtureNodes(),
 		},
 		Records: fixtureRecords(),
+	}
+}
+
+// fixtureReport returns the fixture report of ART §10. Fields the spec leaves open are filled
+// with values consistent with the fixture trace.
+func fixtureReport() Report {
+	return Report{
+		Version:    1,
+		Status:     "fail",
+		Package:    "example.com/toy",
+		Test:       "TestToy",
+		Subtest:    "TestToy/seed=0x0000000000000001",
+		Seed:       "0x0000000000000001",
+		SeedSource: "env",
+		Failure: &Failure{
+			Kind:      "invariant",
+			Check:     "no pong",
+			Signature: "invariant:no pong",
+			Headline:  `invariant "no pong" violated at t=0.003000000s on n2 (event 4)`,
+			Message:   "got ping",
+			AtNS:      3000000,
+			At:        "0.003000000s",
+			Node:      "n2",
+			NodeID:    2,
+			Event:     4,
+			RecordSeq: 12,
+		},
+		Replay: Replay{
+			Command:    "FAULTLINE_SEED=0x0000000000000001 go test -run '^TestToy$' .",
+			Env:        map[string]string{"FAULTLINE_SEED": "0x0000000000000001"},
+			Run:        "^TestToy$",
+			PackageArg: ".",
+			Dir:        "/src/toy",
+			PackageDir: "/src/toy",
+		},
+		Versions: Versions{Faultline: "(devel)", Go: "go1.26.0", GOOS: "linux", GOARCH: "amd64"},
+		Options: RunOptions{
+			Seeds: 1, DurationNS: 1000000000, Duration: "1s", MaxEvents: 10000000, Mode: "event", Trace: "hash",
+			Net:  json.RawMessage(`{"Default":{"Latency":1000000}}`),
+			Disk: json.RawMessage(`{}`),
+		},
+		OptionsHash: "0x0000000000000001",
+		Run: RunInfo{
+			TraceHash: "0x00000000000000aa", Events: 4, Records: 12, EndNS: 3000000, End: "0.003000000s",
+			Stop: "failed", Planners: []string{}, Attempts: 2,
+		},
+		Nodes: fixtureNodes(),
 	}
 }
