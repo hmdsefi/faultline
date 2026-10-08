@@ -83,17 +83,21 @@ test("header, title row and side panels of a failing run (ART-079 item 1)", () =
 });
 
 test("kind chips filter records; scheduler events start hidden (ART-079 item 4)", () => {
-  const { root } = mount(richData());
+  const { root, canvas } = mount(richData());
   const chips = byClass(byClass(root, "fl-kinds")[0], "fl-chip");
   assert.deepEqual(texts(chips), ["check1", "kernel5", "net2", "scheduler events4"]);
   assert.deepEqual(chips.map((c) => c.getAttribute("aria-pressed")), ["true", "true", "true", "false"]);
   const shown = byClass(root, "fl-shown")[0];
+  const sliceEdges = () => canvas.context.ops.filter((o) => o.op === "stroke" && o.dash.join() === "3,2").at(-1).path.length / 2;
   assert.equal(shown.textContent, "8 of 12 shown");
+  assert.equal(sliceEdges(), 8, "slice edges bridge the hidden scheduler events (ART-079 item 10)");
   chips[2].click();
   assert.equal(chips[2].getAttribute("aria-pressed"), "false");
   assert.equal(shown.textContent, "6 of 12 shown");
+  assert.equal(sliceEdges(), 6);
   chips[3].click();
   assert.equal(shown.textContent, "10 of 12 shown");
+  assert.equal(sliceEdges(), 10);
   assert.deepEqual(texts(byTag(byClass(root, "fl-legend")[0], "li")), ["failure", "boot", "scheduler event", "other"]);
 });
 

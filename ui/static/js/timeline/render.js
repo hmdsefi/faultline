@@ -19,6 +19,7 @@ export const MAX_SPAN_FACTOR = 1.2;
 export const PAN_MARGIN = 0.1;
 export const FIT_PAD = 0.02;
 export const SLICE_DIM = 0.3;
+export const BRIDGE_MAX = 1000;
 
 // PALETTE names the theme.css tokens (--fl-<name>) that draw reads; ui/theme_test.go checks that
 // both themes define each one.
@@ -406,6 +407,78 @@ export function sliceEdges(model) {
   return edges;
 }
 
+// shownEdges returns the slice edges to draw under filters (ART-079 items 4 and 10), each from and
+// to a shown record. An edge between shown records stays. A shown member b also gets an edge from
+// each shown member that reaches it through hidden members only, but of b's sources in one run
+// only the latest: a run is a node incarnation's members linked by program-order edges, so an
+// earlier one reaches b through the later one. Each global record is a run of its own. With more
+// than BRIDGE_MAX members the work is not bounded enough for ART-072, so edges with a hidden end
+// are only dropped. The view calls it when the filters change, not on every draw. edges come in
+// record order, so a hidden member's sources are complete before an edge leaves it.
+export function shownEdges(model, edges, filters) {
+  const shown = (seq) => isVisible(model.records[model.bySeq.get(seq)], filters);
+  if (model.slice.size > BRIDGE_MAX) {
+    return edges.filter((e) => shown(e.from) && shown(e.to));
+  }
+  const run = new Map();
+  const last = new Map();
+  for (const r of model.records) {
+    const key = r.node + "#" + r.inc;
+    const po = r.node !== 0 ? last.get(key) : undefined;
+    if (r.node !== 0) {
+      last.set(key, r.seq);
+    }
+    if (model.slice.has(r.seq)) {
+      run.set(r.seq, po !== undefined && run.has(po) ? run.get(po) : r.seq);
+    }
+  }
+  // sources maps a member to the latest source of each run (run -> seq); direct holds the shown
+  // members a shown member has an edge from.
+  const sources = new Map();
+  const direct = new Map();
+  const add = (to, seq) => {
+    if (!sources.has(to)) {
+      sources.set(to, new Map());
+    }
+    const latest = sources.get(to);
+    const k = run.get(seq);
+    if (!latest.has(k) || latest.get(k) < seq) {
+      latest.set(k, seq);
+    }
+  };
+  for (const e of edges) {
+    if (shown(e.from)) {
+      add(e.to, e.from);
+      if (shown(e.to)) {
+        if (!direct.has(e.to)) {
+          direct.set(e.to, new Set());
+        }
+        direct.get(e.to).add(e.from);
+      }
+    } else if (sources.has(e.from)) {
+      for (const seq of sources.get(e.from).values()) {
+        add(e.to, seq);
+      }
+    }
+  }
+  const out = [];
+  for (const [to, latest] of sources) {
+    if (!shown(to)) {
+      continue;
+    }
+    const own = direct.get(to) || new Set();
+    for (const from of own) {
+      out.push({ from, to });
+    }
+    for (const from of latest.values()) {
+      if (!own.has(from)) {
+        out.push({ from, to });
+      }
+    }
+  }
+  return out;
+}
+
 // ticks returns the axis ticks [{x, label}], at least TICK_MIN_PX apart: seconds with the fewest
 // decimals, or "#<seq>" of the record at each index in sequence mode (ART-079 item 3, UI-087).
 export function ticks(model, view) {
@@ -722,8 +795,9 @@ function paintArrows(ctx, g) {
   }
 }
 
-// paintSliceEdges draws the happens-before edges of the slice (ART-079 item 10); an edge along
-// one lane runs as a rail above it, so it does not cover the glyphs.
+// paintSliceEdges draws the slice edges of state.edges (shownEdges, ART-079 item 10), skipping any
+// with a hidden end; an edge along one lane runs as a rail above it, so it does not cover the
+// glyphs.
 function paintSliceEdges(ctx, g) {
   if (!g.dim) {
     return;
@@ -734,6 +808,9 @@ function paintSliceEdges(ctx, g) {
   ctx.setLineDash([3, 2]);
   ctx.beginPath();
   for (const e of g.state.edges) {
+    if (!g.shown(e.from) || !g.shown(e.to)) {
+      continue;
+    }
     const a = g.pos(e.from);
     const b = g.pos(e.to);
     if (offscreen(g, a, b)) {
