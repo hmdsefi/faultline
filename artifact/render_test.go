@@ -320,12 +320,13 @@ func TestRenderSliceError(t *testing.T) {
 		"artifact: render "+dir+": write timeline.html: artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000")
 }
 
-// ART-090: Render removes the temporary files an interrupted Render left, by its three prefixes
-// only, and only once the inputs are read: a Render that fails on schedule.json removes nothing.
+// ART-090: Render removes the temporary files an interrupted Render left, os.CreateTemp's names for
+// its three prefixes only (the prefix, then digits), and only once the inputs are read: a Render
+// that fails on schedule.json removes nothing.
 func TestRenderRemovesStaleTemps(t *testing.T) {
 	dir := renderWritten(t, fixtureArtifact())
 	stale := []string{".timeline.txt.tmp-1", ".hb.mmd.tmp-2", ".timeline.html.tmp-3"}
-	keep := []string{".report.json.tmp-4", "timeline.txt.tmp-5", ".timeline.txt.tmp", ".hb.mmd-tmp-6"}
+	keep := []string{".report.json.tmp-4", "timeline.txt.tmp-5", ".timeline.txt.tmp", ".hb.mmd-tmp-6", ".timeline.txt.tmp-owned-by-someone", ".hb.mmd.tmp-7x", ".timeline.html.tmp-"}
 	for _, name := range slices.Concat(stale, keep) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
 			t.Fatal(err)
@@ -369,17 +370,24 @@ func TestRenderTempInDir(t *testing.T) {
 	}
 }
 
-// ART-090: a rename that fails leaves no temporary file.
+// ART-090: a directory in the place of a target fails Render before the first rename, so no file
+// changes and no temporary file is left.
 func TestRenderRenameFails(t *testing.T) {
 	dir := renderWritten(t, fixtureArtifact())
+	if err := os.WriteFile(filepath.Join(dir, FileTimelineText), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(dir, FileHB)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, FileHB, "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Render(dir, RenderOptions{}); err == nil {
-		t.Fatal("Render over a non-empty directory: no error")
+	if _, err := Render(dir, RenderOptions{}); err == nil || err.Error() != "artifact: render "+dir+": hb.mmd is a directory" {
+		t.Fatalf("Render over a directory = %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, FileTimelineText)); err != nil || string(b) != "old" {
+		t.Errorf("timeline.txt changed: %q, %v", b, err)
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".*.tmp-*")); len(left) != 0 {
 		t.Errorf("temporary files left: %v", left)

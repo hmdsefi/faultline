@@ -94,11 +94,12 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 		{FileTimelineHTML, func(w io.Writer) error { return WriteTimelineHTML(w, rep, tr, sched, s, maxRecords) }},
 	}
 	// The inputs are read, so dir is an artifact: remove the temporary files an interrupted Render
-	// left. Their prefixes are Render's own.
+	// left. Their names are os.CreateTemp's for Render's own prefixes: the prefix, then digits.
 	if entries, err := os.ReadDir(abs); err == nil {
 		for _, e := range entries {
 			for _, o := range outputs {
-				if strings.HasPrefix(e.Name(), tempPrefix(o.name)) {
+				rest, ok := strings.CutPrefix(e.Name(), tempPrefix(o.name))
+				if ok && rest != "" && strings.Trim(rest, "0123456789") == "" {
 					_ = os.Remove(filepath.Join(abs, e.Name()))
 				}
 			}
@@ -120,6 +121,13 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 			return nil, fail("write %s: %w", o.name, err)
 		}
 		tmps = append(tmps, tmp)
+	}
+	// A directory in a target's place would fail its rename after earlier ones succeeded, so it
+	// fails Render before the first rename.
+	for _, o := range outputs {
+		if fi, err := os.Lstat(filepath.Join(abs, o.name)); err == nil && fi.IsDir() {
+			return nil, fail("%s is a directory", o.name)
+		}
 	}
 	paths := make([]string, 0, len(outputs))
 	for i, o := range outputs {

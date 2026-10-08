@@ -162,6 +162,11 @@ func Write(dir string, a *Artifact) error {
 		}
 		sched = b.Bytes()
 	}
+	// dir itself is checked before anything is written (ART-012). It is never followed: a
+	// symbolic link is refused, whatever it points to.
+	if _, err := checkTarget(abs); err != nil {
+		return err
+	}
 	extras := slices.Sorted(maps.Keys(a.Extra))
 	a.Trace.Header = headerFor(a.Trace)
 	a.Report = rep
@@ -260,10 +265,12 @@ func Write(dir string, a *Artifact) error {
 	// The old directory is set aside, not deleted, until the new one is in place: a kill or an
 	// error never leaves dir half deleted.
 	old := ""
-	if _, err := os.Lstat(abs); err == nil {
-		if !replaceable(abs) {
-			return fmt.Errorf("artifact: refusing to replace %s: not a faultline artifact directory (no report.json)", abs)
-		}
+	// Checked again: the files took a while, and dir may have changed meanwhile.
+	exists, err := checkTarget(abs)
+	if err != nil {
+		return err
+	}
+	if exists {
 		old = tmp + ".old"
 		if err := os.Rename(abs, old); err != nil {
 			return fmt.Errorf("artifact: %w", err)
@@ -291,6 +298,23 @@ func leftover(name, base string) bool {
 	}
 	rest = strings.TrimSuffix(rest, ".old")
 	return rest != "" && strings.Trim(rest, "0123456789") == ""
+}
+
+// checkTarget reports whether dir exists, and returns an error unless Write may replace it
+// (ART-012): it is not followed, so a symbolic link is refused.
+func checkTarget(abs string) (bool, error) {
+	fi, err := os.Lstat(abs)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("artifact: %w", err)
+	case fi.Mode()&fs.ModeSymlink != 0:
+		return false, fmt.Errorf("artifact: refusing to replace %s: it is a symbolic link", abs)
+	case !replaceable(abs):
+		return false, fmt.Errorf("artifact: refusing to replace %s: not a faultline artifact directory (no report.json)", abs)
+	}
+	return true, nil
 }
 
 // replaceable reports whether an existing dir may be replaced (ART-012): it holds report.json, or

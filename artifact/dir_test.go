@@ -2,6 +2,8 @@ package artifact
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -663,6 +665,86 @@ func TestWriteOldNotDeletable(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(root, ".a.tmp-*.old", "minimized")); len(left) != 1 {
 		t.Fatalf("set-aside copies: %v, want the one a later Write removes", left)
+	}
+}
+
+// ART-012: a dir Write may not replace is refused before anything is written: no leftover of an
+// earlier Write is removed and a is unchanged.
+func TestWriteRefusesFirst(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "a")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(root, ".a.tmp-5")
+	if err := os.Mkdir(leftover, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := fixtureArtifact()
+	if err := Write(dir, a); err == nil || err.Error() != "artifact: refusing to replace "+dir+": not a faultline artifact directory (no report.json)" {
+		t.Fatalf("Write(empty dir) = %v", err)
+	}
+	if _, err := os.Stat(leftover); err != nil {
+		t.Fatal("the refused Write removed a leftover")
+	}
+	if a.Report.Dir != "" || a.Report.Files != nil {
+		t.Fatalf("the refused Write changed a: %q %v", a.Report.Dir, a.Report.Files)
+	}
+}
+
+// ART-012: a symbolic link at dir is refused before anything is written, whatever it points to,
+// and is not followed: the link and its target stay as they were.
+func TestWriteSymlinkDir(t *testing.T) {
+	root := t.TempDir()
+	art := filepath.Join(root, "art")
+	if err := Write(art, fixtureArtifact()); err != nil {
+		t.Fatal(err)
+	}
+	before := readAll(t, art)
+	other := filepath.Join(root, "other")
+	if err := os.Mkdir(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{art, other} {
+		link := filepath.Join(root, "link-"+filepath.Base(target))
+		if err := os.Symlink(target, link); err != nil {
+			t.Skip(err)
+		}
+		if err := Write(link, fixtureArtifact()); err == nil || err.Error() != "artifact: refusing to replace "+link+": it is a symbolic link" {
+			t.Errorf("Write(link to %s) = %v", filepath.Base(target), err)
+		}
+		if fi, err := os.Lstat(link); err != nil || fi.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("%s is no longer a symbolic link: %v", link, err)
+		}
+	}
+	if after := readAll(t, art); !reflect.DeepEqual(after, before) {
+		t.Error("the linked artifact changed")
+	}
+	if entries, err := os.ReadDir(other); err != nil || len(entries) != 0 {
+		t.Errorf("the linked directory changed: %v, %v", entries, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(root, ".*")); len(left) != 0 {
+		t.Errorf("hidden siblings left: %v", left)
+	}
+}
+
+// ART-012: an os.Lstat error for dir other than "does not exist" is returned before anything is
+// written. A parent without search permission produces one, where permissions are enforced.
+func TestWriteLstatError(t *testing.T) {
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	dir := filepath.Join(locked, "a")
+	if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrPermission) {
+		t.Skip("directory permissions are not enforced here (root, Windows or a FAT file system)")
+	}
+	if err := Write(dir, fixtureArtifact()); err == nil || !strings.HasPrefix(err.Error(), "artifact: lstat "+dir+": ") || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("Write under a parent without search permission = %v", err)
 	}
 }
 
