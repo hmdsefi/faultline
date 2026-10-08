@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { parseTrace, buildModel, firstAtOrAfter, listFaults } from "../static/js/timeline/model.js";
 import { formatTime, shortTime, tickStep, tickDecimals, tickLabel, formatCount, counted, laneLabel, recordNode, windowBanner, nextTheme } from "../static/js/timeline/format.js";
 import { FIXTURE_TRACE, fixtureData, faultData, edgeData, S } from "./fixtures.mjs";
-import { AXIS_HEIGHT, GUTTER, MIN_SPAN_NS, PALETTE, GLYPHS, DRAW_ORDER, category, glyphD, gutterWidth, laneHeight, laneY, toX, timeX, fitView, zoomView, panView, failureView, hitTest, sliceEdges, ticks, draw } from "../static/js/timeline/render.js";
+import { AXIS_HEIGHT, GUTTER, MIN_SPAN_NS, PALETTE, GLYPHS, DRAW_ORDER, BRIDGE_MAX, category, glyphD, gutterWidth, laneHeight, laneY, toX, timeX, fitView, zoomView, panView, failureView, hitTest, sliceEdges, shownEdges, ticks, draw } from "../static/js/timeline/render.js";
 import { RecordingContext } from "./fake-dom.mjs";
 
 test("parseTrace defaults missing fields", () => {
@@ -454,4 +454,101 @@ test("a slice member missing from the trace gets no edge and does not stop the d
   assert.deepEqual(edges.filter((e) => e.from === 8 || e.to === 8), []);
   assert.ok(edges.some((e) => e.from === 5 && e.to === 9), "record 9's program order skips the missing record");
   assert.doesNotThrow(() => paint(m, {}));
+});
+
+// sliceLines draws model m in sequence mode, where every record has its own x, under filters with
+// edges (by default the shown edges, as the view passes them), and returns the slice edges painted
+// as [from, to] seqs.
+function sliceLines(m, filters, edges = shownEdges(m, sliceEdges(m), filters)) {
+  const view = viewOf(m, "seq", 1136, 400);
+  const ctx = new RecordingContext();
+  const colors = Object.fromEntries(PALETTE.map((n) => [n, n]));
+  draw(ctx, m, view, { filters, selected: -1, sliceOn: true, edges, colors, fonts: { sans: "sans", mono: "mono" }, failureNode: 0, window: null });
+  const seqAt = new Map(m.records.map((r, i) => [toX(view, i), r.seq]));
+  const path = ctx.ops.filter((o) => o.op === "stroke" && o.stroke === "select" && o.dash.join() === "3,2").flatMap((o) => o.path);
+  const lines = [];
+  for (let k = 0; k < path.length; k += 2) {
+    lines.push([seqAt.get(path[k][1]), seqAt.get(path[k + 1][1])]);
+  }
+  return lines;
+}
+
+// slicedRun is a failing run on n1 and n2 of records [seq, node, inc, kind, cause], one per ms, with
+// a causal slice of the last: the members seqs, or every record.
+function slicedRun(rows, members) {
+  const lines = [JSON.stringify({ faultline_trace: 1, records: rows.length, dropped: 0, nodes: [{ id: 1, name: "n1", tags: [] }, { id: 2, name: "n2", tags: [] }] })];
+  for (const [seq, node, inc, kind, cause] of rows) {
+    lines.push(JSON.stringify({ seq, at: seq * 1000000, node, inc, kind, cause, text: kind }));
+  }
+  const last = rows[rows.length - 1][0];
+  return buildModel({ report: { status: "fail", failure: { record_seq: last }, run: { end_ns: last * 1000000 } }, trace: lines.join("\n") + "\n", slice: { root: last, seqs: members || rows.map((r) => r[0]), cap: 200, truncated: members !== undefined }, window: null, total: rows.length });
+}
+
+test("slice edges join shown records only and bridge hidden members (ART-079 items 4 and 10)", () => {
+  const m = buildModel(fixtureData());
+  const filters = (showEvents, hidden) => ({ showEvents, hiddenNamespaces: new Set(hidden) });
+  assert.deepEqual(sliceLines(m, filters(false, [])), [[1, 2], [2, 3], [2, 5], [3, 7], [5, 9], [9, 11], [7, 11], [11, 12]], "the kernel.event records 4, 6, 8 and 10 start hidden");
+  assert.deepEqual(sliceLines(m, filters(true, [])), sliceEdges(m).map((e) => [e.from, e.to]), "with scheduler events shown, every edge is drawn");
+  assert.deepEqual(sliceLines(m, filters(false, ["net"])), [[1, 2], [2, 3], [2, 5], [3, 7], [5, 12], [7, 12]], "a bridge crosses several hidden members");
+  // Of the shown records that reach a member through hidden events, the latest of each incarnation
+  // stays, and every global one. Record 8 is reached from 6 and 1 (global), 4 and 2 (n1#1); 4
+  // follows 2, so 2 → 8 is left out.
+  const E = "kernel.event";
+  assert.deepEqual(sliceLines(slicedRun([[1, 0, 0, "app.plan", 0], [2, 1, 1, "app.step", 1], [3, 1, 1, E, 1], [4, 1, 1, "app.step", 3], [5, 1, 1, E, 3], [6, 0, 0, "app.plan", 1], [7, 1, 1, E, 6], [8, 1, 1, "app.step", 7]]), filters(false, [])), [[1, 2], [1, 4], [2, 4], [1, 6], [6, 8], [1, 8], [4, 8]]);
+  // Event 5 is reached from n2's record 2 through its cause and from the earlier 1 through its
+  // program-order predecessor; the latest, 2, stays whatever the order.
+  assert.deepEqual(sliceLines(slicedRun([[1, 2, 1, "app.step", 0], [2, 2, 1, "app.step", 0], [3, 1, 1, E, 1], [4, 2, 1, E, 0], [5, 1, 1, E, 4], [6, 1, 1, "app.step", 5]]), filters(false, [])), [[1, 2], [2, 6]]);
+  // n1's incarnations 1 and 2 are not in program order, so both 1 → 5 and 3 → 5 stay.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, E, 1], [3, 1, 2, "app.step", 0], [4, 1, 2, E, 2], [5, 1, 2, "app.step", 4]]), filters(false, [])), [[1, 5], [3, 5]]);
+  // The trim is per target: 5's hidden predecessors 3 and 4 bring 1 and 2 of one run; only 2 stays.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 2, 1, E, 1], [4, 2, 2, E, 2], [5, 2, 2, "app.step", 3]]), filters(false, [])), [[1, 2], [2, 5]]);
+  // Record 2 is not a member, so 1 and 3 are in different runs and both reach 5 through event 4.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 1, 1, "app.step", 0], [4, 1, 1, E, 1], [5, 2, 1, "app.step", 4]], [5, 4, 3, 1]), filters(false, [])), [[1, 5], [3, 5]]);
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, E, 0], [2, 1, 1, "app.step", 1]]), filters(false, [])), [], "a hidden member without predecessors draws nothing");
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 2, "app.step", 0], [2, 2, 1, "app.step", 0], [3, 2, 1, E, 1], [4, 2, 1, "app.step", 3]]), filters(false, [])), [[1, 4], [2, 4]], "n1#2 and n2#1 stay apart");
+  // Edges between shown records stay as they are, two from one run included.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 1, 1, "app.step", 1]]), filters(false, [])), [[1, 2], [1, 3], [2, 3]]);
+  assert.deepEqual(shownEdges(m, sliceEdges(m), filters(false, ["net"])).map((e) => [e.from, e.to]), [[1, 2], [2, 3], [2, 5], [3, 7], [5, 12], [7, 12]], "shownEdges returns only edges between shown records");
+  // draw itself drops an edge with a hidden end, whatever edges it is given.
+  assert.deepEqual(sliceLines(m, filters(false, []), sliceEdges(m)), [[1, 2], [2, 3], [11, 12]]);
+});
+
+// mapOps counts the Map and Set operations fn performs.
+function mapOps(fn) {
+  const saved = [[Map.prototype, "get"], [Map.prototype, "set"], [Map.prototype, "has"], [Set.prototype, "add"], [Set.prototype, "has"]].map(([proto, name]) => [proto, name, proto[name]]);
+  let n = 0;
+  for (const [proto, name, f] of saved) {
+    proto[name] = function (...args) {
+      n++;
+      return f.apply(this, args);
+    };
+  }
+  try {
+    fn();
+  } finally {
+    for (const [proto, name, f] of saved) {
+      proto[name] = f;
+    }
+  }
+  return n;
+}
+
+test("bridging stops above BRIDGE_MAX members, and its work at the cap stays bounded (ART-072, ART-079 item 10)", () => {
+  const E = "kernel.event";
+  const none = { showEvents: false, hiddenNamespaces: new Set() };
+  // n1: a shown record, a hidden event and its shown effect, then global records up to n members.
+  const chain = (n) => slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, E, 1], [3, 1, 1, "app.step", 2], ...Array.from({ length: n - 3 }, (_, i) => [i + 4, 0, 0, "app.plan", 0])]);
+  const shown = (m) => shownEdges(m, sliceEdges(m), none).map((e) => [e.from, e.to]);
+  assert.deepEqual([shown(chain(BRIDGE_MAX)), shown(chain(BRIDGE_MAX + 1))], [[[1, 3]], []]);
+  // The worst shapes: k global records each cause a hidden event of one chain on n1, which ends in
+  // a shown root (fan), or each event causes a shown record on n2 (spray, k(k+1)/2 bridged edges).
+  // At 1,000 members each takes about 8 ms in node, and draws its edges in about 10 ms.
+  const fan = (k) => [...Array.from({ length: k }, (_, i) => [[2 * i + 1, 0, 0, "app.plan", 0], [2 * i + 2, 1, 1, E, 2 * i + 1]]).flat(), [2 * k + 1, 1, 1, "app.step", 2 * k]];
+  const spray = (k) => Array.from({ length: k }, (_, i) => [[3 * i + 1, 0, 0, "app.plan", 0], [3 * i + 2, 1, 1, E, 3 * i + 1], [3 * i + 3, 2, 1, "app.step", 3 * i + 2]]).flat();
+  for (const rows of [fan(Math.floor((BRIDGE_MAX - 1) / 2)), spray(Math.floor(BRIDGE_MAX / 3))]) {
+    const m = slicedRun(rows);
+    const edges = sliceEdges(m);
+    const ops = mapOps(() => shownEdges(m, edges, none));
+    assert.ok(ops <= 700000, ops + " Map and Set operations");
+  }
 });

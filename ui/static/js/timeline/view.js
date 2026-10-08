@@ -1,6 +1,6 @@
 import { buildModel } from "./model.js";
 import { formatCount, counted, shortTime } from "./format.js";
-import { AXIS_HEIGHT, GUTTER, PALETTE, GLYPHS, namespace, isVisible, category, axisValue, axisExtent, timeValue, toX, laneHeight, gutterWidth, laneTop, laneIndex, fitView, zoomView, panView, centerOn, failureView, hitTest, sliceEdges, draw } from "./render.js";
+import { AXIS_HEIGHT, GUTTER, PALETTE, GLYPHS, namespace, isVisible, category, axisValue, axisExtent, timeValue, toX, laneHeight, gutterWidth, laneTop, laneIndex, fitView, zoomView, panView, centerOn, failureView, hitTest, sliceEdges, shownEdges, draw } from "./render.js";
 import { h, icon, glyphIcon } from "./dom.js";
 import { renderInspector, renderNarration, selectionText } from "./inspect.js";
 import { themeButton, headerBar, titleRow, banner, label, panel, failurePanel, faultsPanel, reportCard, legendCard, errorState, emptyState } from "./panels.js";
@@ -58,16 +58,19 @@ export function mountTimeline(root, data, host) {
   const hasFailure = ok && model.root !== 0 && model.bySeq.has(model.root);
   // Slice seqs that are not records are ignored (ART-079 item 10): only edited data has them.
   const members = [...model.slice].filter((seq) => model.bySeq.has(seq)).length;
+  // allEdges are the slice's edges; state.edges those drawn under the filters (ART-079 item 10).
+  const allEdges = sliceEdges(model);
   const state = {
     filters: { showEvents: false, hiddenNamespaces: new Set() },
     selected: -1,
     sliceOn: members > 0,
-    edges: sliceEdges(model),
+    edges: [],
     colors: {},
     fonts: { sans: "sans-serif", mono: "monospace" },
     failureNode: rep.failure && rep.failure.node_id ? rep.failure.node_id : 0,
     window: data.window || null,
   };
+  state.edges = shownEdges(model, allEdges, state.filters);
   let view = { mode: "time", from: 0, to: 1, width: 800, height: 400, scrollY: 0, laneH: 40, gutter: GUTTER };
 
   // Timeline card: axis mode, causal slice, canvas and legend.
@@ -160,6 +163,7 @@ export function mountTimeline(root, data, host) {
         const now = b.getAttribute("aria-pressed") !== "true";
         b.setAttribute("aria-pressed", String(now));
         toggle(now);
+        state.edges = shownEdges(model, allEdges, state.filters);
         refreshKinds();
         redraw();
       });
