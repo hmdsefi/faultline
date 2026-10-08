@@ -25,7 +25,7 @@ type PlanContext struct {
 	Roles   Roles
 	Until   kernel.Time // faults may start before Until; the recovery window follows
 
-	Disks *simdisk.Disks // read-only use: Lookup(n), then Stat, ReadDir, Capacity; nil if unavailable
+	Disks *simdisk.Disks // read-only use: Lookup(n), then Stat, ReadDir, Capacity, DurableSize; nil if unavailable
 }
 
 // Planner decides faults during a run.
@@ -94,12 +94,13 @@ func resolveRole(ctx *PlanContext, name, who string) []*kernel.Node {
 	return out
 }
 
-// between is uniform in [lo, hi] with exactly one Int64N draw (FLT-080).
-func between(r *rand.Rand, lo, hi time.Duration) time.Duration { //nolint:unused // the Random planner that comes next uses it
+// between is uniform in [lo, hi] with exactly one Int64N draw (FLT-080). It needs lo <= hi and
+// hi-lo < math.MaxInt64, which MaxRuleDuration guarantees for every duration Random passes.
+func between(r *rand.Rand, lo, hi time.Duration) time.Duration {
 	return lo + time.Duration(r.Int64N(int64(hi-lo)+1))
 }
 
-// pick draws exactly one IntN (FLT-080).
+// pick draws exactly one IntN (FLT-080). xs must not be empty.
 func pick(r *rand.Rand, xs []*kernel.Node) *kernel.Node { return xs[r.IntN(len(xs))] }
 
 // names joins node names with ",".

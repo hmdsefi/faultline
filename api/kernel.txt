@@ -190,6 +190,9 @@ pkg github.com/hmdsefi/faultline/kernel/fault, func Script(...Event) Planner
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Applied() Schedule
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) Inject(Event)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (*Injector) NewPlanContext(Planner, []*kernel.Node, Roles, kernel.Time) *PlanContext
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) Name() string
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) RecoverAt() kernel.Time
+pkg github.com/hmdsefi/faultline/kernel/fault, method (*Random) Start(*PlanContext)
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Durable() bool
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) String() string
 pkg github.com/hmdsefi/faultline/kernel/fault, method (Event) Validate() error
@@ -223,12 +226,28 @@ pkg github.com/hmdsefi/faultline/kernel/fault, type PlanContext struct, Until ke
 pkg github.com/hmdsefi/faultline/kernel/fault, type Planner interface { Name, Start }
 pkg github.com/hmdsefi/faultline/kernel/fault, type Planner interface, Name() string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Planner interface, Start(*PlanContext)
+pkg github.com/hmdsefi/faultline/kernel/fault, type Random struct
+pkg github.com/hmdsefi/faultline/kernel/fault, type Random struct, MaxDown int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Random struct, Quiet time.Duration
+pkg github.com/hmdsefi/faultline/kernel/fault, type Random struct, Rules []Rule
 pkg github.com/hmdsefi/faultline/kernel/fault, type Roles map[string]func() []kernel.NodeID
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Every time.Duration
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Kind Kind
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Link *simnet.Link
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Magnitude int64
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, MaxFor time.Duration
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, MinFor time.Duration
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Path string
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Shape Shape
+pkg github.com/hmdsefi/faultline/kernel/fault, type Rule struct, Target string
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, End kernel.Time
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Events []Event
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Recovery kernel.Time
 pkg github.com/hmdsefi/faultline/kernel/fault, type Schedule struct, Version int
+pkg github.com/hmdsefi/faultline/kernel/fault, type Shape interface { Name }
+pkg github.com/hmdsefi/faultline/kernel/fault, type Shape interface, Name() string
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny = 0
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashAny CrashModel
 pkg github.com/hmdsefi/faultline/kernel/simdisk, const CrashKeepPrefix = 2
@@ -280,6 +299,7 @@ pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*File) WriteAt([]byte, 
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Capacity() int64
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Corrupt(string, int64, int) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Create(string) (*File, error)
+pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) DurableSize(string) (int64, error)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) FailSyncs(int)
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) Mkdir(string) error
 pkg github.com/hmdsefi/faultline/kernel/simdisk, method (*Volume) MkdirAll(string) error

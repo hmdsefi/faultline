@@ -26,7 +26,7 @@ const (
 	KindClockDrift   Kind = "clock-drift"   // set Node's drift to N ppm
 	KindSyncFail     Kind = "sync-fail"     // the next N Syncs on Node's volume fail; 0 clears
 	KindDiskCapacity Kind = "disk-capacity" // set Node's volume capacity to N bytes; 0 = unlimited
-	KindCorrupt      Kind = "corrupt"       // damage Len bytes of Path at Off on Node's volume
+	KindCorrupt      Kind = "corrupt"       // damage up to Len synced bytes of Path at Off on Node's volume
 )
 
 // Kinds returns every kind in the declaration order above.
