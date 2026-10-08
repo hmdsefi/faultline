@@ -4,7 +4,11 @@ package ui
 
 import (
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
+	"io"
 	"io/fs"
 	"path"
 	"regexp"
@@ -360,4 +364,68 @@ func exportName(line string) (name, reason string) {
 		}
 	}
 	return "", "unsupported export; use export function, export async function, export const or export class"
+}
+
+// placeholders of the timeline template, each of which must appear exactly once (ART-071).
+var placeholders = []string{"{{TITLE}}", "{{CSS}}", "{{JS}}", "{{DATA}}"}
+
+// TimelineHTML writes the self-contained run view page with title and data, the JSON of a
+// timeline data object (ART-071).
+func TimelineHTML(w io.Writer, title string, data []byte) error {
+	return timelineHTML(FS, w, title, data)
+}
+
+// timelineHTML implements TimelineHTML over any file system holding the template, the
+// stylesheet and the modules.
+func timelineHTML(fsys fs.FS, w io.Writer, title string, data []byte) error {
+	if !json.Valid(data) {
+		return errors.New("ui: timeline data is not valid JSON")
+	}
+	tmpl, err := fs.ReadFile(fsys, TimelineTemplate)
+	if err != nil {
+		return fmt.Errorf("ui: template: %w", err)
+	}
+	for _, p := range placeholders {
+		if n := strings.Count(string(tmpl), p); n != 1 {
+			return fmt.Errorf("ui: template: placeholder %s appears %d times", p, n)
+		}
+	}
+	css, err := fs.ReadFile(fsys, ThemeCSS)
+	if err != nil {
+		return fmt.Errorf("ui: %w", err)
+	}
+	if containsFoldASCII(string(css), "</style") {
+		return errors.New(`ui: theme.css contains "</style"`)
+	}
+	js, err := bundleFS(fsys, TimelineEntry)
+	if err != nil {
+		return err
+	}
+	if containsFoldASCII(js, "</script") {
+		return errors.New(`ui: script contains "</script"`)
+	}
+	// Inside a script element, "<!--" followed by "<script" makes the parser take the next
+	// "</script>" as script text (the script data double-escaped state), so the page would lose
+	// its closing tag. The data needs no such check: every "<" in it becomes \u003c below.
+	if strings.Contains(js, "<!--") {
+		return errors.New(`ui: script contains "<!--"`)
+	}
+	safe := strings.ReplaceAll(string(data), "<", `\u003c`)
+	r := strings.NewReplacer("{{TITLE}}", html.EscapeString(title), "{{CSS}}", string(css), "{{JS}}", js, "{{DATA}}", safe)
+	_, err = io.WriteString(w, r.Replace(string(tmpl)))
+	return err
+}
+
+// containsFoldASCII reports whether s contains sub, comparing ASCII letters case-insensitively.
+func containsFoldASCII(s, sub string) bool {
+	lower := func(x string) string {
+		b := []byte(x)
+		for i, c := range b {
+			if 'A' <= c && c <= 'Z' {
+				b[i] = c + 'a' - 'A'
+			}
+		}
+		return string(b)
+	}
+	return strings.Contains(lower(s), lower(sub))
 }
