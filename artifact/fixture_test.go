@@ -117,3 +117,8 @@ func fixtureReport() Report {
 		Nodes: fixtureNodes(),
 	}
 }
+
+// fixtureArtifact returns a fresh fixture artifact.
+func fixtureArtifact() *Artifact {
+	return &Artifact{Report: fixtureReport(), Text: "--- FAIL: TestToy/seed=0x0000000000000001\n", Trace: fixtureTrace()}
+}
