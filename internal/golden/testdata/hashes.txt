@@ -22,3 +22,12 @@ register/early-ack 0x0000000000000002 0x4b738530ef535a5f idle 105
 register/early-ack 0x0000000000000003 0x188d93743243749e idle 105
 register/early-ack 0x0000000000000004 0x10cef4533c2e12ab idle 105
 register/early-ack 0x0000000000000005 0x653c820611f6b728 idle 105
+stack/journal 0x0000000000000001 0x1882a0f36e56f818 deadline 33
+stack/journal 0x0000000000000002 0xcde9f6b2f42ed232 deadline 33
+stack/journal 0x0000000000000003 0x1fa336aa99e011d7 deadline 33
+stack/register-partition 0x0000000000000001 0xa50546f01951b785 deadline 32
+stack/register-partition 0x0000000000000002 0xb16789de68abeafe deadline 30
+stack/register-partition 0x0000000000000003 0xd70c8ede834fb48e deadline 33
+stack/register-simnet 0x0000000000000001 0xb5fe7e9228f6be1e idle 105
+stack/register-simnet 0x0000000000000002 0xa68fb503aacd6e10 idle 105
+stack/register-simnet 0x0000000000000003 0x42da13cbd4c867a8 idle 105

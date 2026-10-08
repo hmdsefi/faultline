@@ -17,7 +17,7 @@ type scenario struct {
 	run   RunFunc
 }
 
-// scenarios is the fixed, ordered list of DET-051.
+// scenarios is the fixed, ordered list of DET-051; stack_test.go appends DET-053's in init.
 var scenarios = []scenario{
 	{"pingpong/fifo", []uint64{1}, func(seed uint64, trace kernel.TraceConfig) (*kernel.Sim, kernel.StopReason) {
 		s := kernel.New(kernel.Config{Seed: seed, Trace: trace, TieBreak: kernel.TieBreakFIFO})
