@@ -308,11 +308,13 @@
 .fl-run .fl-replay .fl-chip { height: 28px; }
 .fl-run .fl-banner { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 10px 14px; border-left: 3px solid var(--fl-select); }
 
-/* Stage: JS sets --fl-stage-h so it fills the viewport below the title. */
+/* Body: the stage (timeline card and control panel) fills the viewport below the title, as JS sets
+   --fl-stage-h; the cards sit under it at its width, and the side column runs beside both. */
 .fl-run .fl-main { display: contents; }
-.fl-run .fl-stage { display: grid; grid-template: minmax(0, 1fr) auto / minmax(0, 1fr) var(--fl-side-w); gap: var(--fl-space-3); height: var(--fl-stage-h, calc(100vh - 220px)); min-height: 520px; }
-.fl-run .fl-stage:not(:has(.fl-side)) { grid-template-columns: minmax(0, 1fr); }
-.fl-run .fl-tl { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 6px; }
+.fl-run .fl-body { display: grid; grid-template: "stage side" auto "cards side" auto / minmax(0, 1fr) var(--fl-side-w); gap: var(--fl-space-3); }
+.fl-run .fl-body:not(:has(.fl-side)) { grid-template: "stage" auto "cards" auto / minmax(0, 1fr); }
+.fl-run .fl-stage { grid-area: stage; display: grid; grid-template: minmax(0, 1fr) auto / minmax(0, 1fr); gap: var(--fl-space-3); height: var(--fl-stage-h, calc(100vh - 220px)); min-height: 520px; }
+.fl-run .fl-tl { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 6px; }
 .fl-run .fl-tl-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 2px 8px; }
 .fl-run .fl-label, .fl-run .fl-kl { flex: 1; min-width: 0; margin: 0; color: var(--fl-muted); font: 600 10.5px/1.4 var(--fl-font); letter-spacing: 0.8px; text-transform: uppercase; }
 .fl-run .fl-label .fl-count { margin-left: 6px; letter-spacing: 0; text-transform: none; }
@@ -322,7 +324,7 @@
 .fl-run .fl-legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 4px 4px 2px; list-style: none; }
 .fl-run .fl-legend li { height: 22px; padding: 0 9px; color: var(--fl-muted); font: 10.5px/1 var(--fl-font); }
 .fl-run .fl-swatch { width: 18px; height: 10px; flex: none; }
-.fl-run .fl-ctl { grid-area: 2 / 1; display: grid; gap: 10px; padding: 10px 12px; }
+.fl-run .fl-ctl { display: grid; gap: 10px; padding: 10px 12px; }
 .fl-run .fl-narr { display: flex; align-items: flex-start; gap: 10px; min-height: 22px; margin: 0; }
 .fl-run .fl-counter { flex: none; padding: 1px 7px; border: 1px solid var(--fl-on-line); border-radius: 6px; background: color-mix(in srgb, var(--fl-select) 10%, transparent); color: var(--fl-select); font: 600 var(--fl-text-1)/1.6 var(--fl-mono); }
 .fl-run .fl-narr > span { min-width: 0; overflow-wrap: anywhere; }
@@ -338,9 +340,10 @@
 .fl-run .fl-overview::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--fl-fg); box-shadow: 0 0 0 3px var(--fl-on-line); }
 .fl-run .fl-overview:focus-visible { outline-offset: 4px; }
 
-/* Side panels share the stage height; long ones scroll inside. */
-.fl-run .fl-side { grid-area: 1 / 2 / 3; display: grid; grid-template-rows: max-content minmax(0, max-content) minmax(0, 1fr); gap: var(--fl-space-3); height: 0; min-height: 100%; }
-.fl-run .fl-side > .fl-panel:last-child { align-self: start; max-height: 100%; }
+/* The side column is as tall as the stage and the cards; the Inspector takes what the Failure and
+   Faults panels leave, and long panels scroll inside. */
+.fl-run .fl-side { grid-area: side; display: grid; grid-template-rows: max-content minmax(0, max-content) minmax(0, 1fr); gap: var(--fl-space-3); height: 0; min-height: 100%; }
+.fl-run .fl-side > .fl-panel:last-child { max-height: 100%; }
 .fl-run .fl-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 10px 12px 12px; }
 .fl-run .fl-panel > .fl-label { flex: none; }
 /* 4 px of padding inside a scroller, given back by the margin, keeps focus rings unclipped. */
@@ -377,8 +380,8 @@
 .fl-run .fl-stats dt { color: var(--fl-muted); }
 .fl-run .fl-stats dd { margin: 0; font-family: var(--fl-mono); text-align: right; overflow-wrap: anywhere; }
 
-/* Cards below the stage. */
-.fl-run .fl-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--fl-space-3); }
+/* Cards under the stage, side by side while each gets 380 px, else one above the other. */
+.fl-run .fl-cards { grid-area: cards; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: var(--fl-space-3); }
 .fl-run .fl-cards .fl-panel { padding: 10px 12px 14px; }
 .fl-run .fl-keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: var(--fl-text-2); }
 .fl-run .fl-keys dt { display: flex; gap: 4px; }
@@ -414,13 +417,13 @@
   .fl-run .fl-tl-head { flex-wrap: wrap; }
   .fl-run .fl-head h1 { font-size: var(--fl-text-4); }
   .fl-run .fl-replay { border-radius: var(--fl-radius-2); }
+  .fl-run .fl-body { display: flex; flex-direction: column; gap: 10px; }
   .fl-run .fl-stage { display: flex; flex-direction: column; height: auto; min-height: 0; }
   .fl-run .fl-tl { height: var(--fl-tl-h, 56svh); }
   .fl-run .fl-primary span { display: none; }
   .fl-run .fl-primary { width: 40px; padding: 0; justify-content: center; }
   .fl-run .fl-side { grid-template-rows: none; gap: 10px; height: auto; }
   .fl-run .fl-side > .fl-panel:last-child { max-height: none; }
-  .fl-run .fl-cards { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
