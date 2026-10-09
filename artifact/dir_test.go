@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/fault"
@@ -745,6 +746,358 @@ func TestWriteLstatError(t *testing.T) {
 	}
 	if err := Write(dir, fixtureArtifact()); err == nil || !strings.HasPrefix(err.Error(), "artifact: lstat "+dir+": ") || !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("Write under a parent without search permission = %v", err)
+	}
+}
+
+// otherTestErr is the error of ART-012 for a dir that holds the artifact of package
+// example.com/toy, test TestA, seed 1.
+func otherTestErr(dir string) string {
+	return "artifact: refusing to replace " + dir + `: it holds the artifact of another test (package "example.com/toy", test "TestA", seed "0x0000000000000001")`
+}
+
+// AT-ART-22 (a) to (d): the artifact of another package, test or seed is refused before anything
+// is written: the old directory, a leftover of an earlier Write and a stay as they were. The same
+// package, test and seed replace it, whatever else the old report says, compared after normReport.
+func TestWriteOtherTest(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "0000000000000001")
+	first := fixtureArtifact()
+	first.Report.Test = "TestA"
+	if err := Write(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	before := readAll(t, dir)
+	if err := os.Mkdir(filepath.Join(root, ".0000000000000001.tmp-5"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		mutate func(r *Report)
+	}{
+		{"test", func(r *Report) { r.Test = "Testa" }},
+		{"package", func(r *Report) { r.Test, r.Package = "TestA", "example.com/toy2" }},
+		{"seed", func(r *Report) { r.Test, r.Seed = "TestA", "0x0000000000000002" }},
+		{"package case", func(r *Report) { r.Test, r.Package = "TestA", "Example.com/toy" }},
+	} {
+		a, want := fixtureArtifact(), fixtureArtifact()
+		c.mutate(&a.Report)
+		c.mutate(&want.Report)
+		err := Write(dir, a)
+		if err == nil || err.Error() != otherTestErr(dir) || !errors.Is(err, ErrOtherTest) {
+			t.Errorf("another %s: %v", c.name, err)
+		}
+		if !reflect.DeepEqual(a, want) {
+			t.Errorf("another %s: the refused Write changed a", c.name)
+		}
+	}
+	if after := readAll(t, dir); !reflect.DeepEqual(after, before) {
+		t.Error("a refused Write changed the old artifact")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if want := []string{".0000000000000001.tmp-5", "0000000000000001"}; !slices.Equal(names, want) {
+		t.Errorf("entries %v, want %v", names, want)
+	}
+
+	same := fixtureArtifact()
+	same.Report.Test, same.Report.Status, same.Report.Failure = "TestA", "pass", nil
+	same.Report.Subtest, same.Report.OptionsHash = "TestA/other", "0x0000000000000002"
+	if err := Write(dir, same); err != nil {
+		t.Fatalf("Write(same package, test and seed) = %v", err)
+	}
+	if got, err := Read(dir); err != nil || got.Report.Status != "pass" {
+		t.Fatalf("Read = %+v, %v", got, err)
+	}
+	bad := filepath.Join(root, "bad")
+	for range 2 {
+		a := fixtureArtifact()
+		a.Report.Test = "Test\xff"
+		if err := Write(bad, a); err != nil {
+			t.Fatalf("Write(invalid UTF-8 test name) = %v", err)
+		}
+	}
+}
+
+// AT-ART-22 (e), ART-012: a report.json that cannot be read (empty or cut short after a power loss,
+// not a faultline report, a newer version, no read permission) or that is not a regular file (a
+// link is not followed, a FIFO is not opened) names no test, so Write replaces its directory. Each
+// row first shows that the intact report is refused. Write has a time limit: a FIFO that it opened
+// would block it.
+func TestWriteUnreadableReport(t *testing.T) {
+	root := t.TempDir()
+	other := fixtureArtifact()
+	other.Report.Test = "TestOther"
+	linked := filepath.Join(root, "linked")
+	if err := Write(linked, other); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"empty", "cut short", "not a faultline report", "newer version", "unreadable", "link", "fifo"} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(root, strings.ReplaceAll(name, " ", "-"))
+			if err := Write(dir, other); err != nil {
+				t.Fatal(err)
+			}
+			if err := Write(dir, fixtureArtifact()); !errors.Is(err, ErrOtherTest) {
+				t.Fatalf("intact report: %v", err)
+			}
+			p, b := filepath.Join(dir, FileReport), readAll(t, dir)[FileReport]
+			var err error
+			switch name {
+			case "empty":
+				err = os.WriteFile(p, nil, 0o600)
+			case "cut short":
+				err = os.WriteFile(p, b[:len(b)/2], 0o600)
+			case "not a faultline report":
+				err = os.WriteFile(p, bytes.Replace(b, []byte(`"faultline_report": 1`), []byte(`"faultline_report": 0`), 1), 0o600)
+			case "newer version":
+				err = os.WriteFile(p, bytes.Replace(b, []byte(`"faultline_report": 1`), []byte(`"faultline_report": 2`), 1), 0o600)
+			case "unreadable":
+				if err = os.Chmod(p, 0); err == nil {
+					if _, rerr := os.ReadFile(p); rerr == nil {
+						t.Skip("file permissions are not enforced here (root, Windows or a FAT file system)")
+					}
+				}
+			case "link":
+				if err = os.Remove(p); err == nil {
+					if lerr := os.Symlink(filepath.Join(linked, FileReport), p); lerr != nil {
+						t.Skip(lerr)
+					}
+				}
+			case "fifo":
+				if err = os.Remove(p); err == nil {
+					if ok, ferr := mkfifo(p); !ok || ferr != nil {
+						t.Skipf("no FIFO here: %v", ferr)
+					}
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- Write(dir, fixtureArtifact()) }()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("Write did not return within 10s")
+			}
+			if got, err := Read(dir); err != nil || got.Report.Test != "TestToy" {
+				t.Fatalf("Read = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+// AT-ART-22: on a case-insensitive file system (the default on macOS and Windows), names that
+// differ only in case are one folder, and the second Write is refused.
+func TestWriteCaseOnlyNames(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "X")); err != nil {
+		t.Skip("the file system is case-sensitive")
+	}
+	a, b := fixtureArtifact(), fixtureArtifact()
+	a.Report.Test, b.Report.Test = "TestA", "Testa"
+	dirA, dirB := Dir(root, "example.com/toy", "TestA", 1), Dir(root, "example.com/toy", "Testa", 1)
+	if err := Write(dirA, a); err != nil {
+		t.Fatal(err)
+	}
+	before := readAll(t, dirA)
+	if err := Write(dirB, b); err == nil || err.Error() != otherTestErr(dirB) || !errors.Is(err, ErrOtherTest) {
+		t.Fatalf("Write(%s) = %v", dirB, err)
+	}
+	if after := readAll(t, dirA); !reflect.DeepEqual(after, before) {
+		t.Fatal("the refused Write changed the first artifact")
+	}
+}
+
+// ART-012: the second check repeats the first, report check included, only when dir or its
+// report.json is another file now: another inode, or for report.json another size or modification
+// time. The functions are called directly: in Write, no caller code runs between the two checks.
+func TestWriteSecondCheck(t *testing.T) {
+	root := t.TempDir()
+	rep := fixtureReport()
+	rep.Test = "TestA"
+	retest := func(b []byte, test string) []byte {
+		return bytes.Replace(b, []byte(`"test": "TestA"`), []byte(`"test": "`+test+`"`), 1)
+	}
+	cases := []struct {
+		name   string
+		change func(dir, p string, b []byte, mtime time.Time) error
+		want   string // the error after "<dir>: "; "": the first check's result stands
+	}{
+		{"same files, other content", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p, retest(b, "TestB"), 0o600); err != nil {
+				return err
+			}
+			return os.Chtimes(p, mtime, mtime)
+		}, ""},
+		{"report.json larger", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p, retest(b, "TestOther"), 0o600); err != nil {
+				return err
+			}
+			return os.Chtimes(p, mtime, mtime)
+		}, "it holds the artifact of another test"},
+		{"report.json smaller", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p, retest(b, "T"), 0o600); err != nil {
+				return err
+			}
+			return os.Chtimes(p, mtime, mtime)
+		}, "it holds the artifact of another test"},
+		{"report.json modification time later", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p, retest(b, "TestB"), 0o600); err != nil {
+				return err
+			}
+			return os.Chtimes(p, mtime, mtime.Add(time.Second))
+		}, "it holds the artifact of another test"},
+		{"report.json modification time earlier", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p, retest(b, "TestB"), 0o600); err != nil {
+				return err
+			}
+			return os.Chtimes(p, mtime, mtime.Add(-time.Second))
+		}, "it holds the artifact of another test"},
+		{"report.json replaced", func(_, p string, b []byte, mtime time.Time) error {
+			if err := os.WriteFile(p+".new", retest(b, "TestB"), 0o600); err != nil {
+				return err
+			}
+			if err := os.Chtimes(p+".new", mtime, mtime); err != nil {
+				return err
+			}
+			return os.Rename(p+".new", p)
+		}, "it holds the artifact of another test"},
+		{"dir replaced", func(dir, _ string, _ []byte, _ time.Time) error {
+			other := fixtureArtifact()
+			other.Report.Test = "TestB"
+			if err := Write(dir+"-other", other); err != nil {
+				return err
+			}
+			if err := os.Rename(dir, dir+"-aside"); err != nil {
+				return err
+			}
+			return os.Rename(dir+"-other", dir)
+		}, "it holds the artifact of another test"},
+		{"dir now a link to itself", func(dir, _ string, _ []byte, _ time.Time) error {
+			if err := os.Rename(dir, dir+"-aside"); err != nil {
+				return err
+			}
+			return os.Symlink(dir+"-aside", dir)
+		}, "it is a symbolic link"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := fixtureArtifact()
+			a.Report = rep
+			dir := filepath.Join(root, strings.ReplaceAll(c.name, " ", "-"))
+			if err := Write(dir, a); err != nil {
+				t.Fatal(err)
+			}
+			seen, err := checkTarget(dir, &rep)
+			if err != nil || seen.dir == nil || seen.report == nil {
+				t.Fatalf("checkTarget = %+v, %v", seen, err)
+			}
+			p := filepath.Join(dir, FileReport)
+			if err := c.change(dir, p, readAll(t, dir)[FileReport], seen.report.ModTime()); err != nil {
+				if c.want == "it is a symbolic link" {
+					t.Skip(err)
+				}
+				t.Fatal(err)
+			}
+			got, err := recheckTarget(dir, &rep, seen)
+			if c.want == "" && (err != nil || got.dir == nil) {
+				t.Fatalf("recheckTarget = %+v, %v, want the first check's result", got, err)
+			}
+			if c.want != "" && (err == nil || !strings.HasPrefix(err.Error(), "artifact: refusing to replace "+dir+": "+c.want)) {
+				t.Fatalf("recheckTarget = %v, want %q", err, c.want)
+			}
+		})
+	}
+
+	// dir absent in the first check: absent again, still nothing to replace, at no more cost than
+	// the first check (one os.Lstat); a directory or another test's artifact that appeared is
+	// checked in full.
+	dir := filepath.Join(root, "new")
+	seen, err := checkTarget(dir, &rep)
+	if err != nil || seen.dir != nil {
+		t.Fatalf("checkTarget(absent) = %+v, %v", seen, err)
+	}
+	if got, err := recheckTarget(dir, &rep, seen); err != nil || got.dir != nil {
+		t.Fatalf("recheckTarget(still absent) = %+v, %v", got, err)
+	}
+	first := testing.AllocsPerRun(10, func() { _, _ = checkTarget(dir, &rep) })
+	if second := testing.AllocsPerRun(10, func() { _, _ = recheckTarget(dir, &rep, seen) }); second > first {
+		t.Errorf("second check of a new dir: %v allocations, first check %v", second, first)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recheckTarget(dir, &rep, seen); err == nil || err.Error() != "artifact: refusing to replace "+dir+": not a faultline artifact directory (no report.json)" {
+		t.Fatalf("recheckTarget(appeared) = %v", err)
+	}
+	other := fixtureArtifact()
+	other.Report.Test = "TestB"
+	dir = filepath.Join(root, "new-other")
+	if err := Write(dir, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recheckTarget(dir, &rep, seen); !errors.Is(err, ErrOtherTest) {
+		t.Fatalf("recheckTarget(another test's artifact appeared) = %v", err)
+	}
+
+	// A dir holding only stall.txt has no report.json to compare, so it is checked in full again:
+	// an entry that appeared during the writes is refused.
+	stall := filepath.Join(root, "stall")
+	if err := os.Mkdir(stall, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stall, "stall.txt"), []byte("stall"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seen, err = checkTarget(stall, &rep)
+	if err != nil || seen.dir == nil || seen.report != nil {
+		t.Fatalf("checkTarget(stall.txt only) = %+v, %v", seen, err)
+	}
+	if got, err := recheckTarget(stall, &rep, seen); err != nil || got.dir == nil {
+		t.Fatalf("recheckTarget(stall.txt only) = %+v, %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(stall, "x.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recheckTarget(stall, &rep, seen); err == nil || err.Error() != "artifact: refusing to replace "+stall+": not a faultline artifact directory (no report.json)" {
+		t.Fatalf("recheckTarget(stall.txt and x.txt) = %v", err)
+	}
+}
+
+// ART-003: Dir plus the FNV-1a 64 hash of the package and test names, so two names that share a
+// Dir get different AltDirs.
+func TestAltDir(t *testing.T) {
+	if got, want := AltDir("/r", "github.com/acme/kv", "TestKV/a b", 0x5e1f9a2c4b7d3e80), filepath.FromSlash("/r/github.com_acme_kv/TestKV__a_b/5e1f9a2c4b7d3e80-1d148d2edfb479eb"); got != want {
+		t.Errorf("AltDir = %q, want %q", got, want)
+	}
+	if got, want := AltDir("/r", "p", "TestKV", 1), filepath.FromSlash("/r/p/TestKV/0000000000000001-0286916e368eed7c"); got != want {
+		t.Errorf("AltDir = %q, want %q (16 hex digits, a leading zero kept)", got, want)
+	}
+	for _, pair := range [][2][2]string{
+		{{"a/b", "TestX"}, {"a_b", "TestX"}},
+		{{"p", "TestX/a:b"}, {"p", "TestX/a*b"}},
+		{{"p", "TestKV/Raft"}, {"p", "TestKV/raft"}}, // one Dir on a case-insensitive file system
+	} {
+		x, y := pair[0], pair[1]
+		if !strings.EqualFold(Dir("/r", x[0], x[1], 1), Dir("/r", y[0], y[1], 1)) {
+			t.Fatalf("%q and %q do not share a Dir", x, y)
+		}
+		if AltDir("/r", x[0], x[1], 1) == AltDir("/r", y[0], y[1], 1) {
+			t.Errorf("%q and %q share an AltDir", x, y)
+		}
 	}
 }
 

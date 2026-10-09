@@ -30,6 +30,12 @@ func Dir(root, pkg, test string, seed uint64) string {
 	return filepath.Join(root, SanitizePackage(pkg), SanitizeTest(test), fmt.Sprintf("%016x", seed))
 }
 
+// AltDir returns the folder for an artifact whose Dir holds another test's artifact (ART-003):
+// Dir(root, pkg, test, seed) + "-" + the FNV-1a 64 hash of pkg + "\x00" + test as 16 hex digits.
+func AltDir(root, pkg, test string, seed uint64) string {
+	return Dir(root, pkg, test, seed) + fmt.Sprintf("-%016x", fnv1a64(pkg+"\x00"+test))
+}
+
 // SanitizePackage maps an import path to one path element ('/' becomes '_').
 func SanitizePackage(pkg string) string { return sanitize(pkg, "_") }
 
@@ -135,8 +141,13 @@ func fileIndex(a *Artifact, extras []string) []File {
 	)
 }
 
+// ErrOtherTest is wrapped by Write's error when dir holds the artifact of another package, test or
+// seed (ART-012). The caller then writes to AltDir.
+var ErrOtherTest = errors.New("it holds the artifact of another test")
+
 // Write writes a to dir atomically (ART-010 to ART-014). It sets a.Report.Version, Dir and
-// Files and the trace header's Version, Records and Dropped.
+// Files and the trace header's Version, Records and Dropped. It does not replace the artifact of
+// another package, test or seed: the error then wraps ErrOtherTest.
 func Write(dir string, a *Artifact) error {
 	if a == nil {
 		return errors.New("artifact: artifact is nil")
@@ -163,8 +174,10 @@ func Write(dir string, a *Artifact) error {
 		sched = b.Bytes()
 	}
 	// dir itself is checked before anything is written (ART-012). It is never followed: a
-	// symbolic link is refused, whatever it points to.
-	if _, err := checkTarget(abs); err != nil {
+	// symbolic link is refused, whatever it points to. So is the artifact of another package,
+	// test or seed, since names can map to one folder (ART-001).
+	seen, err := checkTarget(abs, &rep)
+	if err != nil {
 		return err
 	}
 	extras := slices.Sorted(maps.Keys(a.Extra))
@@ -266,11 +279,11 @@ func Write(dir string, a *Artifact) error {
 	// error never leaves dir half deleted.
 	old := ""
 	// Checked again: the files took a while, and dir may have changed meanwhile.
-	exists, err := checkTarget(abs)
+	seen, err = recheckTarget(abs, &rep, seen)
 	if err != nil {
 		return err
 	}
-	if exists {
+	if seen.dir != nil {
 		old = tmp + ".old"
 		if err := os.Rename(abs, old); err != nil {
 			return fmt.Errorf("artifact: %w", err)
@@ -300,21 +313,82 @@ func leftover(name, base string) bool {
 	return rest != "" && strings.Trim(rest, "0123456789") == ""
 }
 
-// checkTarget reports whether dir exists, and returns an error unless Write may replace it
-// (ART-012): it is not followed, so a symbolic link is refused.
-func checkTarget(abs string) (bool, error) {
+// target is what checkTarget found at dir: the os.Lstat results of dir and of dir/report.json,
+// nil where nothing was found.
+type target struct {
+	dir, report fs.FileInfo
+}
+
+// checkTarget returns what it found at dir, and an error unless Write may replace dir with the
+// artifact of rep (ART-012): dir is not followed, so a symbolic link is refused, and so is the
+// artifact of another package, test or seed.
+func checkTarget(abs string, rep *Report) (target, error) {
 	fi, err := os.Lstat(abs)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return false, nil
+		return target{}, nil
 	case err != nil:
-		return false, fmt.Errorf("artifact: %w", err)
+		return target{}, fmt.Errorf("artifact: %w", err)
 	case fi.Mode()&fs.ModeSymlink != 0:
-		return false, fmt.Errorf("artifact: refusing to replace %s: it is a symbolic link", abs)
+		return target{}, fmt.Errorf("artifact: refusing to replace %s: it is a symbolic link", abs)
 	case !replaceable(abs):
-		return false, fmt.Errorf("artifact: refusing to replace %s: not a faultline artifact directory (no report.json)", abs)
+		return target{}, fmt.Errorf("artifact: refusing to replace %s: not a faultline artifact directory (no report.json)", abs)
 	}
-	return true, nil
+	t := target{dir: fi, report: lstatOrNil(filepath.Join(abs, FileReport))}
+	if old := oldReport(abs, t.report); old != nil && (old.Package != rep.Package || old.Test != rep.Test || old.Seed != rep.Seed) {
+		return target{}, fmt.Errorf("artifact: refusing to replace %s: %w (package %q, test %q, seed %q)", abs, ErrOtherTest, old.Package, old.Test, old.Seed)
+	}
+	return t, nil
+}
+
+// recheckTarget checks dir again just before Write sets it aside (ART-012). Reading report.json is
+// the costly part, so seen stands only when dir is the same directory and report.json the same
+// regular file as in seen; otherwise, also for a dir without report.json, checkTarget runs again.
+// A dir that did not exist goes straight to checkTarget, whose one os.Lstat is all a new dir costs.
+func recheckTarget(abs string, rep *Report, seen target) (target, error) {
+	if seen.dir != nil && sameFile(lstatOrNil(abs), seen.dir) && sameReport(lstatOrNil(filepath.Join(abs, FileReport)), seen.report) {
+		return seen, nil
+	}
+	return checkTarget(abs, rep)
+}
+
+// lstatOrNil returns os.Lstat(name), or nil on an error.
+func lstatOrNil(name string) fs.FileInfo {
+	fi, err := os.Lstat(name)
+	if err != nil {
+		return nil
+	}
+	return fi
+}
+
+// sameFile reports whether a and b are the same file; nil is no file.
+func sameFile(a, b fs.FileInfo) bool {
+	return a != nil && b != nil && os.SameFile(a, b)
+}
+
+// sameReport is sameFile for report.json, which must also be a regular file that kept its size and
+// modification time.
+func sameReport(a, b fs.FileInfo) bool {
+	return sameFile(a, b) && a.Mode().IsRegular() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
+}
+
+// oldReport returns the report of the artifact in dir, or nil when report.json (fi, its os.Lstat
+// result) is not a regular file or ReadReport rejects it (ART-012). A link is not followed, and a
+// FIFO is not opened.
+func oldReport(dir string, fi fs.FileInfo) *Report {
+	if fi == nil || !fi.Mode().IsRegular() {
+		return nil
+	}
+	f, err := os.Open(filepath.Join(dir, FileReport))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	rep, err := ReadReport(f)
+	if err != nil {
+		return nil
+	}
+	return rep
 }
 
 // replaceable reports whether an existing dir may be replaced (ART-012): it holds report.json, or
