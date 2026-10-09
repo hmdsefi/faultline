@@ -1,6 +1,7 @@
 package history
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -46,6 +47,7 @@ func (r *Recorder) Invoke(process, f string, input any) int64 {
 	if err != nil {
 		panic(fmt.Sprintf("history: Invoke: process %q f %q: input is not JSON-encodable: %v", process, f, err))
 	}
+	in = replaceInvalid(in)
 	id := int64(len(r.ops)) + 1
 	r.ops = append(r.ops, Op{
 		ID: id, Process: process, F: f, Input: json.RawMessage(in), Output: json.RawMessage("null"),
@@ -80,6 +82,7 @@ func (r *Recorder) Complete(id int64, status Status, output any) {
 	if err != nil {
 		panic(fmt.Sprintf("history: Complete: op %d (%s %s): output is not JSON-encodable: %v", id, op.Process, op.F, err))
 	}
+	out = replaceInvalid(out)
 	op.Status, op.Output, op.Return, op.ReturnIndex = status, json.RawMessage(out), r.s.Now(), r.next
 	r.next++
 	delete(r.pending, op.Process)
@@ -87,6 +90,38 @@ func (r *Recorder) Complete(id int64, status Status, output any) {
 		kernel.Attr{Key: "id", Value: strconv.FormatInt(id, 10)}, kernel.Attr{Key: "process", Value: op.Process},
 		kernel.Attr{Key: "f", Value: op.F}, kernel.Attr{Key: "status", Value: status.String()},
 		kernel.Attr{Key: "output", Value: string(out)})
+}
+
+// escFFFD is the escape that json.Marshal writes on Go 1.26 for a byte that is not valid UTF-8.
+const escFFFD = `\ufffd`
+
+// replaceInvalid returns b, the output of one json.Marshal call, with each \ufffd escape and each
+// byte that is not part of valid UTF-8 replaced by U+FFFD itself (HIS-002). For a string that is
+// not valid UTF-8, json.Marshal writes U+FFFD for each invalid byte: as the escape on Go 1.26 and
+// as the character on Go 1.27. It copies the bytes of a json.Marshaler as they are on both. So the
+// result is the same on both versions, apart from the exceptions HIS-002 names. b itself is
+// returned when it is valid UTF-8 and holds no \ufffd substring; otherwise the result is a copy,
+// also when it equals b (an escaped backslash before the text ufffd).
+func replaceInvalid(b []byte) []byte {
+	if utf8.Valid(b) && !bytes.Contains(b, []byte(escFFFD)) {
+		return b
+	}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); {
+		r, n := utf8.DecodeRune(b[i:])
+		switch {
+		case bytes.HasPrefix(b[i:], []byte(escFFFD)):
+			out, i = utf8.AppendRune(out, utf8.RuneError), i+len(escFFFD)
+		case b[i] == '\\' && i+1 < len(b):
+			// Any other escape is copied whole, so the second backslash of \\ never starts one.
+			out, i = append(out, b[i], b[i+1]), i+2
+		case r == utf8.RuneError && n == 1:
+			out, i = utf8.AppendRune(out, utf8.RuneError), i+1
+		default:
+			out, i = append(out, b[i:i+n]...), i+n
+		}
+	}
+	return out
 }
 
 // emit emits a record on the node named process, or globally if there is none (HIS §8).
