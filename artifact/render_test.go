@@ -275,6 +275,26 @@ func TestRenderErrors(t *testing.T) {
 			t.Errorf("%s: %v", c.name, err)
 		}
 	}
+	// An input that cannot be read, such as a directory in its place, gives the operation and the
+	// *fs.PathError's inner error, wrapped.
+	for _, name := range []string{FileReport, FileTrace} {
+		dir := renderWritten(t, fixtureArtifact())
+		p := filepath.Join(dir, name)
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var pe *fs.PathError
+		if _, err := os.ReadFile(p); !errors.As(err, &pe) {
+			t.Fatalf("reading a directory: %v", err)
+		}
+		want := "artifact: render " + dir + ": " + pe.Op + " " + name + ": " + pe.Err.Error()
+		if _, err := Render(dir, RenderOptions{}); err == nil || err.Error() != want || !errors.Is(err, pe.Err) {
+			t.Errorf("%s a directory: %v, want %s", name, err, want)
+		}
+	}
 }
 
 // ART-090: schedule.json is parsed and written again as Write writes it. A valid file in another
@@ -317,7 +337,7 @@ func TestRenderSchedule(t *testing.T) {
 func TestRenderSliceError(t *testing.T) {
 	dir := renderWritten(t, renderChain(1001))
 	renderFails(t, dir, RenderOptions{SliceCap: 1000, TimelineRecords: MinTimelineRecords},
-		"artifact: render "+dir+": write timeline.html: artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000")
+		"artifact: render "+dir+": write timeline.html: artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000"+sliceFix)
 }
 
 // ART-090: Render removes the temporary files an interrupted Render left, os.CreateTemp's names for
@@ -391,5 +411,61 @@ func TestRenderRenameFails(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".*.tmp-*")); len(left) != 0 {
 		t.Errorf("temporary files left: %v", left)
+	}
+}
+
+// ART-090 and §7: write and rename errors name the file once. pathErr returns the inner error of a
+// *fs.PathError and of the *os.LinkError of a failed rename, which the directory check before the
+// first rename leaves no portable way to cause.
+func TestPathErr(t *testing.T) {
+	inner := errors.New("inner")
+	for _, err := range []error{
+		&fs.PathError{Op: "open", Path: "/d/.timeline.txt.tmp-1", Err: inner},
+		&os.LinkError{Op: "rename", Old: "/d/.hb.mmd.tmp-2", New: "/d/hb.mmd", Err: inner},
+	} {
+		if got := pathErr(err); got != inner {
+			t.Errorf("pathErr(%v) = %v, want the inner error", err, got)
+		}
+	}
+	if other := errors.New("other"); pathErr(other) != other {
+		t.Error("pathErr changed an error that holds no path")
+	}
+}
+
+// ART-090 and §7: a write error names the file once and wraps its cause. In a read-only artifact
+// directory the first temporary file, timeline.txt's, cannot be created.
+func TestRenderWriteError(t *testing.T) {
+	dir := renderWritten(t, fixtureArtifact())
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if f, err := os.CreateTemp(dir, "probe-"); err == nil {
+		f.Close()
+		t.Skip("directory permissions are not enforced here (root, Windows or a FAT file system)")
+	}
+	_, err := Render(dir, RenderOptions{})
+	want := "artifact: render " + dir + ": write timeline.txt: permission denied"
+	if err == nil || err.Error() != want || !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("Render in a read-only directory = %v, want %s", err, want)
+	}
+}
+
+// ART-090: the temporary files of an interrupted Render are matched by name, not by a glob
+// pattern, so a '[' in the artifact's path does not stop the cleanup.
+func TestRenderStaleTempsGlobChars(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a[1]")
+	if err := Write(dir, fixtureArtifact()); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, ".hb.mmd.tmp-7")
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(dir, RenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("%s was not removed: %v", stale, err)
 	}
 }

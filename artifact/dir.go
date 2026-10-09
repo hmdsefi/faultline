@@ -145,9 +145,12 @@ func fileIndex(a *Artifact, extras []string) []File {
 // seed (ART-012). The caller then writes to AltDir.
 var ErrOtherTest = errors.New("it holds the artifact of another test")
 
-// Write writes a to dir atomically (ART-010 to ART-014). It sets a.Report.Version, Dir and
-// Files and the trace header's Version, Records and Dropped. It does not replace the artifact of
-// another package, test or seed: the error then wraps ErrOtherTest.
+// Write writes a to dir atomically (ART-010 to ART-014). It does not replace the artifact of
+// another package, test or seed: the error then wraps ErrOtherTest. Once a and dir pass its checks,
+// and before it writes a file, Write changes a: a.Report becomes the copy it writes, with every
+// string valid UTF-8, nil Nodes, Planners and Files empty, and Version, Dir and Files set, and
+// a.Trace.Header the header line it writes, with Version, Records and Dropped set. An error after
+// that point, such as a file system error, leaves these changes in a.
 func Write(dir string, a *Artifact) error {
 	if a == nil {
 		return errors.New("artifact: artifact is nil")
@@ -164,7 +167,6 @@ func Write(dir string, a *Artifact) error {
 	if err != nil {
 		return fmt.Errorf("artifact: %w", err)
 	}
-	abs = filepath.Clean(abs)
 	var sched []byte
 	if a.Schedule != nil {
 		var b bytes.Buffer
@@ -185,7 +187,6 @@ func Write(dir string, a *Artifact) error {
 	a.Report = rep
 	a.Report.Dir = abs
 	a.Report.Files = fileIndex(a, extras)
-	a.Report.Nodes = normNodes(a.Report.Nodes)
 	root := uint64(0)
 	if a.Report.Failure != nil {
 		root = a.Report.Failure.RecordSeq
@@ -402,52 +403,74 @@ func replaceable(dir string) bool {
 }
 
 // Read reads an artifact directory (ART-085). report.json is required; other files are optional.
+// An error names its file once and wraps its cause.
 func Read(dir string) (*Artifact, error) {
-	fail := func(err error) error {
-		return fmt.Errorf("artifact: %s: %s", dir, strings.TrimPrefix(err.Error(), "artifact: "))
-	}
-	f, err := os.Open(filepath.Join(dir, FileReport))
-	if err != nil {
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err
+	// fail returns "artifact: <dir>: <reason>" wrapping err. For a *fs.PathError of file name the
+	// reason is "<op> <name>: <inner error>", so the path is not repeated; otherwise it is err's text
+	// without its "artifact: " prefix.
+	fail := func(name string, err error) error {
+		if pe, ok := err.(*fs.PathError); ok {
+			return fmt.Errorf("artifact: %s: %s %s: %w", dir, pe.Op, name, pe.Err)
 		}
-		return nil, fmt.Errorf("artifact: %s: open %s: %w", dir, FileReport, err)
+		return &readError{dir: dir, err: err}
 	}
-	rep, err := ReadReport(f)
-	f.Close()
+	// file returns the content of name, or nil when it does not exist and is not report.json.
+	file := func(name string) ([]byte, error) {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil && (name == FileReport || !errors.Is(err, fs.ErrNotExist)) {
+			return nil, fail(name, err)
+		}
+		return b, nil
+	}
+	b, err := file(FileReport)
 	if err != nil {
-		return nil, fail(err)
+		return nil, err
+	}
+	rep, err := ReadReport(bytes.NewReader(b))
+	if err != nil {
+		return nil, fail(FileReport, err)
 	}
 	a := &Artifact{Report: *rep}
-	if b, err := os.ReadFile(filepath.Join(dir, FileReportText)); err == nil {
-		a.Text = string(b)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fail(err)
+	if b, err = file(FileReportText); err != nil {
+		return nil, err
 	}
+	a.Text = string(b)
+	// trace.jsonl is read as a stream: it can be large.
 	if f, err := os.Open(filepath.Join(dir, FileTrace)); err == nil {
 		tr, err := ReadTrace(f)
 		f.Close()
 		if err != nil {
-			return nil, fail(err)
+			return nil, fail(FileTrace, err)
 		}
 		a.Trace = tr
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fail(err)
+		return nil, fail(FileTrace, err)
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, FileSchedule)); err == nil {
+	if b, err = file(FileSchedule); err != nil {
+		return nil, err
+	}
+	if b != nil {
 		s, err := fault.ReadSchedule(bytes.NewReader(b))
 		if err != nil {
-			return nil, fail(fmt.Errorf("%s: %w", FileSchedule, err))
+			return nil, fail(FileSchedule, fmt.Errorf("%s: %w", FileSchedule, err))
 		}
 		a.Schedule = &s
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fail(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, FileHistory)); err == nil {
-		a.History = b
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fail(err)
+	if a.History, err = file(FileHistory); err != nil {
+		return nil, err
 	}
 	return a, nil
 }
+
+// readError is an error of Read: "artifact: <dir>: " and err's text without its own "artifact: "
+// prefix. It wraps err.
+type readError struct {
+	dir string
+	err error
+}
+
+func (e *readError) Error() string {
+	return "artifact: " + e.dir + ": " + strings.TrimPrefix(e.err.Error(), "artifact: ")
+}
+
+func (e *readError) Unwrap() error { return e.err }

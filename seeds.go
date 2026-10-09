@@ -34,8 +34,13 @@ func DeriveSeed(base uint64, i int) uint64 {
 	return z ^ (z >> 31)
 }
 
-// exploreBase returns a fresh base seed for FAULTLINE_EXPLORE=1 (API-016). It reads the wall
-// clock and the process ID and never crypto/rand.
+// exploreBase returns a fresh base seed for FAULTLINE_EXPLORE=1 (API-016): exploreBaseAt of the
+// wall clock and the process ID. It never reads crypto/rand.
 func exploreBase() uint64 {
-	return DeriveSeed(uint64(time.Now().UnixNano())^(uint64(os.Getpid())<<32), 0) //nolint:gosec // a process ID is not negative
+	return exploreBaseAt(time.Now().UnixNano(), os.Getpid())
+}
+
+// exploreBaseAt returns the base seed of a wall clock reading ns and a process ID pid (API-016).
+func exploreBaseAt(ns int64, pid int) uint64 {
+	return DeriveSeed(uint64(ns)^(uint64(pid)<<32), 0) //nolint:gosec // a process ID is not negative
 }

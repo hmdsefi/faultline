@@ -827,8 +827,8 @@ func TestWriteOtherTest(t *testing.T) {
 // AT-ART-22 (e), ART-012: a report.json that cannot be read (empty or cut short after a power loss,
 // not a faultline report, a newer version, no read permission) or that is not a regular file (a
 // link is not followed, a FIFO is not opened) names no test, so Write replaces its directory. Each
-// row first shows that the intact report is refused. Write has a time limit: a FIFO that it opened
-// would block it.
+// row first shows that the intact report is refused. A FIFO that Write opened would block it until
+// go test's -timeout stops the test binary with the stack of every goroutine.
 func TestWriteUnreadableReport(t *testing.T) {
 	root := t.TempDir()
 	other := fixtureArtifact()
@@ -879,15 +879,8 @@ func TestWriteUnreadableReport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			done := make(chan error, 1)
-			go func() { done <- Write(dir, fixtureArtifact()) }()
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
-				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("Write did not return within 10s")
+			if err := Write(dir, fixtureArtifact()); err != nil {
+				t.Fatal(err)
 			}
 			if got, err := Read(dir); err != nil || got.Report.Test != "TestToy" {
 				t.Fatalf("Read = %+v, %v", got, err)
@@ -1101,7 +1094,9 @@ func TestAltDir(t *testing.T) {
 	}
 }
 
-// ART-085: an invalid report, and errors in present files, are returned as artifact: <dir>: <reason>.
+// ART-085: an invalid report, and errors in present files, are returned as artifact: <dir>: <reason>,
+// naming the file once and wrapping the cause. A file that cannot be read, such as a directory in
+// its place, gives the operation and the *fs.PathError's inner error.
 func TestReadErrors(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "r")
 	if err := Write(dir, fixtureArtifact()); err != nil {
@@ -1111,11 +1106,15 @@ func TestReadErrors(t *testing.T) {
 	for _, c := range []struct {
 		file    string
 		content []byte // nil: a directory in place of the file
-		want    string
+		want    string // the start of the reason; for a directory, set below to the whole reason
 	}{
 		{FileReport, []byte("{}"), "report.json: not a faultline report"},
 		{FileTrace, []byte("{\"faultline_trace\":2}\n"), "trace.jsonl line 1: version 2 is newer"},
 		{FileSchedule, []byte("nope"), "schedule.json: fault: schedule: "},
+		{FileSchedule, []byte{}, "schedule.json: fault: schedule: "}, // empty, so present and invalid
+		{FileReport, nil, ""},
+		{FileTrace, nil, ""},
+		{FileSchedule, nil, ""},
 		{FileHistory, nil, ""},
 		{FileReportText, nil, ""},
 	} {
@@ -1123,16 +1122,32 @@ func TestReadErrors(t *testing.T) {
 		if err := os.RemoveAll(p); err != nil {
 			t.Fatal(err)
 		}
+		var cause error
 		if c.content != nil {
 			err := os.WriteFile(p, c.content, 0o600)
 			if err != nil {
 				t.Fatal(err)
 			}
-		} else if err := os.Mkdir(p, 0o755); err != nil {
-			t.Fatal(err)
+		} else {
+			if err := os.Mkdir(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// What reading a directory gives here: on Unix, "read" and "is a directory".
+			var pe *fs.PathError
+			if _, err := os.ReadFile(p); !errors.As(err, &pe) {
+				t.Fatalf("reading a directory: %v", err)
+			}
+			c.want, cause = pe.Op+" "+c.file+": "+pe.Err.Error(), pe.Err
 		}
-		if _, err := Read(dir); err == nil || !strings.HasPrefix(err.Error(), "artifact: "+dir+": "+c.want) {
-			t.Errorf("%s: %v", c.file, err)
+		switch _, err := Read(dir); {
+		case err == nil || !strings.HasPrefix(err.Error(), "artifact: "+dir+": "+c.want):
+			t.Errorf("%s: %v, want the reason %s", c.file, err, c.want)
+		case strings.Count(err.Error(), dir) != 1:
+			t.Errorf("%s: the path is repeated: %v", c.file, err)
+		case errors.Unwrap(err) == nil:
+			t.Errorf("%s: %v wraps no error", c.file, err)
+		case cause != nil && (err.Error() != "artifact: "+dir+": "+c.want || !errors.Is(err, cause)):
+			t.Errorf("%s: %v, want the reason %s wrapping %v", c.file, err, c.want, cause)
 		}
 		if err := os.RemoveAll(p); err != nil {
 			t.Fatal(err)
@@ -1158,5 +1173,33 @@ func BenchmarkWrite1M(b *testing.B) {
 		if err := Write(dir, a); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// ART-085: a trace.jsonl that cannot be opened gives "open trace.jsonl: <inner error>", wrapping
+// the cause. A symbolic link to itself cannot be opened, also by root.
+func TestReadTraceOpenError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "r")
+	if err := Write(dir, fixtureArtifact()); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, FileTrace)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(FileTrace, p); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	f, err := os.Open(p)
+	if err == nil {
+		f.Close()
+	}
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("opening a link to itself: %v", err)
+	}
+	want := "artifact: " + dir + ": open trace.jsonl: " + pe.Err.Error()
+	if _, err := Read(dir); err == nil || err.Error() != want || !errors.Is(err, pe.Err) {
+		t.Errorf("Read = %v, want %s", err, want)
 	}
 }

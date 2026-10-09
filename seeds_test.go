@@ -74,24 +74,53 @@ func TestDeriveSeedWideIndex(t *testing.T) {
 	}
 }
 
-// API-016: exploreBase is DeriveSeed(wall clock in ns ^ process ID << 32, 0), with the clock
-// read during the call. If the wall clock steps back, or forward by more than 100 ms, during a
-// call, that call gives no usable window and is made again.
-func TestExploreBase(t *testing.T) {
-	pid := uint64(os.Getpid()) << 32 //nolint:gosec // a process ID is not negative
-	for range 5 {
-		before := time.Now().UnixNano()
-		got := exploreBase()
-		after := time.Now().UnixNano()
-		if after < before || after-before > int64(100*time.Millisecond) {
-			continue
+// API-016: exploreBaseAt is DeriveSeed(ns ^ pid<<32, 0).
+func TestExploreBaseAt(t *testing.T) {
+	for _, c := range []struct {
+		ns   int64
+		pid  int
+		want uint64
+	}{
+		{0, 0, 0xe220a8397b1dcdaf}, // DeriveSeed(0, 0)
+		{1_700_000_000_123_456_789, 4242, 0x63d5d0becc24f1a5},
+		{1_700_000_000_123_456_789, 4243, 0x47143eade9812fce},
+		{-1, 1, 0x19ba2418afbbfae1}, // DeriveSeed(0xfffffffeffffffff, 0)
+	} {
+		if got := exploreBaseAt(c.ns, c.pid); got != c.want {
+			t.Errorf("exploreBaseAt(%d, %d) = %#016x, want %#016x", c.ns, c.pid, got, c.want)
 		}
-		for ns := before; ns <= after; ns++ {
-			if DeriveSeed(uint64(ns)^pid, 0) == got {
-				return
-			}
-		}
-		t.Fatalf("exploreBase() = %#016x: no clock reading in [%d, %d] gives it", got, before, after)
 	}
-	t.Fatal("the wall clock stepped during each of 5 calls of exploreBase")
+}
+
+// API-016: exploreBase passes the live clock and process ID to exploreBaseAt. Inverting the mix
+// gives the clock reading it used, which must be within a second of now; a process ID it dropped
+// would move that reading by 2^32 ns (4.3 s) or more.
+func TestExploreBase(t *testing.T) {
+	pid := uint64(os.Getpid()) << 32        //nolint:gosec // a process ID is not negative
+	ns := int64(unmix(exploreBase()) ^ pid) //nolint:gosec // a wall clock reading in ns
+	if d := time.Duration(time.Now().UnixNano() - ns); d < -time.Second || d > time.Second {
+		t.Fatalf("exploreBase used the clock reading %d, %v before now", ns, d)
+	}
+}
+
+// unmix inverts DeriveSeed(x, 0): it returns the x with DeriveSeed(x, 0) == v.
+func unmix(v uint64) uint64 {
+	unshift := func(y uint64, s uint) uint64 { // inverts y = x ^ (x >> s)
+		x := y
+		for range 64/s + 1 {
+			x = y ^ (x >> s)
+		}
+		return x
+	}
+	inverse := func(c uint64) uint64 { // of an odd c modulo 2^64, by Newton's iteration
+		x := c
+		for range 6 {
+			x *= 2 - c*x
+		}
+		return x
+	}
+	z := unshift(v, 31)
+	z = unshift(z*inverse(0x94d049bb133111eb), 27)
+	z = unshift(z*inverse(0xbf58476d1ce4e5b9), 30)
+	return z - gamma
 }
