@@ -39,14 +39,15 @@ const (
 	DefaultMaxEvents = 10_000_000       // Options.MaxEvents == 0
 	// ShortSeeds caps the seed count under `go test -short` unless FAULTLINE_SEEDS is set.
 	ShortSeeds = 5
-	// MaxEnvSeeds is the largest value FAULTLINE_SEEDS accepts.
+	// MaxEnvSeeds is the largest value FAULTLINE_SEEDS and Options.Seeds accept.
 	MaxEnvSeeds = 1_000_000
 )
 
 // Options configures Run. The zero value is valid: 20 seeds of 60 s virtual time each,
 // default network, default disks, hash-only tracing.
 type Options struct {
-	// Seeds is the number of seeds to run. 0 means DefaultSeeds. Negative is a setup error.
+	// Seeds is the number of seeds to run. 0 means DefaultSeeds. Negative or more than
+	// MaxEnvSeeds is a setup error.
 	// FAULTLINE_SEEDS overrides it; FAULTLINE_SEED and FAULTLINE_SEED_LIST replace the seed list.
 	Seeds int
 
@@ -136,6 +137,8 @@ func validateOptions(o Options) error {
 	switch {
 	case o.Seeds < 0:
 		return fmt.Errorf("faultline: Options.Seeds is %d; want 0 (default %d) or more", o.Seeds, DefaultSeeds)
+	case o.Seeds > MaxEnvSeeds:
+		return fmt.Errorf("faultline: Options.Seeds is %d; want at most %d", o.Seeds, MaxEnvSeeds)
 	case o.Duration < 0:
 		return fmt.Errorf("faultline: Options.Duration is %v; want 0 (default %v) or more", o.Duration, DefaultDuration)
 	case o.Trace.Level != kernel.TraceHash && o.Trace.Level != kernel.TraceFull:
