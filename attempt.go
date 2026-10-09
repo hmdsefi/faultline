@@ -59,8 +59,13 @@ type finalResult struct {
 
 // determinism describes a determinism failure (API-070, API-071).
 type determinism struct {
-	seed   uint64
-	hashes []uint64
+	context  string // "artifact_rerun" or "check_determinism"
+	seed     uint64
+	hashes   []uint64
+	original *failure // artifact_rerun only
+	diff     *recordDiff
+	same     uint64 // trace hash of the last full-trace run
+	kept     int    // records each full-trace run kept, when diff is nil
 }
 
 // attemptResult is the outcome and data of one attempt (API-093).
@@ -81,6 +86,8 @@ type attemptResult struct {
 	recovery    kernel.Time
 	hasRecovery bool
 	end         kernel.Time
+	extra       []extraFile
+	warnings    []string
 }
 
 // checkFailure is the error an invariant failure passes to Sim.Fail (API-056).
@@ -510,6 +517,7 @@ func (w *World) result(f *failure, limited bool, stop string) attemptResult {
 	if f != nil && f.hasEvent && f.recordSeq != 0 && f.node == "" && res.records != nil {
 		f.nodeID, f.node = nodeBefore(res.records, f.recordSeq, w.Sim)
 	}
+	res.extra, res.warnings = extraFiles(f)
 	return res
 }
 
