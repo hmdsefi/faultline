@@ -17,6 +17,7 @@ import (
 
 	"github.com/hmdsefi/faultline"
 	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/kernel/fault"
 )
 
 var _ = scenario("ticker-seeds", func(t *testing.T) {
@@ -518,5 +519,495 @@ func TestRunKeepGoing(t *testing.T) {
 	o, code = runScenario(t, "always-fails", []string{"KEEP=1"})
 	if code != 1 || !slices.Equal(ranSeeds(o), hexSeeds(firstSeeds(3)...)) || strings.Count(o, "--- FAIL: TestScenario/seed=") != 3 || strings.Contains(o, "stopping after failing seed") {
 		t.Fatalf("(b) exit %d\n%s", code, o)
+	}
+}
+
+// testPlanner records Start calls (AT-API-23).
+type testPlanner struct {
+	t        *testing.T
+	returned *bool
+	w        **faultline.World
+}
+
+func (p *testPlanner) Name() string { return "p" }
+func (p *testPlanner) Start(ctx *fault.PlanContext) {
+	w := *p.w
+	servers := w.Servers()
+	ok := ctx.Until == w.End() && ctx.Roles["leader"] != nil && ctx.Rand == w.Sim.Rand("fault/p") && slices.Equal(ctx.Servers, servers)
+	outLine(p.t, fmt.Sprintf("start returned=%v until=%d ok=%v", *p.returned, ctx.Until, ok))
+}
+
+// attrValue returns the value of r's attr key and whether r has that attr.
+func attrValue(r kernel.Record, key string) (string, bool) {
+	for _, a := range r.Attrs {
+		if a.Key == key {
+			return a.Value, true
+		}
+	}
+	return "", false
+}
+
+var _ = scenario("planners", func(t *testing.T) {
+	quiet := time.Duration(0)
+	if os.Getenv("QUIET") != "" {
+		quiet, _ = time.ParseDuration(os.Getenv("QUIET"))
+	}
+	faultline.Run(t, faultline.Options{Seeds: 1, Duration: 8 * time.Second, Trace: kernel.TraceConfig{Level: kernel.TraceFull}}, func(w *faultline.World) {
+		returned := false
+		ww := w
+		tk := addTicker(w)
+		_ = tk
+		w.Role("leader", func() []kernel.NodeID { return []kernel.NodeID{1} })
+		w.Plan(&testPlanner{t: t, returned: &returned, w: &ww})
+		random := &fault.Random{Rules: []fault.Rule{{Kind: fault.KindPause, Every: time.Hour}}, Quiet: quiet}
+		w.Plan(random)
+		w.Final("observe", func() error {
+			var plans []string
+			for _, r := range w.Sim.Records() {
+				if r.Kind == "run.plan" {
+					until, _ := attrValue(r, "until_ns")
+					plans = append(plans, r.Text+" until_ns="+until)
+				}
+				if _, ok := attrValue(r, "schedule"); ok && r.Kind == "run.phase" && r.Text == "setup" {
+					outLine(t, "setup-has-schedule")
+				}
+			}
+			outLine(t, fmt.Sprintf("final now=%d recovery=%d end=%d recoverAt=%d plans=%q", w.Sim.Now(), w.RecoveryStart(), w.End(), random.RecoverAt(), plans))
+			return nil
+		})
+		returned = true
+	})
+})
+
+// AT-API-23
+func TestRunPlanners(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out1")
+	o, code := runScenario(t, "planners", []string{"OUT=" + out})
+	want := []string{
+		"start returned=true until=8000000000 ok=true",
+		`final now=8000000000 recovery=6000000000 end=8000000000 recoverAt=6000000000 plans=["planner p until_ns=8000000000" "planner random until_ns=6000000000"]`,
+	}
+	if code != 0 {
+		t.Fatalf("(1) exit %d\n%s", code, o)
+	}
+	if got := readLines(t, out); !slices.Equal(got, want) {
+		t.Fatalf("(1) OUT %q\n%s", got, o)
+	}
+
+	writeSchedule := func(name string, s fault.Schedule) string {
+		path := filepath.Join(dir, name)
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := s.Write(f); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	empty := writeSchedule("empty.json", fault.Schedule{Version: 1})
+	out2 := filepath.Join(dir, "out2")
+	o, code = runScenario(t, "planners", []string{"OUT=" + out2, "FAULTLINE_SCHEDULE=" + empty})
+	want2 := []string{"setup-has-schedule", "final now=8000000000 recovery=6000000000 end=8000000000 recoverAt=0 plans=[]"}
+	if code != 0 || !slices.Equal(readLines(t, out2), want2) || !strings.Contains(o, "faultline: FAULTLINE_SCHEDULE="+empty+": 0 events; planners are disabled") {
+		t.Fatalf("(2) exit %d %q\n%s", code, readLines(t, out2), o)
+	}
+
+	short := writeSchedule("short.json", fault.Schedule{Version: 1, End: kernel.Time(4 * time.Second), Recovery: kernel.Time(3 * time.Second)})
+	out3 := filepath.Join(dir, "out3")
+	o, code = runScenario(t, "planners", []string{"OUT=" + out3, "FAULTLINE_SCHEDULE=" + short})
+	want3 := []string{"setup-has-schedule", "final now=4000000000 recovery=3000000000 end=4000000000 recoverAt=0 plans=[]"}
+	if code != 0 || !slices.Equal(readLines(t, out3), want3) {
+		t.Fatalf("(3) exit %d %q\n%s", code, readLines(t, out3), o)
+	}
+
+	o, code = runScenario(t, "planners", []string{"OUT=" + filepath.Join(dir, "out4"), "QUIET=8s"})
+	if code != 1 || !strings.Contains(o, "faultline: World.Plan: fault.Random.Quiet is 8s; want 0 (default Duration/4) or a positive duration shorter than Options.Duration (8s)") {
+		t.Fatalf("(4) exit %d\n%s", code, o)
+	}
+}
+
+// AT-API-24
+func TestRunScheduleMissing(t *testing.T) {
+	o, code := runScenario(t, "ticker-seeds", []string{"FAULTLINE_SCHEDULE=/nonexistent.json"})
+	if code != 1 || !strings.Contains(o, "faultline: FAULTLINE_SCHEDULE=/nonexistent.json: open /nonexistent.json: no such file or directory") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+}
+
+var _ = scenario("fatal-tick", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		tk := addTicker(w)
+		tk.onTick = func(n *kernel.Node, c int) {
+			if c == 3 {
+				w.T().Fatalf("stop")
+			}
+		}
+	})
+})
+
+// AT-API-25
+func TestRunFatalInCallback(t *testing.T) {
+	root := t.TempDir()
+	results := filepath.Join(t.TempDir(), "r.jsonl")
+	o, code := runScenario(t, "fatal-tick", []string{"FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results})
+	seed := hexSeeds(seedK(0))[0]
+	note := "faultline: seed " + seed + " stopped by t.FailNow or t.Fatal at t=0.030000000s (event 4); no artifacts were written\n" +
+		"      report failures with an Invariant, a Final check or w.Sim.Fail(err) to get a replayable report\n" +
+		"    replay:    FAULTLINE_SEED=" + seed + " go test" + replayFlags() + " -run '^TestScenario$' github.com/hmdsefi/faultline\n"
+	if code != 1 || !strings.Contains(o, note) {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	if _, err := os.Stat(seedDir(root, seedK(0))); !os.IsNotExist(err) {
+		t.Fatal("artifact directory exists")
+	}
+	lines := resultLines(t, results)
+	if len(lines) != 1 || lines[0]["status"] != "fail" || lines[0]["kind"] != "fail" ||
+		lines[0]["message"] != "stopped by t.FailNow, t.Fatal or t.SkipNow" || lines[0]["at_ns"] != 3e7 {
+		t.Fatalf("results %v", lines)
+	}
+}
+
+var _ = scenario("errorf-tick", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		tk := addTicker(w)
+		tk.onTick = func(n *kernel.Node, c int) {
+			if c == 3 {
+				w.T().Errorf("soft")
+			}
+		}
+	})
+})
+
+// AT-API-26
+func TestRunErrorfInCallback(t *testing.T) {
+	root := t.TempDir()
+	o, code := runScenario(t, "errorf-tick", []string{"FAULTLINE_ARTIFACTS=" + root})
+	if code != 1 || !strings.Contains(o, "faultline: test marked failed during the run (t.Error, t.Errorf or t.Fail) at t=") || strings.Count(o, "soft") != 2 ||
+		strings.Contains(o, "stopped by t.FailNow") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	rep := readReport(t, seedDir(root, seedK(0)))
+	if rep.Failure.RecordSeq != 0 || rep.Failure.Signature != "fail:" {
+		t.Fatalf("failure %+v", rep.Failure)
+	}
+}
+
+var _ = scenario("skip", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) { w.T().Skip("skip me") })
+})
+
+// AT-API-27
+func TestRunSkip(t *testing.T) {
+	results := filepath.Join(t.TempDir(), "r.jsonl")
+	o, code := runScenario(t, "skip", []string{"FAULTLINE_RESULTS=" + results, "FAULTLINE_SEED=0x1"})
+	lines := resultLines(t, results)
+	if code != 0 || len(lines) != 1 || lines[0]["status"] != "skip" || lines[0]["kind"] != nil {
+		t.Fatalf("exit %d results %v\n%s", code, lines, o)
+	}
+}
+
+var _ = scenario("goroutine-mode", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Mode: faultline.ModeGoroutine}, func(w *faultline.World) {})
+})
+
+// AT-API-28 (Phase 1 only; GOR-001 removes API-091)
+func TestRunGoroutineModeRejected(t *testing.T) {
+	o, code := runScenario(t, "goroutine-mode", nil)
+	if code != 1 || !strings.Contains(o, "faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+}
+
+var _ = scenario("fails-for-0x2", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.Invariant("not seed 2", func() error {
+			if w.Seed() == 2 {
+				return errors.New("seed 2")
+			}
+			return nil
+		})
+	})
+})
+
+// AT-API-29
+func TestRunWorkerProtocol(t *testing.T) {
+	dir := t.TempDir()
+	list := filepath.Join(dir, "seeds.txt")
+	if err := os.WriteFile(list, []byte("0x1\n0x2 3,0x2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results := filepath.Join(dir, "r.jsonl")
+	o, code := runScenario(t, "fails-for-0x2", []string{"FAULTLINE_SEED_LIST=@" + list, "FAULTLINE_RESULTS=" + results})
+	if code != 1 || !slices.Equal(ranSeeds(o), hexSeeds(1, 2, 3)) {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	lines := resultLines(t, results)
+	if len(lines) != 3 {
+		t.Fatalf("results %v", lines)
+	}
+	for i, st := range []string{"pass", "fail", "pass"} {
+		l := lines[i]
+		wall, _ := l["wall_ns"].(float64)
+		if l["faultline_result"] != 1.0 || l["index"] != float64(i) || l["status"] != st || wall <= 0 || l["trace_hash"] == nil {
+			t.Fatalf("line %d: %v", i, l)
+		}
+	}
+	if lines[1]["signature"] != "invariant:not seed 2" {
+		t.Fatalf("fail line %v", lines[1])
+	}
+	art, _ := lines[1]["artifact"].(string)
+	if fi, err := os.Stat(art); err != nil || !fi.IsDir() {
+		t.Fatalf("artifact %v: %v", lines[1]["artifact"], err)
+	}
+	// API-087: the fields come in the spec's order (trace_hash depends on the Go version).
+	prefixes := []string{
+		`{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000001","index":0,"status":"pass","events":101,"trace_hash":"0x`,
+		`{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000002","index":1,"status":"fail","kind":"invariant","check":"not seed 2","signature":"invariant:not seed 2","message":"seed 2","at_ns":0,"at":"0.000000000s","events":1,"trace_hash":"0x`,
+		`{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000003","index":2,"status":"pass","events":101,"trace_hash":"0x`,
+	}
+	for i, raw := range readLines(t, results) {
+		if !strings.HasPrefix(raw, prefixes[i]) {
+			t.Fatalf("line %d:\n%s\nwant the prefix\n%s", i, raw, prefixes[i])
+		}
+	}
+	results2 := filepath.Join(dir, "r2.jsonl")
+	_, code = runScenario(t, "fails-for-0x2", []string{"FAULTLINE_SEED_LIST=0xZZ", "FAULTLINE_RESULTS=" + results2})
+	lines = resultLines(t, results2)
+	if code != 1 || len(lines) != 1 || lines[0]["seed"] != "" || lines[0]["index"] != -1.0 || lines[0]["kind"] != "setup" {
+		t.Fatalf("setup line %v", lines)
+	}
+	setup := `{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"","index":-1,"status":"fail","kind":"setup","signature":"setup:",` +
+		`"message":"faultline: invalid FAULTLINE_SEED_LIST entry 1 \"0xZZ\": want a decimal or 0x-prefixed hexadecimal uint64","wall_ns":0}`
+	if raw := readLines(t, results2); raw[0] != setup {
+		t.Fatalf("setup line:\n%s\nwant\n%s", raw[0], setup)
+	}
+}
+
+// AT-API-31
+func TestRunArtifactsOff(t *testing.T) {
+	tmp := t.TempDir()
+	o, code := runScenario(t, "invariant-counter", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=off", "TMPDIR=" + tmp})
+	if code != 1 || !strings.Contains(o, "artifacts: off\n") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "faultline")); !os.IsNotExist(err) {
+		t.Fatal("default artifact root was created")
+	}
+}
+
+var _ = scenario("run-twice", func(t *testing.T) {
+	body := func(w *faultline.World) { addTicker(w) }
+	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, body)
+	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, body)
+})
+
+// AT-API-32
+func TestRunTwice(t *testing.T) {
+	o, code := runScenario(t, "run-twice", nil)
+	if code != 1 || !strings.Contains(o, `faultline: Run called twice in test "TestScenario"; wrap each call in t.Run with a distinct name`) || len(ranSeeds(o)) != 1 {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+}
+
+var _ = scenario("logf", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.Logf("hello %d", 7)
+		w.Invariant("second event", func() error {
+			if w.Sim.Executed() == 2 {
+				return errors.New("event 2")
+			}
+			return nil
+		})
+	})
+})
+
+// AT-API-33
+func TestRunLogf(t *testing.T) {
+	root := t.TempDir()
+	o, code := runScenario(t, "logf", []string{"FAULTLINE_ARTIFACTS=" + root})
+	if code != 1 || strings.Count(o, "t=0.000000000s hello 7") != 1 {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	trace := readTrace(t, seedDir(root, seedK(0)))
+	if !slices.ContainsFunc(trace, func(r kernel.Record) bool { return r.Kind == "kernel.log" && r.Node == 0 && r.Text == "hello 7" }) {
+		t.Fatal("no kernel.log record")
+	}
+}
+
+var _ = scenario("body-panic", func(t *testing.T) {
+	late := os.Getenv("LATE") == "1"
+	faultline.Run(t, faultline.Options{Duration: 2 * time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		if late {
+			w.RunFor(time.Second)
+		}
+		panic("boom")
+	})
+})
+
+// AT-API-36
+func TestRunBodyPanic(t *testing.T) {
+	root := t.TempDir()
+	o, code := runScenario(t, "body-panic", []string{"FAULTLINE_ARTIFACTS=" + root})
+	if code != 1 || !regexp.MustCompile(`faultline: body panicked during setup \(before the first event\) for seed 0x[0-9a-f]{16}: boom`).MatchString(o) || strings.Contains(o, "artifacts:") {
+		t.Fatalf("(a) exit %d\n%s", code, o)
+	}
+	o, code = runScenario(t, "body-panic", []string{"FAULTLINE_ARTIFACTS=" + root, "LATE=1"})
+	if code != 1 || !strings.Contains(o, "faultline: panic in body at t="+kernel.Time(time.Second).String()+"\n") {
+		t.Fatalf("(b) exit %d\n%s", code, o)
+	}
+	if _, err := os.Stat(filepath.Join(seedDir(root, seedK(0)), "report.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var _ = scenario("step-in-body", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: 2 * time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.Sim.Step()
+		w.RunFor(time.Second)
+	})
+})
+
+// AT-API-37
+func TestRunStepInBody(t *testing.T) {
+	o, code := runScenario(t, "step-in-body", nil)
+	if code != 1 || !strings.Contains(o, "faultline: body advanced the simulation with w.Sim before calling w.RunFor; use w.RunFor so planners start at time 0") ||
+		strings.Contains(o, "stopped by t.FailNow") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+}
+
+var _ = scenario("fail-first-event", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.Invariant("no events", func() error { return errors.New("an event ran") })
+	})
+})
+
+// AT-API-39
+func TestRunFilteredSeed(t *testing.T) {
+	o, code := runScenario(t, "fail-first-event", nil, "-test.run=^TestScenario$/^seed=0x8a216e8699751f87$")
+	if code != 1 || !slices.Equal(ranSeeds(o), []string{"0x8a216e8699751f87"}) || !strings.Contains(o, "--- FAIL: TestScenario/seed=0x8a216e8699751f87") ||
+		!strings.Contains(o, "replay:    FAULTLINE_SEED=0x8a216e8699751f87 go test"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+}
+
+var _ = scenario("later-phase", func(t *testing.T) {
+	var o faultline.Options
+	switch os.Getenv("ROW") {
+	case "procs":
+		o.Procs = 2
+	case "leak":
+		o.FailOnLeak = true
+	case "swarm":
+		o.Swarm = true
+	}
+	faultline.Run(t, o, func(w *faultline.World) { addTicker(w) })
+})
+
+// AT-API-41 (each row applies until its phase ships)
+func TestRunLaterPhase(t *testing.T) {
+	cases := []struct {
+		env  []string
+		want string
+	}{
+		{[]string{"ROW=procs"}, "faultline: Options.Procs is not available until Phase 2"},
+		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is not available until Phase 2"},
+		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is not available until Phase 3"},
+		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is not available until Phase 3"},
+		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3"},
+		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is not available until Phase 2b"},
+	}
+	for _, c := range cases {
+		o, code := runScenario(t, "later-phase", c.env)
+		if code != 1 || len(ranSeeds(o)) != 0 || !strings.Contains(o, c.want) {
+			t.Errorf("%v: exit %d\n%s", c.env, code, o)
+		}
+	}
+}
+
+var _ = scenario("fatal-body", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.T().Fatalf("stop")
+	})
+})
+
+// resultVary matches the results-line values that change between runs or Go versions.
+var resultVary = regexp.MustCompile(`"(trace_hash|wall_ns)":("0x[0-9a-f]{16}"|[0-9]+)`)
+
+// normResult returns a raw results line with its trace_hash and wall_ns values replaced by ?.
+func normResult(line string) string { return resultVary.ReplaceAllString(line, `"$1":?`) }
+
+// AT-API-45
+func TestRunFatalInBody(t *testing.T) {
+	root := t.TempDir()
+	results := filepath.Join(t.TempDir(), "r.jsonl")
+	o, code := runScenario(t, "fatal-body", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results})
+	if code != 1 || strings.Contains(o, "stopped by t.FailNow or t.Fatal") || strings.Contains(o, "artifacts:") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	if _, err := os.Stat(seedDir(root, 1)); !os.IsNotExist(err) {
+		t.Fatal("artifact directory exists")
+	}
+	want := `{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000001","index":0,"status":"fail","kind":"setup","signature":"setup:",` +
+		`"message":"stopped by t.FailNow, t.Fatal or t.SkipNow","wall_ns":?}`
+	if raw := readLines(t, results); len(raw) != 1 || normResult(raw[0]) != want {
+		t.Fatalf("results:\n%s\nwant\n%s", strings.Join(raw, "\n"), want)
+	}
+}
+
+var fatalRerunCalls int
+
+var _ = scenario("fatal-rerun", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		fatalRerunCalls++
+		outLine(t, "body")
+		tk := addTicker(w)
+		w.Invariant("tick 5", func() error {
+			if tk.count == 5 {
+				return errors.New("five")
+			}
+			return nil
+		})
+		if fatalRerunCalls == 2 {
+			tk.onTick = func(n *kernel.Node, c int) {
+				if c == 3 {
+					w.T().Fatalf("stop")
+				}
+			}
+		}
+	})
+})
+
+// AT-API-46
+func TestRunFatalInRerun(t *testing.T) {
+	root := t.TempDir()
+	results := filepath.Join(t.TempDir(), "r.jsonl")
+	out := filepath.Join(t.TempDir(), "out")
+	o, code := runScenario(t, "fatal-rerun", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results, "OUT=" + out})
+	note := `faultline: invariant "tick 5" violated at t=0.050000000s (event 6)` + "\n      five\n" +
+		"    faultline: the artifact re-run of seed 0x0000000000000001 stopped by t.FailNow or t.Fatal at t=0.030000000s (event 4); no artifacts were written\n" +
+		"      the first run did not stop, so the test depends on something outside the seed; the failure above is the seed's outcome\n"
+	if code != 1 || !strings.Contains(o, note) || strings.Contains(o, "artifacts:") {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	if calls := readLines(t, out); len(calls) != 2 {
+		t.Fatalf("%d body calls, want 2\n%s", len(calls), o)
+	}
+	if _, err := os.Stat(seedDir(root, 1)); !os.IsNotExist(err) {
+		t.Fatal("artifact directory exists")
+	}
+	want := `{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000001","index":0,"status":"fail","kind":"invariant","check":"tick 5",` +
+		`"signature":"invariant:tick 5","message":"five","at_ns":50000000,"at":"0.050000000s","events":6,"trace_hash":?,"wall_ns":?}`
+	if raw := readLines(t, results); len(raw) != 1 || normResult(raw[0]) != want {
+		t.Fatalf("results:\n%s\nwant\n%s", strings.Join(raw, "\n"), want)
 	}
 }
