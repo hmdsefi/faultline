@@ -6,6 +6,7 @@ import (
 	"html"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,17 +157,47 @@ func TestWriteTimelineHTML(t *testing.T) {
 	}
 }
 
-// TestTimelineSize is the ART §9 size target: 50,000 records stay under 16 MB.
+// TestTimelineSize is the ART §9 size target: 50,000 records stay under 16 MB (16,000,000 bytes).
+// The records are messages between five nodes, shaped like the fixture's, so the page is as large
+// as a real run's: about 12 MB.
 func TestTimelineSize(t *testing.T) {
 	rep := fixtureReport()
-	tr := window60k()
+	tr := messageTrace(60_000)
 	var buf bytes.Buffer
 	if err := WriteTimelineHTML(&buf, &rep, tr, nil, CausalSlice(tr.Records, 60_000, 200), DefaultTimelineRecords); err != nil {
 		t.Fatal(err)
 	}
-	if buf.Len() > 16<<20 {
+	if buf.Len() > 16_000_000 {
 		t.Fatalf("timeline.html is %d bytes", buf.Len())
 	}
+}
+
+// messageTrace returns n records, n a multiple of 4: messages between five nodes, each the four
+// records of seqs 8 to 11 of the fixture (a tick, the send with its payload, the delivery event and
+// the delivery), each record caused by the one before.
+func messageTrace(n int) *Trace {
+	tr := &Trace{Header: TraceHeader{Version: 1}}
+	for id := 1; id <= 5; id++ {
+		tr.Header.Nodes = append(tr.Header.Nodes, Node{ID: int32(id), Name: "n" + strconv.Itoa(id), Tags: []string{"server"}})
+	}
+	add := func(r kernel.Record) {
+		r.Seq = uint64(len(tr.Records)) + 1
+		r.Cause = r.Seq - 1
+		tr.Records = append(tr.Records, r)
+	}
+	for i := 1; len(tr.Records) < n; i++ {
+		from, to := i%5+1, (i+2)%5+1
+		fn, tn, msg := "n"+strconv.Itoa(from), "n"+strconv.Itoa(to), strconv.Itoa(i)
+		payload := `{"key":"k` + strconv.Itoa(i%100) + `","value":` + msg + `}`
+		at := kernel.Time(i) * 1_000_000
+		add(kernel.Record{At: at, Node: kernel.NodeID(from), Inc: 1, Kind: "kernel.event", Text: "tick", Attrs: attrs("id", strconv.Itoa(2*i))})
+		add(kernel.Record{At: at, Node: kernel.NodeID(from), Inc: 1, Kind: "net.send", Text: "send #" + msg + " " + fn + " -> " + tn + ": " + payload,
+			Attrs: attrs("msg", msg, "from", fn, "to", tn, "payload", payload)})
+		add(kernel.Record{At: at + 2_000_000, Node: kernel.NodeID(to), Inc: 1, Kind: "kernel.event", Text: "net.deliver", Attrs: attrs("id", strconv.Itoa(2*i+1))})
+		add(kernel.Record{At: at + 2_000_000, Node: kernel.NodeID(to), Inc: 1, Kind: "net.deliver", Text: "deliver #" + msg + ".1 " + fn + " -> " + tn,
+			Attrs: attrs("msg", msg, "copy", "1", "from", fn, "to", tn, "latency_ns", "2000000")})
+	}
+	return tr
 }
 
 // eventChain returns n records 1..n on node 1 inc 1, each caused by the previous one.
@@ -198,8 +229,11 @@ func includedSeqs(t *testing.T, tl *Timeline) []uint64 {
 func TestTimelineDataSelection(t *testing.T) {
 	rep := fixtureReport()
 	tl, err := TimelineData(&rep, eventChain(1000), nil, Slice{}, 1000)
-	if err != nil || tl.Window != nil {
-		t.Fatalf("n == maxRecords: window = %+v, err %v", tl.Window, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tl.Window != nil {
+		t.Fatalf("n == maxRecords: window = %+v", tl.Window)
 	}
 
 	tr := eventChain(2000)
@@ -266,11 +300,62 @@ func TestTimelineDataSelection(t *testing.T) {
 	}
 	includedSeqs(t, tl)
 
+	// Dropped is the header's; the embedded header line is the one WriteTrace writes, with the counts
+	// recomputed.
 	tr = fixtureTrace()
-	tr.Header.Dropped = 5
+	tr.Header.Records, tr.Header.Dropped = 999, 5
 	tl, err = TimelineData(&rep, tr, nil, Slice{}, 1000)
-	if err != nil || tl.Dropped != 5 {
-		t.Fatalf("dropped = %d, %v", tl.Dropped, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantTrace bytes.Buffer
+	if err := WriteTrace(&wantTrace, tr); err != nil {
+		t.Fatal(err)
+	}
+	if tl.Dropped != 5 || tl.Trace != wantTrace.String() {
+		t.Fatalf("dropped = %d, trace:\n%s", tl.Dropped, tl.Trace)
+	}
+}
+
+// ART-060: the slice members count against the specials' budget of maxRecords/4; net.* records are
+// not special; FromSeq is the Seq of a record also when the seqs have holes.
+func TestTimelineDataBudget(t *testing.T) {
+	rep := fixtureReport()
+	tr := eventChain(3000)
+	for i := 0; i < 1000; i++ {
+		tr.Records[i].Kind = "fault.x"
+	}
+	for i, k := range []string{"net.send", "net.deliver", "kernel.defer", "net.drop"} {
+		tr.Records[1000+i].Kind = k
+	}
+	tl, err := TimelineData(&rep, tr, nil, CausalSlice(tr.Records, 2000, 200), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 200 slice members (1801 to 2000), then 50 specials (951 to 1000), then the newest 750.
+	got := includedSeqs(t, tl)
+	if !slices.Contains(got, 951) || slices.Contains(got, 950) {
+		t.Errorf("specials: 951 kept %v, 950 kept %v", slices.Contains(got, 951), slices.Contains(got, 950))
+	}
+	for seq := uint64(1001); seq <= 1004; seq++ {
+		if slices.Contains(got, seq) {
+			t.Errorf("%s (seq %d) kept as a special record", tr.Records[seq-1].Kind, seq)
+		}
+	}
+	if want := (&TimelineWindow{FromSeq: 2251, FromNS: 2251000, Extra: 250}); !reflect.DeepEqual(tl.Window, want) {
+		t.Errorf("window = %+v, want %+v", tl.Window, want)
+	}
+
+	holes := &Trace{Header: TraceHeader{Version: 1, Nodes: []Node{{ID: 1, Name: "n1"}}}}
+	for seq := uint64(2); seq <= 4000; seq += 2 {
+		holes.Records = append(holes.Records, kernel.Record{Seq: seq, At: kernel.Time(seq * 500), Node: 1, Inc: 1, Kind: "kernel.event", Cause: seq - 2, Text: "e"})
+	}
+	tl, err = TimelineData(&rep, holes, nil, Slice{}, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (&TimelineWindow{FromSeq: 2002, FromNS: 1001000, Extra: 0}); !reflect.DeepEqual(tl.Window, want) {
+		t.Errorf("window with holes = %+v, want %+v", tl.Window, want)
 	}
 }
 
@@ -291,8 +376,11 @@ func TestTimelineDataSliceAndSchedule(t *testing.T) {
 		t.Fatalf("schedule = %q", tl.Schedule)
 	}
 	h, err := TimelineData(&rep, tr, nil, Slice{Root: 12, Cap: 1}, 1000)
-	if err != nil || h.Slice == nil {
-		t.Fatalf("slice with root 12 and no seqs = %+v, %v", h.Slice, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Slice == nil {
+		t.Fatal("the slice with root 12 and no seqs is nil")
 	}
 }
 
@@ -363,10 +451,10 @@ func TestTimelineDataErrors(t *testing.T) {
 		extraWant int
 	}{
 		// 1,500 members, the newest record not one of them.
-		{long, 2000, 1500, "artifact: causal slice has 1500 records; it must be smaller than maxRecords 1000", 0, 0},
+		{long, 2000, 1500, "artifact: causal slice has 1500 records; it must be smaller than maxRecords 1000" + sliceFix, 0, 0},
 		// Every one of 1,001 records is a member.
-		{eventChain(1001), 1001, 2000, "artifact: causal slice has 1001 records; it must be smaller than maxRecords 1000", 0, 0},
-		{long, 2000, 1000, "artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000", 0, 0},
+		{eventChain(1001), 1001, 2000, "artifact: causal slice has 1001 records; it must be smaller than maxRecords 1000" + sliceFix, 0, 0},
+		{long, 2000, 1000, "artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000" + sliceFix, 0, 0},
 		// 999 members leave room for the newest record.
 		{long, 2000, 999, "", 3000, 999},
 	} {
@@ -377,8 +465,12 @@ func TestTimelineDataErrors(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || tl.Window == nil || tl.Window.FromSeq != c.fromSeq || tl.Window.Extra != c.extraWant {
-			t.Errorf("slice cap %d: window %+v, err %v", c.cap, tl.Window, err)
+		if err != nil {
+			t.Errorf("slice cap %d: %v", c.cap, err)
+			continue
+		}
+		if tl.Window == nil || tl.Window.FromSeq != c.fromSeq || tl.Window.Extra != c.extraWant {
+			t.Errorf("slice cap %d: window %+v", c.cap, tl.Window)
 		}
 	}
 	// The count is of the slice's seqs found in the trace, each once.
@@ -387,7 +479,10 @@ func TestTimelineDataErrors(t *testing.T) {
 		seqs = append(seqs, q)
 	}
 	_, err := TimelineData(&rep, long, nil, Slice{Root: 2000, Seqs: seqs, Cap: 2000}, 1000)
-	if err == nil || err.Error() != "artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000" {
+	if err == nil || err.Error() != "artifact: causal slice has 1000 records; it must be smaller than maxRecords 1000"+sliceFix {
 		t.Errorf("hand-made slice: err = %v", err)
 	}
 }
+
+// sliceFix ends the slice error of ART-060 and §7: how to fix it with faultline render.
+const sliceFix = " (with faultline render: lower -slice-cap or raise -max-records)"

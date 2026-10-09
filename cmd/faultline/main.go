@@ -1,5 +1,13 @@
-// Command faultline is the faultline CLI: help, version and render in Phase 1 (spec ART §5.14);
-// sweep and minimize (Phase 3) and view (Phase 4) add one file and one table entry each.
+// Faultline is the command-line tool of faultline, a deterministic simulation testing tool for
+// Go. It works on the artifact directory that a failing faultline test writes for one seed.
+//
+// Usage:
+//
+//	faultline <command> [arguments]
+//
+// "faultline help" lists the commands, and "faultline help <command>" prints the usage, help text
+// and flags of one. For example, "faultline render <dir>" regenerates timeline.txt, hb.mmd and
+// timeline.html in dir from its report.json and trace.jsonl.
 package main
 
 import (
@@ -79,26 +87,38 @@ func usageText() string {
 	return b.String()
 }
 
-// newFlagSet returns a FlagSet with the conventions of ART-096.
+// newFlagSet returns a FlagSet with the conventions of ART-096. Its Usage writes the whole usage
+// to the FlagSet's output, so one usage text never spans two streams.
 func newFlagSet(name, usage string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: %s\n", usage)
+		fmt.Fprintf(fs.Output(), "usage: %s\n", usage)
 		fs.PrintDefaults()
 	}
 	return fs
 }
 
-// parseFlags parses args; ok is false when the command must return code (ART-096).
-func parseFlags(fs *flag.FlagSet, args []string) (code int, ok bool) {
-	if err := fs.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			return 0, false
-		}
-		return 2, false
+// parseFlags parses args; ok is false when the command must return code (ART-096). -h and -help
+// print the usage to stdout, as "faultline -h" does; another error prints the flag package's
+// message and then the usage to the FlagSet's output.
+func parseFlags(fs *flag.FlagSet, args []string, stdout io.Writer) (code int, ok bool) {
+	usage := fs.Usage
+	fs.Usage = func() {} // the flag package calls it on every error; it is called below instead
+	err := fs.Parse(args)
+	fs.Usage = usage
+	switch err {
+	case nil:
+		return 0, true
+	case flag.ErrHelp:
+		out := fs.Output()
+		fs.SetOutput(stdout)
+		fs.Usage()
+		fs.SetOutput(out)
+		return 0, false
 	}
-	return 0, true
+	fs.Usage()
+	return 2, false
 }
 
 // usageError prints "faultline <command>: <message>" and the usage, and returns 2 (ART-096).

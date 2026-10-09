@@ -20,7 +20,8 @@ type RenderOptions struct {
 }
 
 // Render regenerates timeline.txt, hb.mmd and timeline.html in dir from report.json and
-// trace.jsonl, and returns the absolute paths it wrote, in that order (ART-090).
+// trace.jsonl, and returns the absolute paths it wrote, in that order (ART-090). It changes no other
+// file, except that it removes the temporary files of an interrupted Render.
 func Render(dir string, opts RenderOptions) ([]string, error) {
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("artifact: render %s: "+format, append([]any{dir}, args...)...)
@@ -43,26 +44,35 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 	if err != nil {
 		return nil, fail("%w", err)
 	}
-	rf, err := os.Open(filepath.Join(abs, FileReport))
+	// readErr is fail for an error of reading the file name: a *fs.PathError gives its operation
+	// and inner error, so the path is not repeated, and is wrapped; a reader's error gives its text
+	// without the "artifact: " prefix.
+	readErr := func(name string, err error) error {
+		if pe, ok := err.(*fs.PathError); ok {
+			return fail("%s %s: %w", pe.Op, name, pe.Err)
+		}
+		return fail("%s", strings.TrimPrefix(err.Error(), "artifact: "))
+	}
+	b, err := os.ReadFile(filepath.Join(abs, FileReport))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fail("not a faultline artifact directory (no report.json); pass the directory of one seed, which holds report.json and trace.jsonl")
 	}
 	if err != nil {
-		return nil, fail("open %s: %w", FileReport, pathErr(err))
+		return nil, readErr(FileReport, err)
 	}
-	rep, err := ReadReport(rf)
-	rf.Close()
+	rep, err := ReadReport(bytes.NewReader(b))
 	if err != nil {
-		return nil, fail("%s", strings.TrimPrefix(err.Error(), "artifact: "))
+		return nil, readErr(FileReport, err)
 	}
+	// trace.jsonl is read as a stream: it can be large.
 	tf, err := os.Open(filepath.Join(abs, FileTrace))
 	if err != nil {
-		return nil, fail("open %s: %w", FileTrace, pathErr(err))
+		return nil, readErr(FileTrace, err)
 	}
 	tr, err := ReadTrace(tf)
 	tf.Close()
 	if err != nil {
-		return nil, fail("%s", strings.TrimPrefix(err.Error(), "artifact: "))
+		return nil, readErr(FileTrace, err)
 	}
 	// schedule.json is parsed and written again, as Write writes it, so only a schedule reaches
 	// timeline.html, never the content of some other file it may link to.
@@ -118,7 +128,7 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 	for _, o := range outputs {
 		tmp, err := writeTemp(abs, o.name, o.write)
 		if err != nil {
-			return nil, fail("write %s: %w", o.name, err)
+			return nil, fail("write %s: %w", o.name, pathErr(err))
 		}
 		tmps = append(tmps, tmp)
 	}
@@ -133,7 +143,7 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 	for i, o := range outputs {
 		target := filepath.Join(abs, o.name)
 		if err := os.Rename(tmps[i], target); err != nil {
-			return nil, fail("write %s: %w", o.name, err)
+			return nil, fail("write %s: %w", o.name, pathErr(err))
 		}
 		tmps[i] = ""
 		paths = append(paths, target)
@@ -144,12 +154,16 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 // tempPrefix is the name prefix of the temporary files Render writes for name.
 func tempPrefix(name string) string { return "." + name + ".tmp-" }
 
-// pathErr returns the inner error of a *fs.PathError, so that the message names the file once,
-// as Read's does.
+// pathErr returns the inner error of a *fs.PathError, or of the *os.LinkError of a failed rename,
+// so that the message names the file once, as Read's does.
 func pathErr(err error) error {
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
 		return pe.Err
+	}
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		return le.Err
 	}
 	return err
 }

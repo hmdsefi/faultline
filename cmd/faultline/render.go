@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 
 	"github.com/hmdsefi/faultline/artifact"
 )
@@ -15,7 +17,7 @@ func renderCommand() command {
 		name:    "render",
 		summary: "regenerate timeline.txt, hb.mmd and timeline.html in an artifact directory",
 		usage:   renderUsage,
-		help:    "Render regenerates timeline.txt, hb.mmd and timeline.html in an artifact directory from its\nreport.json and trace.jsonl. It does not change any other file.",
+		help:    "Render regenerates timeline.txt, hb.mmd and timeline.html in an artifact directory from its\nreport.json and trace.jsonl. It changes no other file, except that it removes the temporary\nfiles of an interrupted render.",
 		run:     runRender,
 		flags: func(stderr io.Writer) *flag.FlagSet {
 			fs, _, _ := renderFlags(stderr)
@@ -35,10 +37,14 @@ func renderFlags(stderr io.Writer) (fs *flag.FlagSet, sliceCap, maxRecords *int)
 // runRender implements ART-098.
 func runRender(args []string, stdout, stderr io.Writer) int {
 	fs, sliceCap, maxRecords := renderFlags(stderr)
-	if code, ok := parseFlags(fs, args); !ok {
+	if code, ok := parseFlags(fs, args, stdout); !ok {
 		return code
 	}
 	if fs.NArg() != 1 {
+		// The flag package stops at the first argument that is not a flag, as go does.
+		if fs.NArg() > 1 && slices.ContainsFunc(fs.Args()[1:], func(a string) bool { return strings.HasPrefix(a, "-") }) {
+			return usageError(fs, stderr, "render", "flags must come before the artifact directory")
+		}
 		return usageError(fs, stderr, "render", "want exactly one artifact directory")
 	}
 	if *sliceCap < 1 {

@@ -43,12 +43,18 @@ type TimelineSlice struct {
 // specialKinds are the node-lifecycle and failure kinds kept in a truncated timeline (ART-060).
 var specialKinds = []string{"kernel.add_node", "kernel.boot", "kernel.crash", "kernel.pause", "kernel.resume", "kernel.fail", "kernel.panic"}
 
+// special reports whether a truncated timeline keeps records of kind before the other records
+// (ART-060).
 func special(kind string) bool {
 	return strings.HasPrefix(kind, "fault.") || strings.HasPrefix(kind, "check.") || strings.HasPrefix(kind, "run.") || slices.Contains(specialKinds, kind)
 }
 
 // TimelineData builds the timeline data with at most maxRecords records (ART-060). schedule is the
-// content of schedule.json, or nil when there is none.
+// content of schedule.json, or nil when there is none. When the trace has more records than
+// maxRecords, it keeps the members of s found in the trace, then the newest special records
+// (fault.*, check.* and run.* kinds, the node lifecycle kinds, kernel.fail and kernel.panic) while
+// fewer than maxRecords/4 are kept, then the newest other records. When it truncates, it returns
+// an error if the members of s found in the trace number maxRecords or more.
 func TimelineData(rep *Report, tr *Trace, schedule []byte, s Slice, maxRecords int) (*Timeline, error) {
 	if rep == nil {
 		return nil, errors.New("artifact: report is nil")
@@ -65,7 +71,7 @@ func TimelineData(rep *Report, tr *Trace, schedule []byte, s Slice, maxRecords i
 	var window *TimelineWindow
 	count := n
 	if n > maxRecords {
-		x := newHBIndex(recs)
+		x := newSeqIndex(recs)
 		count = 0
 		for _, q := range s.Seqs {
 			if i, ok := x.index(q); ok && !include[i] {
@@ -74,7 +80,7 @@ func TimelineData(rep *Report, tr *Trace, schedule []byte, s Slice, maxRecords i
 			}
 		}
 		if count >= maxRecords {
-			return nil, fmt.Errorf("artifact: causal slice has %d records; it must be smaller than maxRecords %d", count, maxRecords)
+			return nil, fmt.Errorf("artifact: causal slice has %d records; it must be smaller than maxRecords %d (with faultline render: lower -slice-cap or raise -max-records)", count, maxRecords)
 		}
 		for i := n - 1; i >= 0; i-- {
 			if include[i] || !special(recs[i].Kind) {

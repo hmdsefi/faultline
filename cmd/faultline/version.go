@@ -22,7 +22,7 @@ func versionCommand() command {
 // runVersion implements ART-097.
 func runVersion(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("version", versionUsage, stderr)
-	if code, ok := parseFlags(fs, args); !ok {
+	if code, ok := parseFlags(fs, args, stdout); !ok {
 		return code
 	}
 	if fs.NArg() != 0 {

@@ -34,9 +34,8 @@ type hbIndex struct {
 }
 
 func newHBIndex(records []kernel.Record) *hbIndex {
-	x := &hbIndex{records: records, po: make([]int32, len(records))}
-	n := len(records)
-	x.contiguous = n == 0 || records[n-1].Seq-records[0].Seq+1 == uint64(len(records))
+	x := newSeqIndex(records)
+	x.po = make([]int32, len(records))
 	last := make(map[poKey]int32) // lookups only; never iterated
 	for i, r := range records {
 		x.po[i] = -1
@@ -50,6 +49,13 @@ func newHBIndex(records []kernel.Record) *hbIndex {
 		last[k] = int32(i)
 	}
 	return x
+}
+
+// newSeqIndex returns an index for index only. It skips the program order that preds needs, which
+// costs newHBIndex 4 bytes and a map lookup per record.
+func newSeqIndex(records []kernel.Record) *hbIndex {
+	n := len(records)
+	return &hbIndex{records: records, contiguous: n == 0 || records[n-1].Seq-records[0].Seq+1 == uint64(n)}
 }
 
 // index returns the position of seq in the record list.
