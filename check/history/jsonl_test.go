@@ -383,3 +383,56 @@ func clientToy(seed uint64, trace kernel.TraceConfig) (*kernel.Sim, *history.Rec
 	}
 	return s, r, s.RunUntil(kernel.Time(10 * time.Second))
 }
+
+// HIS-002, HIS-020: a value that is not valid UTF-8 is stored, written and recorded with U+FFFD
+// for each invalid byte, with the same bytes on Go 1.26 and Go 1.27 (ART-030 does the same for the
+// artifact files). Valid values are unchanged, and the file reads back.
+func TestInvalidUTF8(t *testing.T) {
+	h := newH()
+	h.r.Invoke("c1", "write", map[string]string{"k\xff": "a\xff\xfeb"})
+	h.r.Complete(1, history.OK, "x\xed\xa0\x80y")
+	// A json.Marshaler's bytes, which json.Marshal copies: a raw invalid byte, the escape and an
+	// escaped backslash; then the escape in bytes that are valid UTF-8.
+	h.r.Invoke("c2", "write", json.RawMessage("[\"\xff\",\"\\ufffd\",\"\\\\ufffd\"]"))
+	h.r.Complete(2, history.Info, json.RawMessage("\"t\\ufffdu\""))
+	// Valid: a backslash and "ufffd", U+FFFD itself, a non-ASCII letter and an escaped <.
+	h.r.Invoke("c1", "read", "\\ufffd \uFFFD é <")
+	// ~ stands for U+FFFD.
+	want := strings.ReplaceAll(`{"faultline_history":1,"ops":3}
+{"id":1,"process":"c1","f":"write","status":"ok","call":0,"return":0,"call_index":1,"return_index":2,"input":{"k~":"a~~b"},"output":"x~~~y"}
+{"id":2,"process":"c2","f":"write","status":"info","call":0,"return":0,"call_index":3,"return_index":4,"input":["~","~","\\ufffd"],"output":"t~u"}
+{"id":3,"process":"c1","f":"read","status":"pending","call":0,"return":0,"call_index":5,"return_index":0,"input":"\\ufffd ~ é \u003c","output":null}
+`, "~", "\uFFFD")
+	if got := jsonl(t, h.r); got != want {
+		t.Fatalf("WriteJSONL =\n%q\nwant\n%q", got, want)
+	}
+	if ops, err := history.Read(strings.NewReader(want)); err != nil || !reflect.DeepEqual(ops, h.r.Ops()) {
+		t.Fatalf("Read = %+v, %v\nwant %+v", ops, err, h.r.Ops())
+	}
+	// The records carry the stored bytes (HIS §8).
+	inv, cmp := h.records("history.invoke")[0], h.records("history.complete")[0]
+	if wantText := "c1 invoke write {\"k\uFFFD\":\"a\uFFFD\uFFFDb\"}"; inv.Text != wantText ||
+		attrString(inv) != "id=1, process=c1, f=write, input="+wantText[len("c1 invoke write "):] {
+		t.Errorf("history.invoke %q %q", inv.Text, attrString(inv))
+	}
+	if cmp.Text != "c1 ok write \"x\uFFFD\uFFFD\uFFFDy\"" {
+		t.Errorf("history.complete %q", cmp.Text)
+	}
+}
+
+// HIS-002, HIS §8: a json.Marshaler's bytes with two raw invalid bytes and no escape. Each byte
+// becomes U+FFFD (EF BF BD) in the stored bytes and in both records' text and attrs.
+func TestInvalidUTF8Raw(t *testing.T) {
+	h := newH()
+	raw := json.RawMessage("\"\xff\xfe\"")
+	h.r.Invoke("c1", "write", raw)
+	h.r.Complete(1, history.OK, raw)
+	want := "\"\xef\xbf\xbd\xef\xbf\xbd\""
+	op := h.r.Ops()[0]
+	inv, cmp := h.records("history.invoke")[0], h.records("history.complete")[0]
+	if rawString(t, op.Input) != want || rawString(t, op.Output) != want ||
+		attrString(inv) != "id=1, process=c1, f=write, input="+want || inv.Text != "c1 invoke write "+want ||
+		attrString(cmp) != "id=1, process=c1, f=write, status=ok, output="+want || cmp.Text != "c1 ok write "+want {
+		t.Fatalf("%q %q %q %q", op.Input, op.Output, attrString(inv), attrString(cmp))
+	}
+}

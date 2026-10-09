@@ -456,3 +456,37 @@ func BenchmarkWriteSchedule10k(b *testing.B) {
 		}
 	}
 }
+
+// FLT-028, FLT-004: Write refuses every string that is not valid UTF-8 and writes nothing, so a
+// written schedule has the same bytes on Go 1.26 and Go 1.27, whose json.Marshal differ only for
+// such strings (ART-030). Strings that take json.Marshal's escaping are written, and read back,
+// the same on both.
+func TestWriteInvalidUTF8(t *testing.T) {
+	for _, c := range []struct {
+		e    fault.Event
+		want string
+	}{
+		{fault.Event{Kind: "crash", Node: "n\xff"}, "crash: node is not valid UTF-8"},
+		{fault.Event{Kind: "isolate", Role: "r\xff"}, "isolate: role is not valid UTF-8"},
+		{fault.Event{Kind: "cut", Node: "n1", Peer: "\xed\xa0\x80"}, "cut: peer is not valid UTF-8"},
+		{fault.Event{Kind: "partition", Groups: [][]string{{"n1"}, {"n2", "\xfe"}}}, "partition: groups[1][1] is not valid UTF-8"},
+		{fault.Event{Kind: "corrupt", Node: "n1", Path: "/w\xff", Len: 1}, "corrupt: path is not valid UTF-8"},
+	} {
+		var buf bytes.Buffer
+		err := fault.Schedule{Events: []fault.Event{c.e}}.Write(&buf)
+		if err == nil || err.Error() != "fault: schedule: events[0]: "+c.want || buf.Len() != 0 {
+			t.Errorf("Write of %+v: %v, %d bytes", c.e, err, buf.Len())
+		}
+	}
+	// é, U+2028, <, &, >, U+FFFD itself, a quote, a backslash, U+0001 and DEL.
+	s := fault.Schedule{Events: []fault.Event{{At: 1, Kind: "partition", Groups: [][]string{{"é\u2028<&>"}, {"\uFFFD\"\\\x01\x7f"}}}}}
+	want := "{\n  \"faultline_schedule\": 1,\n  \"events\": [\n" +
+		"    {\"at\": \"1ns\", \"kind\": \"partition\", \"groups\": [[\"é\\u2028\\u003c\\u0026\\u003e\"], [\"\uFFFD\\\"\\\\\\u0001\x7f\"]]}\n" +
+		"  ]\n}\n"
+	if got := write(t, s); got != want {
+		t.Fatalf("Write =\n%q\nwant\n%q", got, want)
+	}
+	if back := read(t, want); !reflect.DeepEqual(back.Events, s.Events) {
+		t.Fatalf("read back %+v", back.Events)
+	}
+}
