@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -200,6 +201,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		r.writeResult(st, res)
 	}()
 	seed := res.seed
+	prev := r.previousReport(seed)
 	res.attempts = 1
 	a1 := r.attempt(st, seed, r.plan.primaryTrace, r.plan.env.schedule, true)
 	if a1.setupErr != "" {
@@ -244,12 +246,27 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 
 	if outcome == nil {
 		res.status = "pass"
+		if r.plan.passArtifacts {
+			r.writePassArtifact(st, res, a1)
+		}
+		if prev != nil && prev.Status == "fail" && prev.Failure != nil {
+			warnings := compareReports(prev, versions(r.build), optionsHash(r.plan.opts, r.plan.env.scheduleHash))
+			msg := fmt.Sprintf("faultline: seed 0x%016x passed; the previous artifact at %s recorded %s", seed, prev.Dir, prev.Failure.Signature)
+			for _, w := range warnings {
+				msg += "\nwarning: " + w
+			}
+			st.Log(msg)
+		}
 		completed = true
 		return
 	}
 
 	res.status, res.fail = "fail", outcome
 	var warnings []string
+	if prev != nil {
+		warnings = compareReports(prev, versions(r.build), optionsHash(r.plan.opts, r.plan.env.scheduleHash))
+	}
+	warnings = append(warnings, art.warnings...)
 	rep := r.replay(seed)
 	dir := r.artifactDir(seed)
 	artifactsLine := "off"
@@ -328,7 +345,80 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 		Schedule: &sched,
 		History:  art.history,
 	}
+	if len(art.extra) > 0 {
+		a.Extra = map[string][]byte{}
+		for _, e := range art.extra {
+			a.Extra[e.name] = e.data
+		}
+	}
 	return a
+}
+
+// writePassArtifact writes the artifact of a passing seed under FAULTLINE_TRACE=full (API-073).
+func (r *runner) writePassArtifact(st *testing.T, res *seedResult, a1 attemptResult) {
+	if r.artifactDir(res.seed) == "" {
+		return
+	}
+	lines := func(dir string) []string {
+		return []string{
+			fmt.Sprintf("faultline: seed 0x%016x passed: %d events, ended at t=%s (%s)", res.seed, a1.executed, a1.now, a1.stop),
+			fmt.Sprintf("artifacts: %s%c", dir, os.PathSeparator),
+		}
+	}
+	dir, err := r.writeArtifact(res.seed, r.buildArtifact(st, res, nil, a1, nil), func(dir string) string {
+		return "--- PASS: " + st.Name() + "\n" + joinLines(lines(dir), "    ")
+	})
+	if err != nil {
+		res.artifactErr = err.Error()
+		st.Errorf("faultline: writing artifacts: %v", err)
+		return
+	}
+	res.artifactDir = dir
+	st.Log(strings.Join(lines(dir), "\n"))
+}
+
+// previousReport reads the report of a previous run of the same seed (API-083): only when the
+// seed list came from FAULTLINE_SEED and artifacts are on. When the seed's directory holds the
+// report of another test whose name maps to the same folder, it reads the one in artifact.AltDir,
+// where writeArtifact put this test's.
+func (r *runner) previousReport(seed uint64) *artifact.Report {
+	if r.plan.seedSource != "env" {
+		return nil
+	}
+	root := r.artifactRoot()
+	if root == "" {
+		return nil
+	}
+	pkg, test := r.build.importPath, r.t.Name()
+	for _, dir := range []string{artifact.Dir(root, pkg, test, seed), artifact.AltDir(root, pkg, test, seed)} {
+		rep := readReportFile(dir)
+		if rep == nil {
+			return nil
+		}
+		if rep.Package == pkg && rep.Test == test && rep.Seed == fmt.Sprintf("0x%016x", seed) {
+			return rep
+		}
+	}
+	return nil
+}
+
+// readReportFile reads report.json in dir, or returns nil when it is missing or unreadable. Only a
+// regular file is opened, so a link is not followed and a FIFO does not block the run.
+func readReportFile(dir string) *artifact.Report {
+	path := filepath.Join(dir, artifact.FileReport)
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	rep, err := artifact.ReadReport(f)
+	if err != nil {
+		return nil
+	}
+	return rep
 }
 
 // goexitMessage is the message of a seed that its primary attempt stopped through Goexit (API-101).
