@@ -8,4 +8,6 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+require github.com/hmdsefi/gograph v0.8.2 // indirect
+
 replace github.com/hmdsefi/faultline => ../..
