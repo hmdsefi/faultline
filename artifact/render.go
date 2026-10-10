@@ -91,7 +91,7 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 		}
 		sched = buf.Bytes()
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fail("read %s: %w", FileSchedule, pathErr(err))
+		return nil, readErr(FileSchedule, err)
 	}
 	root := uint64(0)
 	if rep.Failure != nil {

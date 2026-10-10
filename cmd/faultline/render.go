@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"slices"
-	"strings"
 
 	"github.com/hmdsefi/faultline/artifact"
 )
@@ -29,7 +27,8 @@ func renderCommand() command {
 	}
 }
 
-// renderFlags defines the flags of render (ART-098).
+// renderFlags defines the flags of render (ART-098). Every flag takes a number: misplacedFlag
+// relies on no render flag taking a string value, which could be "--".
 func renderFlags(stderr io.Writer) (fs *flag.FlagSet, sliceCap, maxRecords *int) {
 	fs = newFlagSet("render", renderUsage, stderr)
 	sliceCap = fs.Int("slice-cap", artifact.DefaultSliceCap, "maximum number of records in the causal slice (hb.mmd, timeline marks)")
@@ -44,8 +43,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		// The flag package stops at the first argument that is not a flag, as go does.
-		if fs.NArg() > 1 && slices.ContainsFunc(fs.Args()[1:], func(a string) bool { return strings.HasPrefix(a, "-") }) {
+		if fs.NArg() > 1 && misplacedFlag(args, fs.NArg()) {
 			return usageError(fs, stderr, "render", "flags must come before the artifact directory")
 		}
 		return usageError(fs, stderr, "render", "want exactly one artifact directory")
@@ -65,4 +63,26 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, p)
 	}
 	return 0
+}
+
+// misplacedFlag reports whether an argument after the first positional one is a flag (ART-098):
+// the flag package stops at the first argument that is not a flag, as go does, so such a flag
+// was not parsed. An argument is a flag when it starts with "-", is not "-" alone, and no "--"
+// comes before it. args are the arguments Parse got, and the last nArg of them are the positional
+// ones. A "--" that Parse consumed is the argument right before those: no render flag takes a
+// string value, which could be "--".
+func misplacedFlag(args []string, nArg int) bool {
+	first := len(args) - nArg
+	if first > 0 && args[first-1] == "--" {
+		return false
+	}
+	for _, a := range args[first+1:] {
+		if a == "--" {
+			return false
+		}
+		if len(a) > 1 && a[0] == '-' {
+			return true
+		}
+	}
+	return false
 }

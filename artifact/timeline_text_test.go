@@ -25,19 +25,19 @@ nodes:    1=n1 [server], 2=n2 [server]
 slice:    5 records, root 12, truncated at cap 5
 legend:   ! failure record, * causal slice, <- cause
 
-  SEQ         TIME NODE KIND            TEXT
-    1 0.000000000s -    kernel.start    start seed=0x0000000000000001 tie_break=seeded
-    2 0.000000000s n1#0 kernel.add_node n1 tags=server offset_ns=0 drift_ppm=0 <-1
-    3 0.000000000s n2#0 kernel.add_node n2 tags=server offset_ns=0 drift_ppm=0 <-2
-    4 0.000000000s n1#0 kernel.event    boot id=1 <-2
-    5 0.000000000s n1#1 kernel.boot     boot <-4
-    6 0.000000000s n2#0 kernel.event    boot id=2 <-3
-*   7 0.000000000s n2#1 kernel.boot     boot <-6
-    8 0.001000000s n1#1 kernel.event    tick id=3 <-5
-*   9 0.001000000s n1#1 net.send        send #1 n1 -> n2: "ping" msg=1 from=n1 to=n2 payload="\"ping\"" <-8
-*  10 0.003000000s n2#1 kernel.event    net.deliver id=4 <-9
-*  11 0.003000000s n2#1 net.deliver     deliver #1.1 n1 -> n2 msg=1 copy=1 from=n1 to=n2 latency_ns=2000000 <-10
-!  12 0.003000000s -    check.violation invariant "no pong" violated kind=invariant check="no pong" error="got ping" event=4 <-11
+  SEQ         TIME NODE   KIND            TEXT
+    1 0.000000000s global kernel.start    start seed=0x0000000000000001 tie_break=seeded
+    2 0.000000000s n1#0   kernel.add_node n1 tags=server offset_ns=0 drift_ppm=0 <-1
+    3 0.000000000s n2#0   kernel.add_node n2 tags=server offset_ns=0 drift_ppm=0 <-2
+    4 0.000000000s n1#0   kernel.event    boot id=1 <-2
+    5 0.000000000s n1#1   kernel.boot     boot <-4
+    6 0.000000000s n2#0   kernel.event    boot id=2 <-3
+*   7 0.000000000s n2#1   kernel.boot     boot <-6
+    8 0.001000000s n1#1   kernel.event    tick id=3 <-5
+*   9 0.001000000s n1#1   net.send        send #1 n1 -> n2: "ping" msg=1 from=n1 to=n2 payload="\"ping\"" <-8
+*  10 0.003000000s n2#1   kernel.event    net.deliver id=4 <-9
+*  11 0.003000000s n2#1   net.deliver     deliver #1.1 n1 -> n2 msg=1 copy=1 from=n1 to=n2 latency_ns=2000000 <-10
+!  12 0.003000000s global check.violation invariant "no pong" violated kind=invariant check="no pong" error="got ping" event=4 <-11
 `
 
 // AT-ART-09
@@ -67,8 +67,8 @@ func TestWriteTimelineTextDroppedAndEscapes(t *testing.T) {
 	for _, want := range []string{
 		"records:  12 (dropped 3), trace hash 0x00000000000000aa\n",
 		"slice:    none\n",
-		"  SEQ         TIME NODE KIND            TEXT\n  ... 3 earlier records were not retained\n",
-		`    1 0.000000000s -    kernel.start    a\tb\\c\nd\re empty=""` + "\n",
+		"  SEQ         TIME NODE   KIND            TEXT\n  ... 3 earlier records were not retained\n",
+		`    1 0.000000000s global kernel.start    a\tb\\c\nd\re empty=""` + "\n",
 	} {
 		if !bytes.Contains(buf.Bytes(), []byte(want)) {
 			t.Errorf("missing %q in\n%s", want, out)
@@ -94,8 +94,8 @@ nodes:    none
 slice:    none
 legend:   ! failure record, * causal slice, <- cause
 
-  SEQ         TIME NODE KIND TEXT
-    1 0.000000000s -    k    t
+  SEQ         TIME NODE   KIND TEXT
+    1 0.000000000s global k    t
 `
 	one := `faultline timeline v1
 test:
@@ -108,8 +108,8 @@ nodes:    none
 slice:    1 records, root 1, truncated at cap 7
 legend:   ! failure record, * causal slice, <- cause
 
-  SEQ         TIME NODE KIND TEXT
-!   1 0.000000000s -    k
+  SEQ         TIME NODE   KIND TEXT
+!   1 0.000000000s global k
 `
 	wide := `faultline timeline v1
 test:     TestWide/seed=0x00000000000003e8
@@ -126,7 +126,7 @@ legend:   ! failure record, * causal slice, <- cause
   ... 997 earlier records were not retained
 *  998  0.500000000s node7#12 x               ` + strings.Repeat("é", 45) + `
 *  999 12.500000000s dé#1    net.send        send bare=a.b_c:d/e@f%g+h,i#j|k-l sp="a b" empty="" <-998
-! 1000 12.500000000s -        check.violation boom <-999
+! 1000 12.500000000s global   check.violation boom <-999
 `
 	escaped := `faultline timeline v1
 test:     T\tx
@@ -157,8 +157,8 @@ nodes:    none
 slice:    none
 legend:   ! failure record, * causal slice, <- cause
 
-  SEQ         TIME NODE KIND        TEXT
-    1 0.000000000s -    k\x7f\u009b \u202eevil\u00a0x\x00\U000e0001 \x1bk\u2028=v
+  SEQ         TIME NODE   KIND        TEXT
+    1 0.000000000s global k\x7f\u009b \u202eevil\u00a0x\x00\U000e0001 \x1bk\u2028=v
 `
 	header := TraceHeader{Subtest: "header", Package: "header", Seed: "header", TraceHash: "header", Records: 99}
 	wideRecs := []kernel.Record{

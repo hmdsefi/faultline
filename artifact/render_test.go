@@ -278,24 +278,37 @@ func TestRenderErrors(t *testing.T) {
 			t.Errorf("%s: %v", c.name, err)
 		}
 	}
-	// An input that cannot be read, such as a directory in its place, gives the operation and the
-	// *fs.PathError's inner error, wrapped.
-	for _, name := range []string{FileReport, FileTrace} {
-		dir := renderWritten(t, fixtureArtifact())
-		p := filepath.Join(dir, name)
-		if err := os.Remove(p); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Mkdir(p, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		var pe *fs.PathError
-		if _, err := os.ReadFile(p); !errors.As(err, &pe) {
-			t.Fatalf("reading a directory: %v", err)
-		}
-		want := "artifact: render " + dir + ": " + pe.Op + " " + name + ": " + pe.Err.Error()
-		if _, err := Render(dir, RenderOptions{}); err == nil || err.Error() != want || !errors.Is(err, pe.Err) {
-			t.Errorf("%s a directory: %v, want %s", name, err, want)
+	// An input that cannot be opened (a symbolic link to itself) or read (a directory in its place)
+	// gives the operation and the *fs.PathError's inner error, wrapped, in the same words as Read.
+	a := fixtureArtifact()
+	a.Schedule = &fault.Schedule{Version: 1}
+	for _, name := range []string{FileReport, FileTrace, FileSchedule} {
+		for _, c := range []struct {
+			what  string
+			place func(p string) error
+		}{
+			{"a link to itself", func(p string) error { return os.Symlink(filepath.Base(p), p) }},
+			{"a directory", func(p string) error { return os.Mkdir(p, 0o755) }},
+		} {
+			dir := renderWritten(t, a)
+			p := filepath.Join(dir, name)
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.place(p); err != nil {
+				t.Fatal(err)
+			}
+			var pe *fs.PathError
+			if _, err := os.ReadFile(p); !errors.As(err, &pe) {
+				t.Fatalf("reading %s: %v", c.what, err)
+			}
+			reason := pe.Op + " " + name + ": " + pe.Err.Error()
+			if _, err := Render(dir, RenderOptions{}); err == nil || err.Error() != "artifact: render "+dir+": "+reason || !errors.Is(err, pe.Err) {
+				t.Errorf("Render, %s as %s: %v, want reason %q", name, c.what, err, reason)
+			}
+			if _, err := Read(dir); err == nil || err.Error() != "artifact: "+dir+": "+reason || !errors.Is(err, pe.Err) {
+				t.Errorf("Read, %s as %s: %v, want reason %q", name, c.what, err, reason)
+			}
 		}
 	}
 }
