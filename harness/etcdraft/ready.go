@@ -415,5 +415,8 @@ func (inc *incarnation) applyConf(e *raftpb.Entry) bool {
 	c.o.Apply(inc.now(), inc.n.Name(), inc.s.id, e)
 	inc.emitApply(e, cmd, dup)
 	inc.applied = e.GetIndex()
+	if cfg.Membership.Enabled && !cfg.noConfSnapshot {
+		return inc.takeSnapshot(e.GetIndex()) // ETC-174, after oracle.Apply so refHash[i] exists
+	}
 	return true
 }

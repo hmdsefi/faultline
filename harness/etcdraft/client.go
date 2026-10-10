@@ -17,6 +17,7 @@ type clientKind uint8
 const (
 	workloadClient clientKind = iota
 	probeClient
+	adminClient
 )
 
 // clientOp is a client's pending operation.
@@ -56,6 +57,8 @@ func (cl *client) boot(n *kernel.Node) {
 		cl.think()
 	case probeClient:
 		cl.probeBoot()
+	case adminClient:
+		cl.adminWait()
 	}
 }
 
@@ -155,8 +158,11 @@ func (cl *client) onOpTimeout() {
 
 // next continues after an operation ended without StatusOK.
 func (cl *client) next() {
-	if cl.kind == workloadClient {
+	switch cl.kind {
+	case workloadClient:
 		cl.think()
+	case adminClient:
+		cl.adminWait()
 	}
 }
 
