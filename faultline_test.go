@@ -6,12 +6,14 @@ package faultline_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -183,8 +185,9 @@ func TestFailureArtifact(t *testing.T) {
 	if rep.Versions.Faultline == "" || !regexp.MustCompile(`^0x[0-9a-f]{16}$`).MatchString(rep.OptionsHash) {
 		t.Errorf("versions.faultline %q, options_hash %q", rep.Versions.Faultline, rep.OptionsHash)
 	}
-	if !strings.HasPrefix(rep.Replay.Command, "FAULTLINE_SEED="+s1+" go test") || !strings.HasSuffix(rep.Replay.Command, " -run '^TestScenario$' "+pkgPath) {
-		t.Errorf("replay.command %q", rep.Replay.Command)
+	if !strings.HasPrefix(rep.Replay.Command, "FAULTLINE_SEED="+s1+" go test -v") || !strings.HasSuffix(rep.Replay.Command, " -run '^TestScenario$' "+pkgPath) ||
+		!maps.Equal(rep.Replay.Env, map[string]string{"FAULTLINE_SEED": s1}) {
+		t.Errorf("replay.command %q, replay.env %v", rep.Replay.Command, rep.Replay.Env)
 	}
 
 	headline := "faultline: run exceeded MaxEvents (1000) at t=0.000000000s (event 1000)"
@@ -358,6 +361,101 @@ func TestReruns(t *testing.T) {
 	}
 }
 
+var _ = scenario("env-mismatch", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, func(w *faultline.World) {
+		mismatchCalls++
+		addTicker(w)
+		w.Logf("call %d", mismatchCalls)
+	})
+})
+
+// envCheckCalls counts the body calls of a child process.
+var envCheckCalls int
+
+var _ = scenario("env-skip", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, func(w *faultline.World) {
+		envCheckCalls++
+		addTicker(w)
+		if envCheckCalls == 2 {
+			w.T().Skip("only in the check attempt")
+		}
+	})
+})
+
+var replayRe = regexp.MustCompile(`\n *replay:    (.*) go test -v.* -run '\^TestScenario\$' ` + regexp.QuoteMeta(pkgPath) + `\n`)
+
+// replayEnv returns the variables of the replay command in out.
+func replayEnv(t *testing.T, out string) []string {
+	t.Helper()
+	m := replayRe.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no replay command:\n%s", out)
+	}
+	return strings.Fields(m[1])
+}
+
+// AT-API-48; API-080: a determinism failure that FAULTLINE_CHECK_DETERMINISM found replays with
+// that variable, so the printed command fails again: a hash mismatch (artifacts written) and a
+// check attempt that stopped (API-072, none written). Options.CheckDeterminism needs no variable,
+// and neither does any other outcome of a run with the variable set: an ordinary failure, a
+// determinism failure of the artifact re-run, and a passing seed's pass artifact.
+func TestRunEnvCheckReplay(t *testing.T) {
+	s0 := fmt.Sprintf("0x%016x", seedK(0))
+	want := []string{"FAULTLINE_SEED=" + s0, "FAULTLINE_CHECK_DETERMINISM=1"}
+	for _, name := range []string{"env-mismatch", "env-skip"} {
+		root := t.TempDir()
+		o, code := runScenario(t, name, []string{"FAULTLINE_CHECK_DETERMINISM=1", "FAULTLINE_ARTIFACTS=" + root})
+		env := replayEnv(t, o)
+		if code != 1 || !strings.Contains(o, "faultline: determinism failure") || !slices.Equal(env, want) {
+			t.Fatalf("%s: exit %d, replay variables %q\n%s", name, code, env, o)
+		}
+		if name == "env-mismatch" {
+			rep := readReport(t, seedDir(root, seedK(0)))
+			if !maps.Equal(rep.Replay.Env, map[string]string{"FAULTLINE_SEED": s0, "FAULTLINE_CHECK_DETERMINISM": "1"}) {
+				t.Errorf("%s: replay.env %v", name, rep.Replay.Env)
+			}
+		}
+		o, code = runScenario(t, name, append(env, "FAULTLINE_ARTIFACTS="+t.TempDir()))
+		if code != 1 || !strings.Contains(o, "faultline: determinism failure") {
+			t.Errorf("%s: the replay command did not fail again: exit %d\n%s", name, code, o)
+		}
+	}
+	o, code := runScenario(t, "check-mismatch", nil)
+	if env := replayEnv(t, o); code != 1 || !slices.Equal(env, want[:1]) {
+		t.Errorf("Options.CheckDeterminism: exit %d, replay variables %q\n%s", code, env, o)
+	}
+
+	// With the variable set, these outcomes replay with the seed alone.
+	for _, c := range []struct {
+		scenario string
+		env      []string
+		seed     uint64
+	}{
+		{"fails-for-0x1", []string{"FAULTLINE_SEED=0x1"}, 1}, // an ordinary failure has no determinism failure to look at
+		{"rerun-mismatch", nil, seedK(0)},                    // a determinism failure, but of the artifact re-run, not of the check
+	} {
+		root := t.TempDir()
+		o, code := runScenario(t, c.scenario, append(c.env, "FAULTLINE_CHECK_DETERMINISM=1", "FAULTLINE_ARTIFACTS="+root))
+		seed := fmt.Sprintf("0x%016x", c.seed)
+		env := replayEnv(t, o)
+		if code != 1 || !slices.Equal(env, []string{"FAULTLINE_SEED=" + seed}) {
+			t.Errorf("%s: exit %d, replay variables %q\n%s", c.scenario, code, env, o)
+		}
+		if rep := readReport(t, seedDir(root, c.seed)); !maps.Equal(rep.Replay.Env, map[string]string{"FAULTLINE_SEED": seed}) {
+			t.Errorf("%s: replay.env %v", c.scenario, rep.Replay.Env)
+		}
+	}
+	// A passing seed has no failure to replay, so its pass artifact's command has the seed alone.
+	root := t.TempDir()
+	o, code = runScenario(t, "pingpong-full", []string{"FAULTLINE_CHECK_DETERMINISM=1", "FAULTLINE_TRACE=full", "FAULTLINE_ARTIFACTS=" + root})
+	if code != 0 {
+		t.Fatalf("pass artifact: exit %d\n%s", code, o)
+	}
+	if rep := readReport(t, seedDir(root, seedK(0))); rep.Status != "pass" || !maps.Equal(rep.Replay.Env, map[string]string{"FAULTLINE_SEED": s0}) {
+		t.Errorf("pass artifact: status %s, replay.env %v", rep.Status, rep.Replay.Env)
+	}
+}
+
 // raceEnabled reports whether this test binary was built with -race: its build settings then hold
 // -race=true (API-080).
 func raceEnabled() bool {
@@ -408,16 +506,18 @@ var goexitCalls = map[uint64]int{}
 
 // Scenario goexit ends each seed through Goexit as GOEXIT says: "<how>" in the primary attempt,
 // "<how>-rerun" in the artifact re-run after invariant "tick 5" failed, "<how>-check" in the
-// CheckDeterminism attempt after the primary attempt passed, "<how>-diag" in the first diagnostic
-// attempt after a CheckDeterminism mismatch, or "<how>-rediag" in the diagnostic attempt after an
-// artifact re-run mismatch ("-diag" and "-rediag" log each call's number, so every attempt's trace
+// CheckDeterminism attempt after the primary attempt passed, "<how>-checkdiff" in that attempt when
+// it also differs from the primary attempt, "<how>-diag" in the first diagnostic attempt after a
+// CheckDeterminism mismatch, or "<how>-rediag" in the diagnostic attempt after an artifact re-run
+// mismatch ("-checkdiff", "-diag" and "-rediag" log each call's number, so every attempt's trace
 // differs). how is skip (w.T().Skip in body), setup (a misuse panic in body, a setup error), body
 // (w.T().Fatalf in body, before the first event), tick (w.T().Fatalf in the 3rd tick), tickskip
-// (w.T().Skip in the 3rd tick) or errorskip (w.T().Errorf, then w.T().Skip, in the 3rd tick).
+// (w.T().Skip in the 3rd tick), errorskip (w.T().Errorf, then w.T().Skip, in the 3rd tick) or
+// error (w.T().Errorf in the 3rd tick, which does not stop the attempt).
 var _ = scenario("goexit", func(t *testing.T) {
 	how, where, _ := strings.Cut(os.Getenv("GOEXIT"), "-")
-	stop := map[string]int{"": 1, "rerun": 2, "check": 2, "diag": 3, "rediag": 3}[where] // the body call that stops
-	faultline.Run(t, faultline.Options{Seeds: 2, Duration: time.Second, CheckDeterminism: where == "check" || where == "diag"}, func(w *faultline.World) {
+	stop := map[string]int{"": 1, "rerun": 2, "check": 2, "checkdiff": 2, "diag": 3, "rediag": 3}[where] // the body call that stops
+	faultline.Run(t, faultline.Options{Seeds: 2, Duration: time.Second, CheckDeterminism: where == "check" || where == "checkdiff" || where == "diag"}, func(w *faultline.World) {
 		goexitCalls[w.Seed()]++
 		tk := addTicker(w)
 		if where == "rerun" || where == "rediag" {
@@ -428,7 +528,7 @@ var _ = scenario("goexit", func(t *testing.T) {
 				return nil
 			})
 		}
-		if where == "diag" || where == "rediag" {
+		if where == "checkdiff" || where == "diag" || where == "rediag" {
 			w.Logf("call %d", goexitCalls[w.Seed()])
 		}
 		if goexitCalls[w.Seed()] != stop {
@@ -460,6 +560,12 @@ var _ = scenario("goexit", func(t *testing.T) {
 					w.T().Skip("skip")
 				}
 			}
+		case "error":
+			tk.onTick = func(n *kernel.Node, c int) {
+				if c == 3 {
+					w.T().Errorf("soft")
+				}
+			}
 		}
 	})
 })
@@ -468,7 +574,8 @@ var _ = scenario("goexit", func(t *testing.T) {
 // attempt. In the primary attempt API-101's cases apply in order, and a skip after t.Errorf is not
 // a skip. A Goexit in a later attempt, a skip and a setup error included, keeps the seed's outcome:
 // the primary attempt's failure after the artifact re-run, the determinism failure in a diagnostic
-// attempt. In the check attempt after a passing primary attempt it is a determinism failure. The
+// attempt. In the check attempt after a passing primary attempt it is a determinism failure, and
+// so is t.Errorf there (AT-API-49), which does not stop the attempt. The
 // console then shows that failure, then a note that names the attempt. events and trace_hash are
 // written only when the primary attempt completed. A failing seed stops the seed loop; a skipped
 // one does not. Goexit never writes artifacts.
@@ -478,7 +585,7 @@ func TestGoexitOutcomes(t *testing.T) {
 	misuse := "faultline: World.RunFor: negative duration -1s"
 	fatal, skip, setup := "t.FailNow or t.Fatal", "t.SkipNow or t.Skip", "a setup error"
 	tick3, early := " at t=0.030000000s (event 4)", " before its first event"
-	replay := "replay:    FAULTLINE_SEED=" + s0 + " go test"
+	replay := "replay:    FAULTLINE_SEED=" + s0 + " go test -v"
 	// primary is API-101's note.
 	primary := func(how string) []string {
 		return []string{"faultline: seed " + s0 + " stopped by " + how + tick3 + "; no artifacts were written",
@@ -489,6 +596,13 @@ func TestGoexitOutcomes(t *testing.T) {
 		return append(failure, "faultline: the "+attempt+" of seed "+s0+" stopped by "+stop+"; no artifacts were written",
 			"  the first run did not stop, so the test depends on something outside the seed; the failure above is the seed's outcome", replay)
 	}
+	// marked is the determinism failure of t.Errorf in the check attempt, then API-072's note.
+	marked := "marked the test failed (t.Error, t.Errorf or t.Fail) at t=1.000000000s"
+	markedCheck := []string{"faultline: determinism failure at t=1.000000000s",
+		"  the determinism check " + marked + "; the first run passed with trace hash HASH",
+		"  common causes: state kept between runs in the same process (package-level variables, sync.Once, caches), map iteration order, global math/rand, wall-clock time, goroutines",
+		"faultline: the determinism check of seed " + s0 + " " + marked + "; no artifacts were written",
+		"  the first run did not mark the test failed, so the test depends on something outside the seed; the failure above is the seed's outcome", replay}
 	tick5 := []string{`faultline: invariant "tick 5" violated at t=0.050000000s (event 6)`, "  five"}
 	causes := "  common causes: state kept between runs in the same process (package-level variables, sync.Once, caches), map iteration order, global math/rand, wall-clock time, goroutines"
 	// check is the determinism failure of a stop in the check attempt, diag that of a stop in a
@@ -529,6 +643,7 @@ func TestGoexitOutcomes(t *testing.T) {
 		{"skip-check", 1, 1, "fail", "determinism:", anyValue{}, 0.0, check(skip+early, "0.000000000s"), true},
 		{"setup-check", 1, 1, "fail", "determinism:", anyValue{}, 0.0, check(setup+early, "0.000000000s"), true},
 		{"tick-check", 1, 1, "fail", "determinism:", anyValue{}, 3e7, check(fatal+tick3, "0.030000000s"), true},
+		{"error-check", 1, 1, "fail", "determinism:", anyValue{}, 1e9, markedCheck, true},
 		{"skip-diag", 1, 1, "fail", "determinism:", anyValue{}, 0.0, diag(skip + early), true},
 		{"tickskip-diag", 1, 1, "fail", "determinism:", anyValue{}, 3e7, diag(skip + tick3), true},
 		{"tick-rediag", 1, 1, "fail", "determinism:", anyValue{}, 3e7, rediag(fatal + tick3), true},
@@ -560,6 +675,26 @@ func TestGoexitOutcomes(t *testing.T) {
 	}
 }
 
+// API-072, API-070: a check attempt that marked the test failed and also differs from the primary
+// attempt is an ordinary determinism failure. The hash mismatch comes first, so the diagnostic
+// attempts find the first differing record and the artifacts are written; the marked case's note
+// (no artifacts, no diagnosis) does not apply.
+func TestGoexitErrorCheckDiverges(t *testing.T) {
+	root := t.TempDir()
+	o, code, lines := runResults(t, "goexit", "GOEXIT=error-checkdiff", "FAULTLINE_ARTIFACTS="+root)
+	s0 := fmt.Sprintf("0x%016x", seedK(0))
+	dir := seedDir(root, seedK(0))
+	if code != 1 || len(lines) != 1 || !strings.Contains(o, "faultline: determinism failure: two runs of seed "+s0+" gave trace hashes ") ||
+		!strings.Contains(o, "artifacts: "+dir+string(os.PathSeparator)+"\n") || strings.Contains(o, "marked the test failed") || strings.Contains(o, "no artifacts were written") {
+		t.Fatalf("exit %d, %d results lines\n%s", code, len(lines), o)
+	}
+	checkLine(t, "error-checkdiff", lines[0], "status", "fail", "signature", "determinism:", "artifact", dir)
+	d := readReport(t, dir).Failure.Determinism
+	if d == nil || d.Context != "check_determinism" || len(d.Hashes) != 4 || d.Diff == nil || d.Diff.A.Text != "call 3" || d.Diff.B.Text != "call 4" {
+		t.Errorf("determinism %+v", d)
+	}
+}
+
 var _ = scenario("empty-error", func(t *testing.T) {
 	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, func(w *faultline.World) {
 		addTicker(w)
@@ -583,7 +718,15 @@ func TestResultsFile(t *testing.T) {
 	}
 }
 
-// API-074: where a failure artifact goes. The default root is faultline under the temporary
+// defaultRoot is API-074's default artifact root under tmp: one folder per user.
+func defaultRoot(tmp string) string {
+	if uid := os.Getuid(); uid != -1 {
+		return filepath.Join(tmp, "faultline-"+strconv.Itoa(uid))
+	}
+	return filepath.Join(tmp, "faultline")
+}
+
+// API-074: where a failure artifact goes. The default root is faultline-<uid> under the temporary
 // directory; when the seed's folder holds another test's artifact it is AltDir, which the
 // console, report.txt and the results line name; a write error is printed and goes to the
 // results line's artifact_error.
@@ -601,7 +744,7 @@ func TestArtifactLocation(t *testing.T) {
 		env  []string
 		dir  string // "" when the write fails
 	}{
-		{"default root", []string{"FAULTLINE_ARTIFACTS=", "TMPDIR=" + tmp}, artifact.Dir(filepath.Join(tmp, "faultline"), pkgPath, "TestScenario", seedK(0))},
+		{"default root", []string{"FAULTLINE_ARTIFACTS=", "TMPDIR=" + tmp}, artifact.Dir(defaultRoot(tmp), pkgPath, "TestScenario", seedK(0))},
 		{"folder of another test", []string{"FAULTLINE_ARTIFACTS=" + root}, artifact.AltDir(root, pkgPath, "TestScenario", seedK(0))},
 		{"write error", []string{"FAULTLINE_ARTIFACTS=" + file}, ""},
 	}

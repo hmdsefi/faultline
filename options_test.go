@@ -35,7 +35,7 @@ func TestApplyDefaults(t *testing.T) {
 			t.Errorf("applyDefaults(%+v) = %+v; want it unchanged", in, got)
 		}
 	}
-	if DefaultSeeds != 20 || DefaultDuration != 60*time.Second || DefaultMaxEvents != 10_000_000 || ShortSeeds != 5 || MaxEnvSeeds != 1_000_000 {
+	if DefaultSeeds != 20 || DefaultDuration != 60*time.Second || DefaultMaxEvents != 10_000_000 || ShortSeeds != 5 || MaxSeeds != 1_000_000 {
 		t.Fatal("default constants changed")
 	}
 }
@@ -49,9 +49,9 @@ func TestValidateOptions(t *testing.T) {
 		{Options{}, ""},
 		{Options{Seeds: 1, Duration: 1, MaxEvents: 1, Trace: kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 1}}, ""},
 		{Options{Seeds: -1}, "faultline: Options.Seeds is -1; want 0 (default 20) or more"},
-		{Options{Seeds: MaxEnvSeeds}, ""},
-		{Options{Seeds: MaxEnvSeeds + 1}, "faultline: Options.Seeds is 1000001; want at most 1000000"},
-		{Options{Seeds: MaxEnvSeeds + 1, Duration: -1}, "faultline: Options.Seeds is 1000001; want at most 1000000"},
+		{Options{Seeds: MaxSeeds}, ""},
+		{Options{Seeds: MaxSeeds + 1}, "faultline: Options.Seeds is 1000001; want at most 1000000"},
+		{Options{Seeds: MaxSeeds + 1, Duration: -1}, "faultline: Options.Seeds is 1000001; want at most 1000000"},
 		{Options{Duration: -time.Second}, "faultline: Options.Duration is -1s; want 0 (default 1m0s) or more"},
 		{Options{Duration: -1}, "faultline: Options.Duration is -1ns; want 0 (default 1m0s) or more"},
 		{Options{Trace: kernel.TraceConfig{Level: 7}}, "faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull"},

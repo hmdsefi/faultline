@@ -55,12 +55,26 @@ func TestPreviousReportArtifactsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &runner{t: t, build: buildInfo{importPath: "p"}, plan: &plan{seedSource: "env", env: &environment{artifactsRoot: cwd}}}
-	if r.previousReport(1) == nil {
-		t.Fatal("the report was not read with artifacts on")
+	if rep, dir := r.previousReport(1); rep == nil || dir != artifact.Dir(cwd, "p", t.Name(), 1) {
+		t.Fatalf("with artifacts on: report %+v read from %q", rep, dir)
 	}
 	r.plan.env = &environment{artifactsOff: true}
-	if rep := r.previousReport(1); rep != nil {
-		t.Fatalf("read with artifacts off: %+v", rep)
+	if rep, dir := r.previousReport(1); rep != nil || dir != "" {
+		t.Fatalf("read with artifacts off: %+v from %q", rep, dir)
+	}
+}
+
+// API-074: the default artifact root is one folder per user, or faultline without user IDs.
+func TestDefaultArtifactRoot(t *testing.T) {
+	tmp := filepath.Join("x", "tmp")
+	if got, want := defaultArtifactRoot(tmp, 1000), filepath.Join(tmp, "faultline-1000"); got != want {
+		t.Errorf("uid 1000: %q, want %q", got, want)
+	}
+	if got, want := defaultArtifactRoot(tmp, 0), filepath.Join(tmp, "faultline-0"); got != want {
+		t.Errorf("uid 0: %q, want %q", got, want)
+	}
+	if got, want := defaultArtifactRoot(tmp, -1), filepath.Join(tmp, "faultline"); got != want {
+		t.Errorf("no user IDs: %q, want %q", got, want)
 	}
 }
 

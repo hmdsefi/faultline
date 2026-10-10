@@ -117,9 +117,9 @@ func TestResolveSeeds(t *testing.T) {
 	}
 }
 
-// API-010: FAULTLINE_SEEDS accepts 1 to MaxEnvSeeds.
+// API-010: FAULTLINE_SEEDS accepts 1 to MaxSeeds.
 func TestResolveSeedsBounds(t *testing.T) {
-	for _, n := range []int{1, MaxEnvSeeds} {
+	for _, n := range []int{1, MaxSeeds} {
 		p, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_SEEDS": fmt.Sprint(n)}, false)
 		if err != nil {
 			t.Errorf("FAULTLINE_SEEDS=%d: %v", n, err)
@@ -177,8 +177,8 @@ func TestResolveEffectiveOptions(t *testing.T) {
 	if o.Duration != DefaultDuration || o.MaxEvents != DefaultMaxEvents || o.Net.Default.Latency != time.Millisecond {
 		t.Errorf("defaults not applied: %+v", o)
 	}
-	if o.Trace.Level != kernel.TraceFull || !p.passArtifacts || !o.CheckDeterminism || !o.KeepGoing || o.BaseSeed != 0 || o.Seeds != 1 {
-		t.Errorf("effective options: %+v", o)
+	if o.Trace.Level != kernel.TraceFull || !p.passArtifacts || !o.CheckDeterminism || !p.envCheck || !o.KeepGoing || o.BaseSeed != 0 || o.Seeds != 1 {
+		t.Errorf("effective options: %+v, check from the environment %v", o, p.envCheck)
 	}
 	p2, _ := resolveWith(t, Options{Trace: kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 9}}, map[string]string{"FAULTLINE_TRACE": "hash", "FAULTLINE_CHECK_DETERMINISM": "0"}, false)
 	if p2.opts.Trace.Level != kernel.TraceFull || p2.opts.Trace.Buffer != 9 || p2.passArtifacts || p2.opts.CheckDeterminism || p2.opts.BaseSeed != NameBase("TestScenario") {
@@ -189,8 +189,16 @@ func TestResolveEffectiveOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o := p3.opts; o.Trace != (kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 9}) || !p3.passArtifacts || !o.CheckDeterminism || !o.KeepGoing || o.BaseSeed != 0 {
-		t.Errorf("options with FAULTLINE_TRACE=full and FAULTLINE_SEED: %+v", o)
+	if o := p3.opts; o.Trace != (kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 9}) || !p3.passArtifacts || !o.CheckDeterminism || p3.envCheck || !o.KeepGoing || o.BaseSeed != 0 {
+		t.Errorf("options with FAULTLINE_TRACE=full and FAULTLINE_SEED: %+v, check from the environment %v", o, p3.envCheck)
+	}
+	// Options.CheckDeterminism already turns the check on: the replay needs no variable (API-080).
+	p5, err := resolveWith(t, Options{CheckDeterminism: true}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "1"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p5.checkDeterminism || p5.envCheck {
+		t.Errorf("CheckDeterminism in both: check %v, from the environment %v", p5.checkDeterminism, p5.envCheck)
 	}
 	// Only FAULTLINE_SEED_LIST forces KeepGoing (API-013), not FAULTLINE_SEED.
 	p4, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_SEED": "1"}, false)
@@ -205,6 +213,9 @@ func TestResolveEffectiveOptions(t *testing.T) {
 // AT-API-05, AT-API-41 and §7.1 at the unit level.
 func TestResolveErrors(t *testing.T) {
 	dir := t.TempDir()
+	artifactsErr := func(v string) string {
+		return fmt.Sprintf("faultline: invalid FAULTLINE_ARTIFACTS value %q: artifacts are on by default; set a directory path for the artifact root, or off to turn artifacts off", v)
+	}
 	cases := []struct {
 		opts Options
 		env  map[string]string
@@ -223,6 +234,13 @@ func TestResolveErrors(t *testing.T) {
 		{Options{}, map[string]string{"FAULTLINE_EXPLORE": "yes"}, `faultline: invalid FAULTLINE_EXPLORE value "yes": want 0 or 1`},
 		{Options{}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "true"}, `faultline: invalid FAULTLINE_CHECK_DETERMINISM value "true": want 0 or 1`},
 		{Options{}, map[string]string{"FAULTLINE_TRACE": "Full"}, `faultline: invalid FAULTLINE_TRACE value "Full": want hash or full`},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "0"}, artifactsErr("0")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "False"}, artifactsErr("False")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": " no "}, artifactsErr("no")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "1"}, artifactsErr("1")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "TRUE"}, artifactsErr("TRUE")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "Yes"}, artifactsErr("Yes")},
+		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": " on "}, artifactsErr("on")},
 		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": "1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ": want a decimal or 0x-prefixed hexadecimal uint64`},
 		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": " , "}, `faultline: FAULTLINE_SEED_LIST contains no seeds`},
 		{Options{}, map[string]string{"FAULTLINE_SEED": "1", "FAULTLINE_SEED_LIST": "2"}, `faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one`},
@@ -232,7 +250,7 @@ func TestResolveErrors(t *testing.T) {
 		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3`},
 		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is not available until Phase 2b`},
 		{Options{Seeds: -1}, nil, `faultline: Options.Seeds is -1; want 0 (default 20) or more`},
-		{Options{Seeds: MaxEnvSeeds + 1}, nil, `faultline: Options.Seeds is 1000001; want at most 1000000`},
+		{Options{Seeds: MaxSeeds + 1}, nil, `faultline: Options.Seeds is 1000001; want at most 1000000`},
 		{Options{Duration: -time.Second}, nil, `faultline: Options.Duration is -1s; want 0 (default 1m0s) or more`},
 		{Options{Trace: kernel.TraceConfig{Level: 7}}, nil, `faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull`},
 		{Options{Trace: kernel.TraceConfig{Buffer: -1}}, nil, `faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more`},
@@ -253,8 +271,8 @@ func TestResolveErrors(t *testing.T) {
 		}
 	}
 	// The cap holds under -short too, which would otherwise cut the count to 5 first.
-	if _, err := resolveWith(t, Options{Seeds: MaxEnvSeeds + 1}, nil, true); err == nil || err.Error() != "faultline: Options.Seeds is 1000001; want at most 1000000" {
-		t.Errorf("Options.Seeds above MaxEnvSeeds under -short: err = %v", err)
+	if _, err := resolveWith(t, Options{Seeds: MaxSeeds + 1}, nil, true); err == nil || err.Error() != "faultline: Options.Seeds is 1000001; want at most 1000000" {
+		t.Errorf("Options.Seeds above MaxSeeds under -short: err = %v", err)
 	}
 	listFile := filepath.Join(dir, "seeds.txt")
 	if err := os.WriteFile(listFile, []byte("0x1\n0x2 3,0x2\n"), 0o600); err != nil {
@@ -270,8 +288,8 @@ func TestResolveErrors(t *testing.T) {
 }
 
 // API-010: the first invalid variable in table order is the error. Each variable is set to an
-// invalid value together with every later one. FAULTLINE_ARTIFACTS and FAULTLINE_RESULTS accept
-// any value, so they are not listed.
+// invalid value together with every later one. FAULTLINE_RESULTS accepts any value, so it is not
+// listed.
 func TestResolveErrorOrder(t *testing.T) {
 	invalid := [][2]string{
 		{"FAULTLINE_SEED", "x"},
@@ -279,6 +297,7 @@ func TestResolveErrorOrder(t *testing.T) {
 		{"FAULTLINE_BASE_SEED", "x"},
 		{"FAULTLINE_EXPLORE", "2"},
 		{"FAULTLINE_SCHEDULE", "/nonexistent.json"},
+		{"FAULTLINE_ARTIFACTS", "0"},
 		{"FAULTLINE_CHECK_DETERMINISM", "2"},
 		{"FAULTLINE_TRACE", "x"},
 		{"FAULTLINE_MINIMIZE", "x"},
@@ -351,27 +370,29 @@ func TestResolveSchedule(t *testing.T) {
 	}
 }
 
-// API-010: FAULTLINE_ARTIFACTS is exactly off or a path, FAULTLINE_RESULTS is a path, and relative
-// paths are made absolute.
+// API-010: FAULTLINE_ARTIFACTS is off in any letter case or a path, FAULTLINE_RESULTS is a path,
+// and relative paths are made absolute.
 func TestResolveArtifactsAndResults(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "off"}, false)
+	for _, v := range []string{"off", "OFF", " Off "} {
+		p, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": v}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !p.env.artifactsOff || p.env.artifactsRoot != "" {
+			t.Errorf("FAULTLINE_ARTIFACTS=%q: off %v, root %q", v, p.env.artifactsOff, p.env.artifactsRoot)
+		}
+	}
+	// Only the bare words are rejected: ./0 is a folder named 0.
+	p, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "./0"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.env.artifactsOff || p.env.artifactsRoot != "" {
-		t.Errorf("FAULTLINE_ARTIFACTS=off: off %v, root %q", p.env.artifactsOff, p.env.artifactsRoot)
-	}
-	// Exactly "off": any other spelling is a directory name.
-	p, err = resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "OFF"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.env.artifactsOff || p.env.artifactsRoot != filepath.Join(cwd, "OFF") {
-		t.Errorf("FAULTLINE_ARTIFACTS=OFF: off %v, root %q", p.env.artifactsOff, p.env.artifactsRoot)
+	if p.env.artifactsOff || p.env.artifactsRoot != filepath.Join(cwd, "0") {
+		t.Errorf("FAULTLINE_ARTIFACTS=./0: off %v, root %q", p.env.artifactsOff, p.env.artifactsRoot)
 	}
 	p, err = resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "rel", "FAULTLINE_RESULTS": " r.jsonl "}, false)
 	if err != nil {

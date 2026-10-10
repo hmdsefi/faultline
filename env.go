@@ -52,7 +52,7 @@ type environment struct {
 	schedulePath     string          // FAULTLINE_SCHEDULE, absolute
 	schedule         *fault.Schedule // parsed FAULTLINE_SCHEDULE
 	scheduleHash     string          // 0x%016x of NameBase(file content)
-	artifactsOff     bool            // FAULTLINE_ARTIFACTS=off
+	artifactsOff     bool            // FAULTLINE_ARTIFACTS=off, in any letter case
 	artifactsRoot    string          // FAULTLINE_ARTIFACTS, absolute; "" = default root
 	checkDeterminism bool            // FAULTLINE_CHECK_DETERMINISM=1
 	traceFull        bool            // FAULTLINE_TRACE=full
@@ -119,8 +119,8 @@ func (e *environment) parse(name, v string) error {
 		}
 	case envSeeds:
 		n, err := strconv.ParseUint(v, 10, 64)
-		if !allDigits(v) || err != nil || n < 1 || n > MaxEnvSeeds {
-			return fmt.Errorf("faultline: invalid FAULTLINE_SEEDS value %q: want a decimal integer from 1 to %d", v, MaxEnvSeeds)
+		if !allDigits(v) || err != nil || n < 1 || n > MaxSeeds {
+			return fmt.Errorf("faultline: invalid FAULTLINE_SEEDS value %q: want a decimal integer from 1 to %d", v, MaxSeeds)
 		}
 		e.seeds = int(n)
 	case envExplore, envCheckDeterminism:
@@ -149,9 +149,12 @@ func (e *environment) parse(name, v string) error {
 		e.schedulePath, e.schedule = abs, &s
 		e.scheduleHash = fmt.Sprintf("0x%016x", NameBase(string(data)))
 	case envArtifacts:
-		if v == "off" {
+		switch strings.ToLower(v) {
+		case "off":
 			e.artifactsOff = true
 			return nil
+		case "0", "false", "no", "1", "true", "yes", "on": // meant as off or on; as a path they would name a folder in the package
+			return fmt.Errorf("faultline: invalid FAULTLINE_ARTIFACTS value %q: artifacts are on by default; set a directory path for the artifact root, or off to turn artifacts off", v)
 		}
 		abs, err := filepath.Abs(v)
 		if err != nil {
@@ -343,6 +346,7 @@ type plan struct {
 	env              *environment
 	primaryTrace     kernel.TraceConfig
 	checkDeterminism bool
+	envCheck         bool // FAULTLINE_CHECK_DETERMINISM turned the check on, Options.CheckDeterminism did not
 	keepGoing        bool
 	passArtifacts    bool     // FAULTLINE_TRACE=full
 	logs             []string // parent-level log lines (API-017), in order
@@ -438,6 +442,7 @@ func resolve(in resolveInput) (*plan, error) {
 		p.passArtifacts = true
 	}
 	p.checkDeterminism = o.CheckDeterminism || env.checkDeterminism
+	p.envCheck = env.checkDeterminism && !o.CheckDeterminism
 	p.keepGoing = o.KeepGoing || env.set[envSeedList]
 
 	o.Seeds = len(p.seeds)

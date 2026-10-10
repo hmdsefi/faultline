@@ -119,6 +119,9 @@ func TestRunSeedEnv(t *testing.T) {
 
 // AT-API-05
 func TestRunInvalidEnv(t *testing.T) {
+	artifactsErr := func(v string) string {
+		return fmt.Sprintf("faultline: invalid FAULTLINE_ARTIFACTS value %q: artifacts are on by default; set a directory path for the artifact root, or off to turn artifacts off", v)
+	}
 	cases := []struct {
 		env  []string
 		want string
@@ -133,6 +136,13 @@ func TestRunInvalidEnv(t *testing.T) {
 		{[]string{"FAULTLINE_EXPLORE=yes"}, `faultline: invalid FAULTLINE_EXPLORE value "yes": want 0 or 1`},
 		{[]string{"FAULTLINE_CHECK_DETERMINISM=true"}, `faultline: invalid FAULTLINE_CHECK_DETERMINISM value "true": want 0 or 1`},
 		{[]string{"FAULTLINE_TRACE=Full"}, `faultline: invalid FAULTLINE_TRACE value "Full": want hash or full`},
+		{[]string{"FAULTLINE_ARTIFACTS=0"}, artifactsErr("0")},
+		{[]string{"FAULTLINE_ARTIFACTS=false"}, artifactsErr("false")},
+		{[]string{"FAULTLINE_ARTIFACTS=NO"}, artifactsErr("NO")},
+		{[]string{"FAULTLINE_ARTIFACTS=1"}, artifactsErr("1")},
+		{[]string{"FAULTLINE_ARTIFACTS=True"}, artifactsErr("True")},
+		{[]string{"FAULTLINE_ARTIFACTS=yes"}, artifactsErr("yes")},
+		{[]string{"FAULTLINE_ARTIFACTS=ON"}, artifactsErr("ON")},
 		{[]string{"FAULTLINE_SEED_LIST=1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ": want a decimal or 0x-prefixed hexadecimal uint64`},
 		{[]string{"FAULTLINE_SEED=1", "FAULTLINE_SEED_LIST=2"}, `faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one`},
 	}
@@ -296,7 +306,7 @@ func TestRunInvariantFailure(t *testing.T) {
 		t.Fatalf("headline missing:\n%s", o)
 	}
 	mustContainInOrder(t, o, head[0], "\n", "  counter=5\n",
-		"replay:    FAULTLINE_SEED=0x0000000000000001 go test"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n",
+		"replay:    FAULTLINE_SEED=0x0000000000000001 go test -v"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n",
 		"artifacts: "+dir+string(os.PathSeparator)+"\n")
 	var violations []kernel.Record
 	for _, r := range readTrace(t, dir) {
@@ -659,7 +669,7 @@ func TestRunFatalInCallback(t *testing.T) {
 	seed := hexSeeds(seedK(0))[0]
 	note := "faultline: seed " + seed + " stopped by t.FailNow or t.Fatal at t=0.030000000s (event 4); no artifacts were written\n" +
 		"      report failures with an Invariant, a Final check or w.Sim.Fail(err) to get a replayable report\n" +
-		"    replay:    FAULTLINE_SEED=" + seed + " go test" + replayFlags() + " -run '^TestScenario$' github.com/hmdsefi/faultline\n"
+		"    replay:    FAULTLINE_SEED=" + seed + " go test -v" + replayFlags() + " -run '^TestScenario$' github.com/hmdsefi/faultline\n"
 	if code != 1 || !strings.Contains(o, note) {
 		t.Fatalf("exit %d\n%s", code, o)
 	}
@@ -790,15 +800,25 @@ func TestRunWorkerProtocol(t *testing.T) {
 	}
 }
 
-// AT-API-31
+// AT-API-31: off in any letter case. A value taken as a path would be a folder in the package
+// directory, the child's working directory; the test removes one it created.
 func TestRunArtifactsOff(t *testing.T) {
-	tmp := t.TempDir()
-	o, code := runScenario(t, "invariant-counter", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=off", "TMPDIR=" + tmp})
-	if code != 1 || !strings.Contains(o, "artifacts: off\n") {
-		t.Fatalf("exit %d\n%s", code, o)
-	}
-	if _, err := os.Stat(filepath.Join(tmp, "faultline")); !os.IsNotExist(err) {
-		t.Fatal("default artifact root was created")
+	for _, v := range []string{"off", "OFF", "Off"} {
+		if _, err := os.Lstat(v); !os.IsNotExist(err) {
+			t.Fatalf("%s exists in the package directory before the run: %v", v, err)
+		}
+		tmp := t.TempDir()
+		o, code := runScenario(t, "invariant-counter", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + v, "TMPDIR=" + tmp})
+		if _, err := os.Lstat(v); !os.IsNotExist(err) {
+			_ = os.RemoveAll(v)
+			t.Errorf("FAULTLINE_ARTIFACTS=%s wrote artifacts to the package directory", v)
+		}
+		if code != 1 || !strings.Contains(o, "artifacts: off\n") {
+			t.Fatalf("FAULTLINE_ARTIFACTS=%s: exit %d\n%s", v, code, o)
+		}
+		if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 0 {
+			t.Fatalf("FAULTLINE_ARTIFACTS=%s: the temporary directory holds %v (%v)", v, entries, err)
+		}
 	}
 }
 
@@ -897,7 +917,7 @@ var _ = scenario("fail-first-event", func(t *testing.T) {
 func TestRunFilteredSeed(t *testing.T) {
 	o, code := runScenario(t, "fail-first-event", nil, "-test.run=^TestScenario$/^seed=0x8a216e8699751f87$")
 	if code != 1 || !slices.Equal(ranSeeds(o), []string{"0x8a216e8699751f87"}) || !strings.Contains(o, "--- FAIL: TestScenario/seed=0x8a216e8699751f87") ||
-		!strings.Contains(o, "replay:    FAULTLINE_SEED=0x8a216e8699751f87 go test"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n") {
+		!strings.Contains(o, "replay:    FAULTLINE_SEED=0x8a216e8699751f87 go test -v"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n") {
 		t.Fatalf("exit %d\n%s", code, o)
 	}
 }
