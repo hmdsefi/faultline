@@ -1,8 +1,7 @@
 # faultline documentation
 
 These pages show how to test a distributed system in Go with faultline, by hand or through an AI
-coding agent. Each page has one job: a tutorial teaches, a guide walks through one task, a
-reference page lists facts, and a concept page explains.
+coding agent.
 
 ## AI coding agents
 

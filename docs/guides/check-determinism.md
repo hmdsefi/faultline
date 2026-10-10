@@ -18,7 +18,7 @@ but it cannot turn off a check that the options turned on.
 
 A failing seed runs twice even without the check, because faultline runs it again to write its
 artifact. The check adds a second run to the seeds that pass. We recommend it in CI on every pull
-request, as faultline's own CI does: [Run faultline in CI](ci.md) shows a workflow.
+request, and [Run faultline in CI](ci.md) shows a workflow.
 
 ## Read a determinism failure
 

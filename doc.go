@@ -60,8 +60,8 @@
 // faultline-<uid> in os.TempDir(). Its files include report.txt (the lines above), trace.jsonl
 // (every event of the run), schedule.json (the faults) and timeline.html (a page that shows the
 // run). Package artifact describes them all. The replay command runs the seed again and gets the
-// same run, record for record. That holds as long as the code, the options and the Go version
-// stay the same.
+// same run, record for record. That holds as long as the faultline version, the Go minor version,
+// the code and the options stay the same.
 //
 // To keep a seed as a regression test, set FAULTLINE_SEED in a test of its own:
 //

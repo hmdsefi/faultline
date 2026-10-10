@@ -25,15 +25,17 @@ func ExampleTest() {
 	_ = TestRaft
 }
 
-// A scenario with its own faults calls Setup inside faultline.Run and plans the faults itself.
-// Here a script crashes whichever server leads at 5s, and an extra final check asks for a new
-// leader after the crash. The harness's own checks run too. This example compiles
-// TestLeaderCrash but does not run it, since Run needs the *testing.T of a real test.
+// A scenario with its own faults calls Setup inside faultline.Run, with the harness's network from
+// NetConfig, and plans the faults itself. Here a script crashes whichever server leads at 5s, and
+// an extra final check asks for a new leader after the crash. The harness's own checks run too.
+// This example compiles TestLeaderCrash but does not run it, since Run needs the *testing.T of a
+// real test.
 func ExampleSetup() {
 	TestLeaderCrash := func(t *testing.T) {
 		cfg := etcdraft.DefaultConfig()
 		cfg.Duration = 20 * time.Second
-		faultline.Run(t, faultline.Options{Duration: cfg.Duration}, func(w *faultline.World) {
+		opts := faultline.Options{Duration: cfg.Duration, Net: etcdraft.NetConfig()}
+		faultline.Run(t, opts, func(w *faultline.World) {
 			c := etcdraft.Setup(w, cfg)
 			w.Plan(fault.Script(fault.Event{At: kernel.Time(5 * time.Second), Kind: fault.KindCrash, Role: "leader"}))
 			w.Final("a new leader after the crash", func() error {

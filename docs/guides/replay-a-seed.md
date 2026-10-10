@@ -40,7 +40,9 @@ FAIL
 ```
 
 A script can read the command from `report.json` instead. `replay.command` holds the command line,
-and `replay.env` holds its environment variables:
+and `replay.env` holds its environment variables. The paths on this page are examples, from a
+machine with user ID 501 and the temporary directory `/tmp`. In the commands, use the `artifacts:`
+path from your own output.
 
 ```sh
 jq -r .replay.command /tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/report.json
@@ -74,10 +76,10 @@ deterministic](check-determinism.md) explains what to do then.
 
 ## Read the replay warnings
 
-A replay is exact while four things stay the same: the faultline version, the Go minor version, your
-code and the options. `report.json` records all four. A replay with `FAULTLINE_SEED` reads the
-report that the seed left in its artifact directory, unless artifacts are off. faultline then prints
-a warning for each difference, such as these:
+A replay is exact only while the things that [Seeds and replay](../how-it-works.md#seeds-and-replay)
+lists stay the same, and `report.json` records each of them. A replay with `FAULTLINE_SEED` reads
+the report that the seed left in its artifact directory, unless artifacts are off. faultline then
+prints a warning for each difference, such as these:
 
 ```text
     warning: previous artifact was recorded with go1.26; this run uses go1.27

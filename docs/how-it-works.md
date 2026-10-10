@@ -58,9 +58,9 @@ A run ends when the clock reaches `Options.Duration` or when a check fails. A ru
 `Options.MaxEvents` (10,000,000 events by default) also ends, and faultline reports it as a likely
 livelock or runaway timer.
 
-The clock skips the idle time between events, so a run costs only the CPU time of its callbacks. In
-faultline's own etcd/raft runs on an Apple M4 Max, a 60-second run of a three-node cluster under
-faults took 68 ms on average.
+The clock skips the idle time between events, so a run costs only the CPU time of its callbacks.
+The etcd/raft guide gives measured times in [Results of 40,000
+seeds](guides/etcd-raft.md#results-of-40000-seeds).
 
 ## The seeded scheduler
 
@@ -103,7 +103,9 @@ down or paused), a local clock and a disk volume. `w.AddServer` and `w.AddClient
 boot function. faultline calls the boot function at the node's first start and again at every
 restart. The boot function installs everything the node does.
 
-The server `n1` from the test above boots like this:
+[Get started](getting-started.md) builds two versions of `kv.Server`: one acknowledges a put before
+it syncs the log, and the fix syncs before every acknowledgment. A third version holds each
+acknowledgment until the next sync. It boots like this:
 
 ```go
 // Boot runs at every boot of the node: its first start and every restart.
@@ -293,37 +295,23 @@ what the rest of your Go code does, so code that runs inside the simulation foll
   Without one, the trace shows only the type name of a struct.
 
 `crypto/rand` is the one outside source faultline handles for you. `faultline.Run` seeds it for
-every run through `testing/cryptotest`. Go does not allow that in a parallel test, so a test that
-calls `faultline.Run` cannot call `t.Parallel`.
+every run through `testing/cryptotest`. Go does not allow that in a parallel test, so a parallel
+test that calls `faultline.Run` fails with a setup error. `Options.NoCryptoSeed` turns the seeding
+off and allows `t.Parallel`, but `crypto/rand` is then no longer part of the replay.
 
 faultline does not inspect your code for these rules. It checks their effect instead. When a broken
 rule changes the run, a second run of the same seed gets a different trace hash. Failing seeds
-always run twice. To run passing seeds twice as well, set `FAULTLINE_CHECK_DETERMINISM=1`, as
-faultline's own CI does.
+always run twice. To run passing seeds twice as well, set `FAULTLINE_CHECK_DETERMINISM=1`. [Check
+that a test is deterministic](guides/check-determinism.md) shows how to read a determinism failure.
 
 ## What a failure leaves behind
 
 A failing seed fails its subtest. faultline prints the failure, a command that replays the seed, and
-the path of the seed's *artifact directory*. That folder holds the following files, written from the
-second, full-trace run:
-
-- `report.txt`: the failure report as printed, with the full panic stack when there is one;
-- `report.json`: the same report as data, plus the seed, the replay command, the versions, the
-  options and the trace hash;
-- `trace.jsonl`: every record of the run, one JSON object per line;
-- `timeline.txt`: the trace as aligned text, with the failure and the records that led to it marked;
-- `schedule.json`: the fault schedule;
-- `history.jsonl`: the client operations, when the test records any;
-- `hb.mmd`: the records that led to the failure, as a Mermaid flowchart;
-- `timeline.html`: an interactive timeline in one file, which loads nothing from the network.
-
-By default the artifact directories live in a folder named `faultline-` plus your user ID, under
-your system's temporary directory. With user ID 501 and the temporary directory `/tmp`, the
-artifact of seed `0x287372ab06f1482e` of `TestKV` goes to
-`/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/`. `FAULTLINE_ARTIFACTS` names another
-root, or turns artifacts off when it is set to `off`. To see which file answers which
-question while you debug, read [Use faultline with an AI coding
-agent](ai-agents.md#which-file-answers-which-question).
+the path of the seed's *artifact directory*. It writes that folder from the second, full-trace run:
+the report, the trace, a text timeline, the fault schedule, the client history and an interactive
+timeline page. [Read a failure artifact](guides/read-an-artifact.md) shows which file answers which
+question, and [Environment variables](reference/environment.md#faultline_artifacts) says where the
+folder goes.
 
 ## Next steps
 

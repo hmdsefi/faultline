@@ -19,8 +19,6 @@ simulation unchanged. You port it to the node API first, the way the etcd/raft h
 faultline fits a Go team that builds a distributed system and wants failures it can replay. It is
 the wrong tool in these cases:
 
-- You need to test existing goroutine code without porting it. Running such code unchanged is
-  planned for Phase 2, with no date.
 - You want to test the system as deployed, with real binaries, a real network and real disks.
   faultline simulates all of them inside one test process.
 - You want performance numbers. A callback takes zero virtual time, so a run says nothing about CPU
@@ -34,6 +32,7 @@ the wrong tool in these cases:
 The [roadmap](https://github.com/hmdsefi/faultline/issues/167) plans these for later phases, with no
 dates:
 
+- Running existing goroutine code unchanged, without a port to the node API.
 - Shrinking a failing run to its smallest form. In v0.1.0 you delete faults from a copy of
   `schedule.json` and replay it.
 - Linearizability and isolation checkers. Your invariants and final checks are the checks.
@@ -63,13 +62,14 @@ out of it. Report failures with `w.Invariant`, `w.Final` or `w.Sim.Fail`: a seed
 
 ## How far a replay reaches
 
-A seed replays the same run when four things match: the faultline version, the Go minor version,
-your code and the options. `report.json` records all four, and a replay with `FAULTLINE_SEED` warns
-about each difference.
+A seed replays the same run only while the things that [Seeds and
+replay](how-it-works.md#seeds-and-replay) lists stay the same. A replay with `FAULTLINE_SEED` warns
+when one of them changed.
 
-faultline's CI computes the trace hashes of a set of scenarios on Linux on amd64 and macOS on arm64.
-It does so with Go 1.26 and Go 1.27, and fails when the hashes disagree. Other platforms are not
-checked.
+Across machines, faultline's CI checks that a set of scenarios gives the same trace hashes on the
+platforms and Go versions that
+[Architecture](architecture.md#how-faultline-checks-its-own-determinism) lists. Other platforms are
+not checked.
 
 ## Known issues
 
@@ -88,12 +88,14 @@ These are the issues known at release:
 
 ## Questions
 
+Short answers about using faultline, and about how it relates to other tools.
+
 ### Can my coding agent run faultline on its own?
 
-Yes. Every step from a failing seed to a pinned regression test is a command to run or a file to
-read. `report.json` holds the failure, the replay command and the trace hash as data.
-`FAULTLINE_SEED_LIST` and `FAULTLINE_RESULTS` let a script run a set of seeds and collect one JSON
-line per seed. [Use faultline with an AI coding agent](ai-agents.md) walks through the loop.
+Yes. From a failing seed to a pinned regression test, every step except the fix itself is a command
+to run or a file to read. `report.json` holds the failure, the replay command and the trace hash as
+data. `FAULTLINE_SEED_LIST` and `FAULTLINE_RESULTS` let a script run a set of seeds and collect one
+JSON line per seed. [Use faultline with an AI coding agent](ai-agents.md) walks through the loop.
 
 ### Is faultline a chaos engineering tool?
 
@@ -165,9 +167,9 @@ No. Neither the faultline module nor the etcd/raft harness imports a network pac
 
 Virtual time skips the idle time between events, so a run costs only the CPU time of its callbacks.
 On an Apple M4 Max, a 60-second run of a three-node etcd/raft cluster under faults took 68 ms on
-average. On the same machine, the 50 seeds of the key-value example's `TestKV`, 10 seconds of
-virtual time each, run in about one second. A failing seed runs twice, once more to write its
-artifact.
+average, as [Results of 40,000 seeds](guides/etcd-raft.md#results-of-40000-seeds) reports. On the
+same machine, the 50 seeds of the key-value example's `TestKV`, 10 seconds of virtual time each, run
+in about one second. A failing seed runs twice, once more to write its artifact.
 
 ## Next steps
 

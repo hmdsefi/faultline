@@ -73,9 +73,9 @@ started](../getting-started.md#pin-the-seed) shows.
 ## Set a timeout
 
 `go test` stops a test binary after 10 minutes by default. Raise the limit with `-timeout` for long
-runs. A run's wall-clock time grows with its events. In faultline's own runs on an Apple M4 Max, a
-60-second run of a three-node etcd/raft cluster under faults took 68 ms on average. A test of 10,000
-such seeds took 692 seconds, more than the default limit.
+runs. A run's wall-clock time grows with its events. On an Apple M4 Max, one test that ran 10,000
+seeds of a three-node etcd/raft cluster took 692 seconds, more than the default limit. [Results of
+40,000 seeds](etcd-raft.md#results-of-40000-seeds) gives the time per seed.
 
 ## A GitHub Actions workflow
 
@@ -142,9 +142,8 @@ example a different Go version:
 ```
 
 Expect the test binary warning as well: a binary built on another machine differs from yours. The
-run itself stays the same across the platforms faultline checks: its own CI runs its golden seeds
-on Linux on amd64 and on macOS on arm64, with Go 1.26 and Go 1.27, and checks that every trace hash
-matches.
+run itself stays the same across the platforms and Go versions that faultline's own CI checks, as
+[Architecture](../architecture.md#how-faultline-checks-its-own-determinism) lists.
 
 ## Next steps
 

@@ -3,7 +3,7 @@
 A failing seed leaves an *artifact directory*: the files you, a script or an AI coding agent read to
 debug the failure. This page lists where the directory goes, every file in it, the format version of
 each file and the fields a program reads. To see which file answers which question while you debug,
-read [Use faultline with an AI coding agent](../ai-agents.md#which-file-answers-which-question).
+read [Read a failure artifact](../guides/read-an-artifact.md).
 
 ## The artifact directory
 
@@ -12,7 +12,8 @@ keeps every record. With `FAULTLINE_TRACE=full` it writes one for passing seeds 
 when artifacts are off, for a setup error, or when a seed stops through `t.Fatal`, `t.FailNow` or
 `t.SkipNow`.
 
-The path is `<root>/<package>/<test>/<seed>`:
+The path is `<root>/<package>/<test>/<seed>`. For example, for user ID 501 with the temporary
+directory `/tmp`:
 
 ```text
 /tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/
@@ -51,7 +52,7 @@ An artifact directory holds these files:
 | `timeline.html` | always | `faultline_timeline` 1 | an interactive page of the run |
 
 A check can add [extra files](#extra-files). The `files` field of `report.json` lists every file
-except `report.json` itself, with its type and format version:
+except `report.json` itself, with its type, and its format version where the index records one:
 
 ```sh
 jq -c '.files[]' report.json
@@ -193,9 +194,9 @@ holds the variables it sets, and `replay.run` its `-run` pattern. To run the tes
 `replay.package_dir` the test package's directory.
 
 `versions` holds `faultline` (the faultline module version in the test binary), `go`, `goos`,
-`goarch` and `test_binary_sha256`. A replay is exact only with the same faultline version, Go minor
-version, code and options. A replay with `FAULTLINE_SEED` compares them with these fields and
-`options_hash`, and warns about each difference.
+`goarch` and `test_binary_sha256`. A replay with `FAULTLINE_SEED` compares the current run with
+these fields and `options_hash`, and warns about each difference that can break [the
+replay](../how-it-works.md#seeds-and-replay).
 
 `options` holds `seeds`, `duration_ns`, `duration`, `max_events`, `mode`, `trace` (`hash` or
 `full`), `trace_buffer`, `check_determinism`, `keep_going`, `no_crypto_seed`, `allow_limit`, `net`

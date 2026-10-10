@@ -67,7 +67,9 @@ The flags come before the directory:
 | `-max-records n` | 50000 | the most records `timeline.html` holds; at least 1000 |
 
 On success, `render` prints the paths it wrote and exits with 0. This example raises the slice cap
-of the key-value example's failing seed to 500:
+of the key-value example's failing seed to 500. Set `dir` to the `artifacts:` path that your failing
+seed printed. The example path is from a machine with user ID 501 and the temporary directory
+`/tmp`:
 
 ```sh
 dir=/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e

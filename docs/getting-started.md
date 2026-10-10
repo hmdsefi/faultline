@@ -2,7 +2,7 @@
 
 In this tutorial you write a small key-value server and a faultline test for it. faultline finds a
 seed that loses a write the server acknowledged. You replay that seed and find the cause in the
-timeline. Then you fix the server, prove the fix with the same seed, and keep the seed as a
+timeline. Then you fix the server, check the fix with the same seed, and keep the seed as a
 regression test.
 
 ## What you build
@@ -297,7 +297,9 @@ FAIL
 faultline derives the 50 seeds from the test name, so every machine runs the same ones. The first
 seed, `0x287372ab06f1482e`, failed. Your run fails on the same seed, at the same virtual time and
 event number. Apart from the timings, only the artifact path can differ. It sits in a folder named
-`faultline-` plus your user ID, under your system's temporary directory.
+`faultline-` plus your user ID, under your system's temporary directory. This page shows it for user
+ID 501 with the temporary directory `/tmp`, the usual one on Linux; on macOS it is under `$TMPDIR`.
+In the commands that follow, use the `artifacts:` path from your own output.
 
 ## Read the report
 
@@ -378,7 +380,7 @@ restart:
 ! 3629 5.873034010s global check.violation    invariant "acked puts survive" violated kind=invariant check="acked puts survive" error="k169=v169 was acknowledged, but n1 holds \"\"" event=1455 <-3628
 ```
 
-From the bottom up, these lines tell the whole story:
+Read from the bottom up, these lines show the failure:
 
 1. At 5.873034010s the server restarts, boots for the seventh time, and fails the invariant.
 2. At 5.553747583s the client receives the acknowledgment for `k169` and records the put as done.
@@ -425,7 +427,7 @@ crashes only. A failed sync needs more care, because the write it dropped leaves
 Add a `fault.KindSyncFail` rule with `Magnitude: 1` to the planner, and faultline finds that bug
 too.
 
-## Prove the fix
+## Check the fix
 
 Run the same replay command again:
 
@@ -473,7 +475,7 @@ import (
 	"github.com/hmdsefi/faultline"
 )
 
-// TestKVSeed287372ab replays the seed that lost an acknowledged put before the fix.
+// TestKVSeed287372ab runs the seed that lost an acknowledged put before the fix.
 func TestKVSeed287372ab(t *testing.T) {
 	t.Setenv("FAULTLINE_SEED", "0x287372ab06f1482e")
 	t.Setenv("FAULTLINE_SEED_LIST", "") // FAULTLINE_SEED_LIST and FAULTLINE_SEED cannot both be set

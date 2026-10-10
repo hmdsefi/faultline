@@ -1,8 +1,8 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Faultline is the command-line tool of faultline, a deterministic simulation testing tool for
-// Go. It works on the artifact directory that a failing faultline test writes for one seed.
+// The faultline command works on the artifact directory that a failing faultline test writes for
+// one seed.
 //
 // Install it with:
 //

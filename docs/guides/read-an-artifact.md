@@ -21,6 +21,9 @@ system's temporary directory. `FAULTLINE_ARTIFACTS=<dir>` sets another root, and
 `FAULTLINE_ARTIFACTS=off` turns artifacts off. [Artifact files](../reference/artifacts.md) has the
 exact naming rules.
 
+The paths on this page are examples, from a machine with user ID 501 and the temporary directory
+`/tmp`. In the commands, use the `artifacts:` path from your own output.
+
 faultline writes the directory from a second run of the failing seed, which keeps every record. A
 seed that stopped through `t.Fatal`, `t.FailNow` or `t.SkipNow` gets no artifact. Passing seeds get
 one only under `FAULTLINE_TRACE=full`.
@@ -102,7 +105,7 @@ the failure record. It follows each record's cause, and the previous record of t
 until it has 200 records. `slice:` in the header says when the run had more.
 
 To find the cause, search for the `!` line and read upward through the `*` lines. A search for the
-key from the message finds the client's side of the story:
+key from the message finds the records that name that key:
 
 ```sh
 grep -n 'k169' /tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/timeline.txt

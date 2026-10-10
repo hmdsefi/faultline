@@ -116,7 +116,8 @@ ok  	example.com/raftdemo	14.242s
 
 For your own faults and checks, call `etcdraft.Setup` inside `faultline.Run`. `Setup` adds the
 servers, the clients and the harness's checks, and returns a `Cluster` to query. The following test
-crashes whichever server leads at 5 seconds, and checks that another server becomes leader:
+crashes whichever server leads at 5 seconds, and checks that another server becomes leader. Create
+`scenario_test.go`:
 
 ```go
 package raftdemo
@@ -216,7 +217,8 @@ the harness on purpose. Each one breaks a rule of etcd/raft's contract for the c
 - `BugSnapshotOffByOne` labels each snapshot with the wrong index.
 
 `SelfTestConfig` returns a configuration with harder faults for these tests. The following test
-turns on `BugSkipSync`, with a disk on which a crash loses every unsynced write:
+turns on `BugSkipSync`, with a disk on which a crash loses every unsynced write. Create
+`bugs_test.go`:
 
 ```go
 package raftdemo
@@ -257,12 +259,12 @@ FAIL	example.com/raftdemo	0.353s
 FAIL
 ```
 
-## What faultline's own hunt found
+## Results of 40,000 seeds
 
 faultline ran 40,000 seeds of the harness against etcd/raft v3.7.0. It ran 10,000 seeds each for
 three and five servers, with the default configuration and with a snapshot every 50 entries. Each
 seed ran 60 seconds of virtual time under the default faults. No seed failed. In faultline's
-self-test of the harness, each of the five bug switches failed on the first seed it ran.
+self-test of the harness, the checks caught each of the five bug switches on the first seed.
 
 On an Apple M4 Max, a three-server seed took 68 ms on average and a five-server seed 124 ms. The
 whole hunt took about 32 minutes, with two `go test` processes at a time.

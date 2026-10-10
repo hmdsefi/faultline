@@ -131,6 +131,8 @@ describes the file.
 
 ## Artifacts and traces
 
+Two variables decide where artifacts go and when a seed writes one.
+
 ### FAULTLINE_ARTIFACTS
 
 `FAULTLINE_ARTIFACTS=<path>` sets the artifact root, the folder that holds every artifact directory.
@@ -139,7 +141,8 @@ describes the file.
 
 The default root is `faultline-<uid>` in the system temporary directory, where `<uid>` is your user
 ID: for example `/tmp/faultline-501`. The temporary directory is `$TMPDIR`, or `/tmp` when `TMPDIR`
-is unset. On Windows the folder is named `faultline`.
+is unset. On macOS, `$TMPDIR` is a folder of your own under `/var/folders`, so the root is too; on
+most Linux systems it is `/tmp`. On Windows the folder is named `faultline`.
 
 The values `0`, `1`, `true`, `false`, `yes`, `no` and `on` are setup errors, because as paths they
 would name a folder in the package:
@@ -160,8 +163,7 @@ With `FAULTLINE_ARTIFACTS=off`, `FAULTLINE_TRACE=full` writes nothing, and `Run`
 
 `FAULTLINE_CHECK_DETERMINISM=1` runs every passing seed a second time and compares the two trace
 hashes. Different hashes fail the seed with a determinism failure. Its replay command sets
-`FAULTLINE_CHECK_DETERMINISM=1` too, so the replay runs the check again. faultline's own CI runs its
-whole suite with this variable set.
+`FAULTLINE_CHECK_DETERMINISM=1` too, so the replay runs the check again.
 
 ## Output for tools: FAULTLINE_RESULTS
 
@@ -195,10 +197,10 @@ The fields of a line, in order:
 A field without a value is left out. A setup error writes one line with `"kind":"setup"`, an `index`
 of `-1` and the error as its `message`.
 
-## Reserved for later versions
+## Reserved variables
 
-v0.1.0 reserves four variables for later phases. It checks their values and reports any use, so a
-command written for a later version cannot run here unnoticed.
+v0.1.0 checks four reserved variables and reports any use, so a command written for another version
+cannot run here unnoticed.
 
 `FAULTLINE_MINIMIZE` accepts `0`, `1`, or a comma-separated list of `runs=<n>`, `time=<duration>`
 and `out=<absolute path>`, with `out` last. An invalid value is a setup error, such as

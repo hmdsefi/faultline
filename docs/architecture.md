@@ -14,7 +14,7 @@ with.
 flowchart TB
     accTitle: How faultline's packages fit together
     accDescr: go test runs your test or the etcd/raft harness, and both call faultline.Run in the root package. For every run, Run builds a world from kernel, simnet, simdisk, fault and history. On a failure, Run passes the run to package artifact, which writes the artifact directory and inlines the timeline renderer from package ui. The faultline command re-renders the files of an artifact directory.
-    go_test["go test"]
+    go_test["The go test command"]
     your_test["Your simulation test"]
     harness["harness/etcdraft (own module)"]
     run["faultline: Run, World, Options"]
@@ -30,7 +30,7 @@ flowchart TB
         ui["ui: timeline page assets"]
         cli["cmd/faultline: render, version"]
     end
-    dir[("Artifact directory")]
+    dir[("The artifact directory on disk")]
     go_test -->|runs| your_test
     go_test -->|runs| harness
     your_test -->|calls| run
@@ -47,7 +47,7 @@ The packages do these jobs:
 - `faultline`, the module root, is the test entry point: `Run`, `Options` and `World`. It reads the
   `FAULTLINE_*` environment variables, derives the seed list and runs each seed as a subtest. It
   runs the checks, classifies failures, runs failing seeds a second time and prints the report. It
-  is the only package that imports `testing`.
+  and the etcd/raft harness are the only packages on this page that import `testing`.
 - `kernel` is the discrete-event simulator. It owns virtual time, the event queue and its seeded
   tie-break, the named random streams, and nodes with their incarnations, crashes, pauses and
   clocks. It also keeps the trace and its running hash. It starts no goroutines and imports only the

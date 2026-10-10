@@ -20,17 +20,17 @@
 
 ## Reference
 
-- [Environment variables](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/environment.md): every `FAULTLINE_*` variable, its values and default, its setup errors and log lines, and how it combines with `Options`.
-- [Artifact files](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/artifacts.md): the artifact directory path, and the format and fields of `report.json`, `report.txt`, `trace.jsonl` and its record kinds, `timeline.txt`, `schedule.json`, `history.jsonl`, `hb.mmd` and `timeline.html`.
-- [The faultline command](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/cli.md): `faultline render` and `faultline version`, their flags, output and exit codes.
-- [Package faultline on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline): `Run`, `Options` and `World`, and the packages `kernel`, `kernel/simnet`, `kernel/simdisk`, `kernel/fault` and `check/history`, with runnable examples.
-- [Package etcdraft on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline/harness/etcdraft): every `Config` field and `Cluster` method of the etcd/raft harness.
+- [Environment variables](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/environment.md): when you choose seeds, replay a schedule, move the artifact root, keep full traces or collect results in a script. Every `FAULTLINE_*` variable, its values and default, its setup errors and log lines, and how it combines with `Options`.
+- [Artifact files](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/artifacts.md): when a script reads an artifact, or you need the exact meaning of a field. The artifact directory path, and the format and fields of `report.json`, `report.txt`, `trace.jsonl` and its record kinds, `timeline.txt`, `schedule.json`, `history.jsonl`, `hb.mmd` and `timeline.html`.
+- [The faultline command](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/cli.md): when you need a larger causal slice, or the rendered files of an artifact from CI. `faultline render` and `faultline version`, their flags, output and exit codes.
+- [Package faultline on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline): when you need a signature or the default of an option. `Run`, `Options` and `World`, and the packages `kernel`, `kernel/simnet`, `kernel/simdisk`, `kernel/fault` and `check/history`, with runnable examples.
+- [Package etcdraft on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline/harness/etcdraft): when you configure the etcd/raft harness. Every `Config` field and `Cluster` method of the etcd/raft harness.
 
 ## Concepts
 
-- [How faultline works](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/how-it-works.md): virtual time, the seeded scheduler, named random streams, nodes, the simulated network and disk, faults and fault schedules, checks, seeds and replay, and the determinism rules for code under test.
-- [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): the packages, how one seed runs through them, and the design choices behind them.
-- [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): what v0.1.0 does not do, the known issues, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
+- [How faultline works](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/how-it-works.md): when you write code that runs inside the simulation, or need to know why a run behaves as it does. Virtual time, the seeded scheduler, named random streams, nodes, the simulated network and disk, faults and fault schedules, checks, seeds and replay, and the determinism rules for code under test.
+- [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): when you need to know which package does what. The packages, how one seed runs through them, and the design choices behind them.
+- [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): before you decide whether faultline fits a system, or when a feature seems to be missing. What v0.1.0 does not do, the known issues, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
 
 ## Optional
 
