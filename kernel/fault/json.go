@@ -67,8 +67,8 @@ func unknownKey(obj map[string]json.RawMessage, known []string) string {
 	return ""
 }
 
-// ReadSchedule reads one schedule in JSON format v1 (FLT-020 to FLT-027). Events are returned
-// stably sorted by At; ID and Undoes are returned as written.
+// ReadSchedule reads one schedule in JSON format v1, the format of schedule.json. Events are
+// returned stably sorted by At; ID and Undoes are returned as written.
 func ReadSchedule(r io.Reader) (Schedule, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -309,8 +309,9 @@ func parseLink(raw json.RawMessage) (*simnet.Link, error) {
 	return &l, nil
 }
 
-// Write validates s and writes it in canonical JSON format v1 (FLT-028). Events are written
-// stably sorted by At. Nothing is written if validation fails.
+// Write validates s and writes it in canonical JSON format v1. Each event takes one line, with
+// the fields of its kind in a fixed key order, so two schedules diff line by line. Events are
+// written stably sorted by At. Nothing is written if validation fails.
 func (s Schedule) Write(w io.Writer) error {
 	if err := s.Validate(); err != nil {
 		return err

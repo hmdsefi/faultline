@@ -9,7 +9,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 )
 
-// Send sends payload from → to. Payloads are passed by reference and never copied; send
+// Send sends payload from -> to. Payloads are passed by reference and never copied; send
 // immutable values or byte slices that are no longer mutated. It panics if from is nil, belongs
 // to another Sim, or is not up, or if to is unknown.
 func (nw *Network) Send(from *kernel.Node, to kernel.NodeID, payload any) {

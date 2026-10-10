@@ -1,16 +1,6 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Faultline is the command-line tool of faultline, a deterministic simulation testing tool for
-// Go. It works on the artifact directory that a failing faultline test writes for one seed.
-//
-// Usage:
-//
-//	faultline <command> [arguments]
-//
-// "faultline help" lists the commands, and "faultline help <command>" prints the usage, help text
-// and flags of one. For example, "faultline render <dir>" regenerates timeline.txt, hb.mmd and
-// timeline.html in dir from its report.json and trace.jsonl.
 package main
 
 import (

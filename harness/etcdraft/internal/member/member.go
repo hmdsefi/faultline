@@ -1,7 +1,7 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Package member chooses stage 1c membership changes.
+// Package member chooses the membership changes of the harness's admin client.
 package member
 
 import (

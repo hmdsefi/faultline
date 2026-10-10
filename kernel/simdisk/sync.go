@@ -8,7 +8,9 @@ import (
 	"strconv"
 )
 
-// Sync makes the pending data ops of the file durable (or fails, see DSK-021).
+// Sync makes the file's unsynced writes durable. After Volume.FailSyncs it fails with ErrIO
+// instead. Config.FailedSync then decides what happens to those writes: dropped (readable until a
+// crash, never durable) or kept for the next Sync.
 func (f *File) Sync() error {
 	if err := f.check("sync", "Sync"); err != nil {
 		return err
@@ -51,7 +53,9 @@ func (v *Volume) FailSyncs(n int) {
 	v.emit("disk.fail_syncs", "fail next "+strconv.Itoa(n)+" syncs", attr("n", strconv.Itoa(n)))
 }
 
-// SyncDir makes the directory's pending namespace operations durable (see DSK-024).
+// SyncDir makes the directory's unsynced namespace operations durable: creates, removes, renames
+// and mkdirs of its entries. It also makes durable the earlier unsynced operations on the other
+// directories they touch, such as the source directory of a rename.
 func (v *Volume) SyncDir(path string) error {
 	v.mustBeUp("SyncDir")
 	p, err := clean("syncdir", path)

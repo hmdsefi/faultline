@@ -21,11 +21,11 @@ import (
 // Artifact is the content of one artifact directory.
 type Artifact struct {
 	Report   Report
-	Text     string            // report.txt content, written verbatim (API-076)
+	Text     string            // report.txt content, written verbatim
 	Trace    *Trace            // required by Write; nil from Read when trace.jsonl is absent
 	Schedule *fault.Schedule   // nil: no schedule.json
-	History  []byte            // history.jsonl content in HIS format; empty: no file
-	Extra    map[string][]byte // extra files, written verbatim (ART-010, ART-012); nil from Read
+	History  []byte            // history.jsonl content, as history.Recorder.WriteJSONL writes it; empty: no file
+	Extra    map[string][]byte // extra files by name, written verbatim; nil from Read
 }
 
 // Dir returns filepath.Join(root, SanitizePackage(pkg), SanitizeTest(test), fmt.Sprintf("%016x", seed)).
@@ -33,8 +33,9 @@ func Dir(root, pkg, test string, seed uint64) string {
 	return filepath.Join(root, SanitizePackage(pkg), SanitizeTest(test), fmt.Sprintf("%016x", seed))
 }
 
-// AltDir returns the folder for an artifact whose Dir holds another test's artifact (ART-003):
-// Dir(root, pkg, test, seed) + "-" + the FNV-1a 64 hash of pkg + "\x00" + test as 16 hex digits.
+// AltDir returns the folder for an artifact whose Dir holds another test's artifact, which
+// happens when two names sanitize to the same path. It is Dir(root, pkg, test, seed) + "-" + the
+// FNV-1a 64 hash of pkg + "\x00" + test as 16 hex digits.
 func AltDir(root, pkg, test string, seed uint64) string {
 	return Dir(root, pkg, test, seed) + fmt.Sprintf("-%016x", fnv1a64(pkg+"\x00"+test))
 }
@@ -145,11 +146,13 @@ func fileIndex(a *Artifact, extras []string) []File {
 }
 
 // ErrOtherTest is wrapped by Write's error when dir holds the artifact of another package, test or
-// seed (ART-012). The caller then writes to AltDir.
+// seed. The caller then writes to AltDir.
 var ErrOtherTest = errors.New("it holds the artifact of another test")
 
-// Write writes a to dir atomically (ART-010 to ART-014). It does not replace the artifact of
-// another package, test or seed: the error then wraps ErrOtherTest. Once a and dir pass its checks,
+// Write writes a to dir atomically. It writes every file into a temporary directory next to dir,
+// then renames it to dir, so dir never mixes old and new files. It refuses to replace a symbolic
+// link or a directory without report.json. It does not replace the artifact of another package,
+// test or seed either: the error then wraps ErrOtherTest. Once a and dir pass its checks,
 // and before it writes a file, Write changes a: a.Report becomes the copy it writes, with every
 // string valid UTF-8, nil Nodes, Planners and Files empty, and Version, Dir and Files set, and
 // a.Trace.Header the header line it writes, with Version, Records and Dropped set. An error after
@@ -405,8 +408,9 @@ func replaceable(dir string) bool {
 	return err == nil && len(entries) == 1 && entries[0].Name() == "stall.txt"
 }
 
-// Read reads an artifact directory (ART-085). report.json is required; other files are optional.
-// An error names its file once and wraps its cause.
+// Read reads an artifact directory: report.json, which is required, and report.txt, trace.jsonl,
+// schedule.json and history.jsonl when present. It does not read extra files; report.json's file
+// index lists them. An error names its file once and wraps its cause.
 func Read(dir string) (*Artifact, error) {
 	// fail returns "artifact: <dir>: <reason>" wrapping err. For a *fs.PathError of file name the
 	// reason is "<op> <name>: <inner error>", so the path is not repeated; otherwise it is err's text

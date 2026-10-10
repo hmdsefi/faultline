@@ -4,6 +4,18 @@
 // Package simnet simulates a datagram network between kernel nodes: per-link latency, jitter,
 // tail latency, loss, duplication and FIFO order, and a gograph topology with partitions.
 //
+// A node installs a Handler when it boots. The handler receives every message delivered to that
+// incarnation of the node, and Send addresses a node by its ID:
+//
+//	nw := simnet.New(s, simnet.DefaultConfig())
+//	s.AddNode("server", func(n *kernel.Node) {
+//		nw.Handle(n, func(from kernel.NodeID, msg any) { nw.Send(n, from, "pong") })
+//	})
+//
+// Inside faultline.Run, World.Net is the network of the world, created from Options.Net. A message
+// to a node that is down, cut off by a partition or without a handler is dropped. Its record in
+// the trace says why (DropReason).
+//
 // All methods must be called from the simulation goroutine (inside kernel callbacks or between
 // Run calls). Network is not safe for concurrent use.
 package simnet

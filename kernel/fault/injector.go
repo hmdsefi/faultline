@@ -27,7 +27,8 @@ type Injector struct {
 }
 
 // NewInjector returns an injector for s. nw or d may be nil; events that need a nil component
-// then panic (FLT-031). It panics if s is nil.
+// then panic. The network kinds need nw, and sync-fail, disk-capacity and corrupt need d.
+// NewInjector panics if s is nil.
 func NewInjector(s *kernel.Sim, nw *simnet.Network, d *simdisk.Disks) *Injector {
 	if s == nil {
 		panic("fault: NewInjector: nil *kernel.Sim")
@@ -35,7 +36,8 @@ func NewInjector(s *kernel.Sim, nw *simnet.Network, d *simdisk.Disks) *Injector 
 	return &Injector{s: s, nw: nw, d: d, saved: map[[2]kernel.NodeID]simnet.Link{}}
 }
 
-// Inject applies e now (FLT-030). e.At, e.ID and e.Undoes are ignored.
+// Inject applies e now. e.At, e.ID and e.Undoes are ignored. It panics if e is invalid, has a
+// Role, or names an unknown node.
 func (in *Injector) Inject(e Event) { in.apply(e, "inject") }
 
 // Applied returns a deep copy of the concrete schedule of every event applied so far, with

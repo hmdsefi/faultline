@@ -1,0 +1,38 @@
+# faultline
+
+> faultline is deterministic simulation testing for Go, run by `go test`. A test calls `faultline.Run(t, options, world)`. The world function adds nodes, fault planners, invariants and final checks. faultline runs it once per seed, in virtual time, on a simulated network and disk. Every random choice comes from the seed. A failing seed prints a replay command that reproduces the identical run, and leaves an artifact directory with files such as `report.txt`, `timeline.txt`, `schedule.json` and `trace.jsonl` to debug it. In v0.1.0 the code under test is written against faultline's node API. It runs as callbacks on one goroutine, starts no goroutines, and uses the simulated network and disk instead of `net` and `os`. etcd/raft v3.7.0 runs through the `harness/etcdraft` module. Settings are `FAULTLINE_*` environment variables, not test flags. A test that calls `faultline.Run` cannot call `t.Parallel` unless `Options.NoCryptoSeed` is set. faultline needs Go 1.26 or newer.
+
+## AI coding agents
+
+- [Use faultline with an AI coding agent](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/ai-agents.md): read this first. The loop from a failing seed to a fix and a pinned regression test, which artifact file answers which question, the rules for code inside the simulation, what v0.1.0 cannot do, and a block to paste into `AGENTS.md` or `CLAUDE.md`.
+
+## Tutorial
+
+- [Get started](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/getting-started.md): a key-value server and its faultline test, built from an empty module. Finds a seed that loses an acknowledged write, replays it, finds the cause in the timeline, fixes the server and pins the seed. Use it as the model for a new simulation test.
+
+## How-to guides
+
+- [Replay a failing seed](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/replay-a-seed.md): when a seed fails. Run the replay command, confirm the trace hash, read the replay warnings, step through a replay in a debugger, and narrow a failure by deleting faults from `schedule.json`.
+- [Read a failure artifact](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/read-an-artifact.md): when you debug a failure. What each file of the artifact directory answers, how to read `timeline.txt` backward from the failure, and `jq` queries on `report.json`, `trace.jsonl` and `history.jsonl`.
+- [Check that a test is deterministic](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/check-determinism.md): when a report says "determinism failure", or before you trust a new test. How to read the failure, the common causes and their fixes, and the `t.Parallel` setup error.
+- [Run faultline in CI](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/ci.md): when you set up CI. Fixed seeds on every pull request, fresh seeds every night with `FAULTLINE_EXPLORE`, artifact upload, one JSON line per seed with `FAULTLINE_RESULTS`, and a GitHub Actions workflow.
+- [Test etcd/raft with the harness](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/etcd-raft.md): when the system under test is etcd/raft. `etcdraft.Test`, fault presets and cluster size, scenarios with `etcdraft.Setup`, the checks, the bug switches, and the steps before you report an etcd/raft bug.
+
+## Reference
+
+- [Environment variables](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/environment.md): when you choose seeds, replay a schedule, move the artifact root, keep full traces or collect results in a script. Every `FAULTLINE_*` variable, its values and default, its setup errors and log lines, and how it combines with `Options`.
+- [Artifact files](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/artifacts.md): when a script reads an artifact, or you need the exact meaning of a field. The artifact directory path, and the format and fields of `report.json`, `report.txt`, `trace.jsonl` and its record kinds, `timeline.txt`, `schedule.json`, `history.jsonl`, `hb.mmd` and `timeline.html`.
+- [The faultline command](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/reference/cli.md): when you need a larger causal slice, or the rendered files of an artifact from CI. `faultline render` and `faultline version`, their flags, output and exit codes.
+- [Package faultline on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline): when you need a signature or the default of an option. `Run`, `Options` and `World`, and the packages `kernel`, `kernel/simnet`, `kernel/simdisk`, `kernel/fault` and `check/history`, with runnable examples.
+- [Package etcdraft on pkg.go.dev](https://pkg.go.dev/github.com/hmdsefi/faultline/harness/etcdraft): when you configure the etcd/raft harness. Every `Config` field and `Cluster` method of the etcd/raft harness.
+
+## Concepts
+
+- [How faultline works](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/how-it-works.md): when you write code that runs inside the simulation, or need to know why a run behaves as it does. Virtual time, the seeded scheduler, named random streams, nodes, the simulated network and disk, faults and fault schedules, checks, seeds and replay, and the determinism rules for code under test.
+- [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): when you need to know which package does what. The packages, how one seed runs through them, and the design choices behind them.
+- [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): before you decide whether faultline fits a system, or when a feature seems to be missing. What v0.1.0 does not do, the known issues, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
+
+## Optional
+
+- [README](https://raw.githubusercontent.com/hmdsefi/faultline/main/README.md): overview, install commands and status.
+- [Contributing](https://raw.githubusercontent.com/hmdsefi/faultline/main/.github/CONTRIBUTING.md): when you change faultline itself. Build and test commands, and the determinism rules for faultline's own packages.

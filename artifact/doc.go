@@ -3,7 +3,16 @@
 
 // Package artifact reads and writes faultline artifact directories: report.json, report.txt,
 // trace.jsonl, schedule.json, history.jsonl, extra files, and the render files timeline.txt,
-// hb.mmd and timeline.html (spec ART).
+// hb.mmd and timeline.html.
+//
+// Tests do not need it: faultline.Run writes the artifact of a failing seed, and the faultline
+// command's render subcommand regenerates the render files. Tools that read artifacts start with
+// Read:
+//
+//	a, err := artifact.Read(dir)
+//	if err == nil && a.Report.Failure != nil {
+//		fmt.Println(a.Report.Failure.Headline)
+//	}
 //
 // Every function is a pure function of its inputs: no timestamps, no randomness, no environment.
 package artifact
@@ -34,5 +43,5 @@ const (
 	FileTimelineText = "timeline.txt"
 	FileHB           = "hb.mmd"
 	FileTimelineHTML = "timeline.html"
-	FileMinimized    = "minimized" // directory written by MIN (Phase 3)
+	FileMinimized    = "minimized" // reserved for the output of failure minimization
 )

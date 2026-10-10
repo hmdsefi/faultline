@@ -9,7 +9,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 )
 
-// SetLink overrides the configuration of the directed link from → to (from == to allowed).
+// SetLink overrides the configuration of the directed link from -> to (from == to allowed).
 // It applies to messages sent after the call. It panics if l is invalid or an ID is unknown.
 func (nw *Network) SetLink(from, to kernel.NodeID, l Link) {
 	nw.register()
@@ -32,7 +32,7 @@ func (nw *Network) SetLink(from, to kernel.NodeID, l Link) {
 		attr("fifo", strconv.FormatBool(l.FIFO)))
 }
 
-// ResetLink removes the override of from → to, so the link uses Config.Default again.
+// ResetLink removes the override of from -> to, so the link uses Config.Default again.
 func (nw *Network) ResetLink(from, to kernel.NodeID) {
 	nw.register()
 	i := nw.index("ResetLink", from)
@@ -44,7 +44,7 @@ func (nw *Network) ResetLink(from, to kernel.NodeID) {
 	nw.emit("net.link_reset", 0, "link "+f+" -> "+t+": reset to default", attr("from", f), attr("to", t))
 }
 
-// Link returns the effective configuration of from → to: its override, or Config.Default.
+// Link returns the effective configuration of from -> to: its override, or Config.Default.
 func (nw *Network) Link(from, to kernel.NodeID) Link {
 	nw.register()
 	return nw.effective(nw.index("Link", from), nw.index("Link", to))

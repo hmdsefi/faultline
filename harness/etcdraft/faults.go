@@ -56,7 +56,10 @@ func selfTestRules() []fault.Rule {
 	}
 }
 
-// Faults returns a new planner for cfg.Faults (ETC-141). Call it once per seed.
+// Faults returns a new planner for cfg.Faults. FaultsNone gives fault.None. Every other preset
+// gives a fault.Random with the preset's rules (see FaultPreset) and cfg.Quiet as its recovery
+// window. Its default MaxDown keeps fewer than half the servers down or paused at once. Call
+// Faults once per seed.
 func Faults(cfg Config) fault.Planner {
 	cfg = cfg.withDefaults()
 	var rules []fault.Rule

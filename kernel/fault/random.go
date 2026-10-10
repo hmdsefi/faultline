@@ -13,10 +13,9 @@ import (
 	"github.com/hmdsefi/faultline/kernel/simnet"
 )
 
-// Shape is a partition shape of a KindPartition rule. FLT declares it so Rule can carry one; it
-// has only Name. PPL (Phase 3) defines the shape types and the PlanShape interface (Shape plus
-// Check and Split) that Random requires of a non-nil Shape (PPL-001). A nil Shape selects the
-// Phase 1 split (FLT-085).
+// Shape is a partition shape of a KindPartition rule. Random.Start panics on a non-nil Shape, so a
+// partition rule leaves Shape nil. Each partition then splits the target nodes, the servers by
+// default, into two random groups; every other node joins one of them.
 type Shape interface {
 	Name() string
 }
@@ -29,20 +28,26 @@ type Rule struct {
 	MaxFor time.Duration // MinFor = MaxFor = 0: the fault lasts until the recovery window
 	Target string        // role name; "" = a uniformly random eligible server
 
-	Shape     Shape        // KindPartition only; nil = Phase 1 split (FLT-085); PPL defines others
-	Magnitude int64        // per-kind amount (FLT-083); 0 where not used
+	Shape Shape // KindPartition only; must be nil (see Shape)
+	// Magnitude is the size of each fault, by kind. KindClockJump: the largest jump in
+	// nanoseconds, either way. KindClockDrift: the largest drift in ppm, either way.
+	// KindSyncFail: the number of syncs that fail (0 means 1). KindDiskCapacity: the capacity in
+	// bytes. KindCorrupt: the number of bytes to damage (0 means 1). Other kinds take 0.
+	Magnitude int64
 	Link      *simnet.Link // KindLink only: the config to apply
 	Path      string       // KindCorrupt only: the file to damage
 }
 
-// Random starts faults at random times following its rules and ends them all when its
-// recovery window starts, at PlanContext.Until (FLT-080 to FLT-089). A value may be reused
-// sequentially: each Start begins a new run, and the kernel events of an earlier run keep their
-// own state (FLT-087). It must not be shared by runs that execute concurrently.
+// Random starts faults at random times following its rules. At PlanContext.Until, where the
+// recovery window starts, it ends the faults it started that are still active. It heals the
+// network, resets links, clears disk faults, and resumes and restarts nodes; clock changes stay.
+// All its draws come from PlanContext.Rand, so the same seed gives the same faults. A value may
+// be reused sequentially: each Start begins a new run, and the kernel events of an earlier run
+// keep their own state. It must not be shared by runs that execute concurrently.
 type Random struct {
 	Rules   []Rule
 	MaxDown int           // max servers down or paused at once for crash/pause rules; 0 = (n-1)/2
-	Quiet   time.Duration // recovery window length; read by API-044 to set Until, not by Random
+	Quiet   time.Duration // recovery window length; World.Plan sets Until from it (0: a quarter of the run)
 
 	run *randomRun // the run of the last Start; nil before the first
 }
@@ -94,7 +99,8 @@ func (r *Random) RecoverAt() kernel.Time {
 }
 
 // Start validates r against ctx and schedules the first occurrence of every rule and the
-// recovery. It panics on invalid configuration (FLT-081).
+// recovery. It panics on invalid configuration, with a message that names the rule and the
+// problem.
 func (r *Random) Start(ctx *PlanContext) {
 	switch {
 	case ctx.Sim == nil:

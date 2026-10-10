@@ -88,7 +88,7 @@ func (nw *Network) Isolate(id kernel.NodeID) {
 	nw.emit("net.isolate", 0, "isolate "+name, attr("node", name), attr("removed", strconv.Itoa(removed)))
 }
 
-// Cut removes the edge from → to (one direction only). It panics if from == to.
+// Cut removes the edge from -> to (one direction only). It panics if from == to.
 func (nw *Network) Cut(from, to kernel.NodeID) {
 	nw.register()
 	i, j := nw.pair("Cut", from, to)
@@ -120,7 +120,7 @@ func (nw *Network) Heal() {
 	nw.emit("net.heal", 0, "heal", attr("added", strconv.Itoa(added)))
 }
 
-// HealLink restores the edge from → to (one direction only). It panics if from == to.
+// HealLink restores the edge from -> to (one direction only). It panics if from == to.
 func (nw *Network) HealLink(from, to kernel.NodeID) {
 	nw.register()
 	i, j := nw.pair("HealLink", from, to)

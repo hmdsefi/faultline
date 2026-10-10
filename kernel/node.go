@@ -19,9 +19,9 @@ type NodeID int32
 type NodeState uint8
 
 const (
-	NodeUp NodeState = iota + 1
-	NodeDown
-	NodePaused
+	NodeUp     NodeState = iota + 1 // booted: its events run
+	NodeDown                        // before its first boot, or crashed
+	NodePaused                      // booted, but its events wait for Resume
 )
 
 // String returns "up", "down", "paused", or "NodeState(<n>)".
@@ -80,7 +80,8 @@ type Node struct {
 }
 
 // AddNode creates a node in state NodeDown with incarnation 0 and schedules its initial boot at
-// Now(). It panics on an invalid or duplicate name, a nil boot, or invalid options (KRN §7).
+// Now(). A name has 1 to 64 characters from [A-Za-z0-9._-] and starts with a letter or a digit.
+// AddNode panics on an invalid or duplicate name, a nil boot, or invalid options.
 func (s *Sim) AddNode(name string, boot BootFunc, opts ...NodeOption) *Node {
 	if !validName(name) {
 		panic(fmt.Sprintf("kernel: invalid node name %q: want 1-64 characters [A-Za-z0-9._-], starting with a letter or digit", name))
@@ -191,8 +192,8 @@ func (n *Node) State() NodeState { return n.state }
 // Incarnation returns the current incarnation: 0 before the first boot.
 func (n *Node) Incarnation() uint32 { return n.inc }
 
-// Rand returns the stream "node/<name>/<incarnation>" for the current incarnation. Node streams are
-// not kept in the Sim: an old incarnation's stream is never returned again (KRN-080).
+// Rand returns the stream "node/<name>/<incarnation>" for the current incarnation. A restart
+// starts a new stream: an old incarnation's stream is never returned again.
 func (n *Node) Rand() *rand.Rand {
 	if n.rnd == nil || n.rndInc != n.inc {
 		n.rnd = newStream(n.sim.cfg.Seed, "node/"+n.name+"/"+strconv.FormatUint(uint64(n.inc), 10))
@@ -226,8 +227,11 @@ func (n *Node) Cancel(id EventID) bool {
 	return n.sim.Cancel(id)
 }
 
-// Crash takes the node down (KRN-060, KRN-062). Crashing a node before its first boot cancels the
-// boot. Crashing a down node is otherwise a no-op.
+// Crash takes the node down. Events scheduled with the node's After and Post never run, including
+// the ones a pause deferred. The OnCrash hooks run: simnet removes the node's handler, and simdisk
+// decides which unsynced writes survive. The incarnation stays the same until Restart.
+// Crashing a node before its first boot cancels the boot. Crashing a down node is otherwise a
+// no-op.
 func (n *Node) Crash() {
 	s := n.sim
 	switch n.state {
@@ -259,7 +263,8 @@ func (n *Node) Crash() {
 	}
 }
 
-// Restart boots a down node (KRN-061). It is a no-op unless the node is down.
+// Restart boots a down node: it increments the incarnation, runs the OnBoot hooks and then the
+// node's BootFunc. It is a no-op unless the node is down.
 func (n *Node) Restart() {
 	if n.state != NodeDown {
 		return
@@ -285,8 +290,8 @@ func (n *Node) Logf(format string, args ...any) {
 	n.sim.emit(Record{Kind: "kernel.log", Node: n.id, Inc: n.inc, Text: fmt.Sprintf(format, args...)})
 }
 
-// Pause stops running the node's events (KRN-060): they are deferred when due and run after
-// Resume in their original order. It is a no-op unless the node is up.
+// Pause stops running the node's events: they are deferred when due and run after Resume in
+// their original order. It is a no-op unless the node is up.
 func (n *Node) Pause() {
 	if n.state != NodeUp {
 		return
@@ -295,7 +300,7 @@ func (n *Node) Pause() {
 	n.sim.emit(Record{Kind: "kernel.pause", Node: n.id, Inc: n.inc, Text: "pause"})
 }
 
-// Resume makes a paused node up again (KRN-063). Its deferred events run at Now(), in the order they
+// Resume makes a paused node up again. Its deferred events run at Now(), in the order they
 // were deferred: under TieBreakSeeded before the seeded events at Now(), under TieBreakFIFO after the
 // events already queued for Now(). It is a no-op unless the node is paused.
 func (n *Node) Resume() {

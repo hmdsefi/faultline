@@ -13,13 +13,14 @@ import (
 // Attr is one key/value pair of a record. Keys are snake_case.
 type Attr struct{ Key, Value string }
 
-// Record is one trace entry (architecture §12.1).
+// Record is one trace entry. The trace of a run is its records in Seq order, and the trace hash
+// covers all of them.
 type Record struct {
 	Seq   uint64 // 1-based emission order
 	At    Time
 	Node  NodeID // 0 = global
 	Inc   uint32 // node incarnation
-	Kind  string // namespaced, e.g. "kernel.event", "net.send"
+	Kind  string // namespaced, for example "kernel.event" or "net.send"
 	Cause uint64 // Seq of the causing record; 0 only for kernel.start
 	Text  string // short human description
 	Attrs []Attr // ordered
@@ -40,7 +41,8 @@ func newTrace(cfg TraceConfig) trace {
 	return trace{level: cfg.Level, buffer: cfg.Buffer, hash: fnvOffset64}
 }
 
-// AppendRecord appends the canonical binary encoding of r (KRN-095) to b.
+// AppendRecord appends the canonical binary encoding of r to b: the encoding the trace hash is
+// computed over.
 func AppendRecord(b []byte, r Record) []byte {
 	b = binary.AppendUvarint(b, r.Seq)
 	b = binary.AppendVarint(b, int64(r.At))
@@ -152,8 +154,9 @@ func (s *Sim) emitEvent(kind string, id EventID, label string, node NodeID, inc 
 	}
 }
 
-// Emit assigns Seq and At, defaults Cause and Inc (KRN-090), hashes the record, keeps a copy when
-// tracing fully, and returns its Seq. Attrs is copied, so the caller may reuse it. It panics on an
+// Emit assigns Seq and At, hashes the record, keeps a copy when tracing fully, and returns its
+// Seq. A zero Cause becomes the previous record, and a zero Inc of a node record becomes the
+// node's incarnation. Attrs is copied, so the caller may reuse it. It panics on an
 // empty or "kernel."-prefixed Kind, an empty attribute key, an unknown Node, or a Cause after
 // Cause().
 func (s *Sim) Emit(r Record) uint64 {

@@ -25,7 +25,14 @@ type PanicError struct {
 	Seed     uint64
 }
 
-// Error formats the panic as specified in KRN-047.
+// Error returns one line in this form, where the bracketed parts appear only for a node's event
+// and for an observer:
+//
+//	kernel: panic at <At> in event <Event> <Label>[ on node <NodeName> (inc <Inc>)][ (observer)] (seed <Seed>): <panic text>
+//
+// Label and NodeName are quoted, and Seed is 0x followed by 16 hex digits. For example:
+//
+//	kernel: panic at 1.000000000s in event 1 "boom" (seed 0x0000000000000007): boom
 func (e *PanicError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "kernel: panic at %s in event %d %q", e.At, e.Event, e.Label)
