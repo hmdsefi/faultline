@@ -149,26 +149,42 @@ func validateOptions(o Options) error {
 	case o.Trace.Buffer < 0:
 		return fmt.Errorf("faultline: Options.Trace.Buffer is %d; want 0 (unbounded) or more", o.Trace.Buffer)
 	case o.Mode == ModeGoroutine:
-		return fmt.Errorf("faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)")
+		return fmt.Errorf("faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at %s", roadmapURL)
 	case o.Mode != ModeEvent:
 		return fmt.Errorf("faultline: unknown Options.Mode %d; want ModeEvent (the zero value)", o.Mode)
 	}
 	later := []struct {
-		name  string
-		set   bool
-		phase string
-		zero  string // the value to use until the phase ships
+		name    string
+		set     bool
+		feature string // the later feature the option belongs to, in the words of the roadmap
+		zero    string // the value to use until the feature ships
 	}{
-		{"Options.Procs", o.Procs != 0, "2", "0"},
-		{"Options.Drain", o.Drain != 0, "2", "0"},
-		{"Options.StallTimeout", o.StallTimeout != 0, "2", "0"},
-		{"Options.FailOnLeak", o.FailOnLeak, "2", "false"},
-		{"Options.Swarm", o.Swarm, "3", "false"},
+		{"Options.Procs", o.Procs != 0, featureGoroutine, "0"},
+		{"Options.Drain", o.Drain != 0, featureGoroutine, "0"},
+		{"Options.StallTimeout", o.StallTimeout != 0, featureGoroutine, "0"},
+		{"Options.FailOnLeak", o.FailOnLeak, featureGoroutine, "false"},
+		{"Options.Swarm", o.Swarm, featureSwarm, "false"},
 	}
 	for _, l := range later {
 		if l.set {
-			return fmt.Errorf("faultline: %s is not available until Phase %s; want %s", l.name, l.phase, l.zero)
+			return notInRelease(l.name, l.feature, "set it to "+l.zero)
 		}
 	}
 	return nil
+}
+
+// roadmapURL is the public roadmap that the messages for later features point to (API-005).
+const roadmapURL = "https://github.com/hmdsefi/faultline/issues/167"
+
+// The later features of API-005's table, as its messages name them.
+const (
+	featureGoroutine = "goroutine mode"
+	featureExact     = "exact replay in goroutine mode"
+	featureSwarm     = "swarm testing"
+)
+
+// notInRelease is API-005's setup error for an option or variable of a later feature: name is
+// set, feature is not in this release, and fix says what to do instead.
+func notInRelease(name, feature, fix string) error {
+	return fmt.Errorf("faultline: %s is set, but %s is not in this release yet; %s, and see the roadmap at %s", name, feature, fix, roadmapURL)
 }

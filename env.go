@@ -176,9 +176,9 @@ func (e *environment) parse(name, v string) error {
 		}
 		e.minimize = on
 	case envSwarm, envSwarmConfig:
-		return fmt.Errorf("faultline: %s is not available until Phase 3; unset it", name)
+		return notInRelease(name, featureSwarm, "unset it")
 	case envExact:
-		return fmt.Errorf("faultline: %s is not available until Phase 2b; unset it", name)
+		return notInRelease(name, featureExact, "unset it")
 	case envSeedList:
 		list, err := parseSeedList(v)
 		if err != nil {
@@ -380,6 +380,14 @@ func parseMinimize(v string) (enabled bool, reason string) {
 	return true, ""
 }
 
+// seedCount returns "1 seed" or "<n> seeds" for the seed-list summary (API-017).
+func seedCount(n int) string {
+	if n == 1 {
+		return "1 seed"
+	}
+	return strconv.Itoa(n) + " seeds"
+}
+
 // plan is the resolved configuration of one Run call (API-001 to API-017).
 type plan struct {
 	opts             Options // effective options: World.Options()
@@ -429,7 +437,7 @@ func resolve(in resolveInput) (*plan, error) {
 	case env.set[envSeedList]:
 		ignore(envSeedList, envSeeds, envBaseSeed, envExplore)
 		p.seeds, p.seedSource = env.seedList, "list"
-		p.logs = append(p.logs, fmt.Sprintf("faultline: FAULTLINE_SEED_LIST: running %d seeds", len(p.seeds)))
+		p.logs = append(p.logs, "faultline: FAULTLINE_SEED_LIST: running "+seedCount(len(p.seeds)))
 	case env.set[envSeed]:
 		ignore(envSeed, envSeeds, envBaseSeed, envExplore)
 		p.seeds, p.seedSource = []uint64{env.seed}, "env"
@@ -469,7 +477,7 @@ func resolve(in resolveInput) (*plan, error) {
 			p.seeds[i] = DeriveSeed(p.base, i)
 		}
 		p.seedSource = "derived"
-		p.logs = append(p.logs, fmt.Sprintf("faultline: running %d seeds from base 0x%016x (%s)", n, p.base, label))
+		p.logs = append(p.logs, fmt.Sprintf("faultline: running %s from base 0x%016x (%s)", seedCount(n), p.base, label))
 	}
 	if shortLog != "" {
 		p.logs = append(p.logs, shortLog)

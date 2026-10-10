@@ -729,7 +729,7 @@ var _ = scenario("goroutine-mode", func(t *testing.T) {
 // AT-API-28 (Phase 1 only; GOR-001 removes API-091)
 func TestRunGoroutineModeRejected(t *testing.T) {
 	o, code := runScenario(t, "goroutine-mode", nil)
-	if code != 1 || !strings.Contains(o, "faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)") {
+	if code != 1 || !strings.Contains(o, "faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167") {
 		t.Fatalf("exit %d\n%s", code, o)
 	}
 }
@@ -968,12 +968,12 @@ func TestRunLaterPhase(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{[]string{"ROW=procs"}, "faultline: Options.Procs is not available until Phase 2; want 0"},
-		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is not available until Phase 2; want false"},
-		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is not available until Phase 3; want false"},
-		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is not available until Phase 3; unset it"},
-		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3; unset it"},
-		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is not available until Phase 2b; unset it"},
+		{[]string{"ROW=procs"}, "faultline: Options.Procs is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
+		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is set, but goroutine mode is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
+		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
+		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
+		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
+		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 	}
 	for _, c := range cases {
 		o, code := runScenario(t, "later-phase", c.env)
