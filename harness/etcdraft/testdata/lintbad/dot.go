@@ -16,6 +16,7 @@ func dot(hs *raftpb.HardState, m map[string]int) {
 	_ = Now()                    // want `use of time.Now`
 	Sleep(1)                     // want `use of time.Sleep`
 	_ = Getenv("X")              // want `use of os.Getenv`
+	_ = Environ()                // want `use of os.Environ`
 	_ = Stdout                   // want `use of os.Stdout`
 	_, _ = Fprintln(Stderr, "x") // want `use of os.Stderr`
 	Println("x")                 // want `use of fmt.Println`
