@@ -29,10 +29,12 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 	w.T().Cleanup(raft.ResetDefaultLogger)
 
 	c := &Cluster{
-		w:      w,
-		cfg:    cfg,
-		o:      oracle.New(bootSnapshot(cfg.Nodes)),
-		byNode: map[kernel.NodeID]*server{},
+		w:            w,
+		cfg:          cfg,
+		o:            oracle.New(bootSnapshot(cfg.Nodes)),
+		byNode:       map[kernel.NodeID]*server{},
+		clientByNode: map[kernel.NodeID]*client{},
+		opIDs:        map[int64]uint64{},
 	}
 	if cfg.selfTestHook != nil {
 		hook, seed := cfg.selfTestHook, w.Seed()
@@ -48,6 +50,17 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 		c.servers = append(c.servers, s)
 		c.byNode[s.node.ID()] = s
 	}
+	addClient := func(name string, cid uint32, kind clientKind) *client {
+		cl := &client{c: c, name: name, cid: cid, kind: kind}
+		cl.node = w.AddClient(name, cl.boot)
+		c.clientByNode[cl.node.ID()] = cl
+		return cl
+	}
+	for k := 1; k <= cfg.Clients; k++ {
+		c.clients = append(c.clients, addClient("c"+strconv.Itoa(k), uint32(k), workloadClient))
+	}
+	//nolint:gosec // Config.Clients is validated to 1..16
+	c.probe = addClient("probe", uint32(cfg.Clients+1), probeClient)
 	w.Sim.OnCrash(c.onCrash)
 
 	c.registerRoles()
@@ -60,10 +73,15 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 	return c
 }
 
-// onCrash is the Setup crash hook: it drops a server's incarnation state.
+// onCrash is the Setup crash hook: it drops a server's incarnation state and completes
+// a client's pending operation as Info (ETC-097).
 func (c *Cluster) onCrash(n *kernel.Node) {
 	if s, ok := c.byNode[n.ID()]; ok && s.node == n {
 		s.inc = nil
+		return
+	}
+	if cl, ok := c.clientByNode[n.ID()]; ok && cl.node == n {
+		cl.onCrash()
 	}
 }
 

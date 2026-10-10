@@ -20,14 +20,31 @@ type Cluster struct {
 	cfg Config
 	o   *oracle.Oracle
 
-	servers []*server                 // index raft ID - 1: initial voters, then spares
-	byNode  map[kernel.NodeID]*server // accessed by key only
+	servers      []*server                 // index raft ID - 1: initial voters, then spares
+	byNode       map[kernel.NodeID]*server // accessed by key only
+	clients      []*client                 // c1..cK
+	probe        *client
+	clientByNode map[kernel.NodeID]*client // accessed by key only
 
 	stats         Stats // counters; history and oracle fields are filled by Stats()
 	leaderChanges []LeaderChange
-	drainStart    kernel.Time // End − Drain
-	recoveryStart kernel.Time // R of ETC-096
+	drainStart    kernel.Time      // End − Drain
+	recoveryStart kernel.Time      // R of ETC-096
+	probeOp       uint64           // client op ID of the probe write; 0 until invoked
+	probeAcked    bool             // the probe write completed OK
+	probeAckedAt  kernel.Time      // when it did
+	opIDs         map[int64]uint64 // history op ID -> client op ID, accessed by key only
 }
+
+// KVInput is the check/history input of "read" ({"key": k}) and "write" ({"key": k, "value": v})
+// operations, LIN's KV shapes (LIN-022). Write values are never empty.
+type KVInput struct {
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"` // writes only
+}
+
+// The output of an OK "read" is the value read as a Go string (a JSON string), or nil (JSON null)
+// when the key is absent; the output of an OK "write" is nil (ETC-095).
 
 // LeaderChange is one observed change of a server's SoftState (lead or raft state).
 type LeaderChange struct {
@@ -65,6 +82,15 @@ func (c *Cluster) Servers() []*kernel.Node {
 	out := make([]*kernel.Node, len(c.servers))
 	for i, s := range c.servers {
 		out[i] = s.node
+	}
+	return out
+}
+
+// Clients returns the workload clients c1..cK in order (not probe or admin).
+func (c *Cluster) Clients() []*kernel.Node {
+	out := make([]*kernel.Node, len(c.clients))
+	for i, cl := range c.clients {
+		out[i] = cl.node
 	}
 	return out
 }
@@ -149,12 +175,31 @@ func (c *Cluster) Stats() Stats {
 	st.Terms = c.o.Terms()
 	st.ConfChangesApplied = c.o.ConfChanges()
 	st.LastIndex = c.o.LastIndex()
+	st.ProbeAcked = c.probeAcked
+	if c.probeOp != 0 {
+		st.ProbeIndex, _ = c.o.FirstApplied(c.probe.cid, c.probeOp)
+	}
 	return st
 }
 
 // clientName returns the node name of client ID cid for record texts.
 func (c *Cluster) clientName(cid uint32) string {
+	switch {
+	case cid >= 1 && int(cid) <= len(c.clients):
+		return c.clients[cid-1].name
+	case c.probe != nil && cid == c.probe.cid:
+		return c.probe.name
+	}
 	return "client" + strconv.FormatUint(uint64(cid), 10)
+}
+
+// clientByName returns the client (workload or probe) named name, or nil.
+func (c *Cluster) clientByName(name string) *client {
+	n := c.w.Sim.Lookup(name)
+	if n == nil {
+		return nil
+	}
+	return c.clientByNode[n.ID()]
 }
 
 // finalVoters returns the raft IDs in Voters or VotersOutgoing of the latest canonical

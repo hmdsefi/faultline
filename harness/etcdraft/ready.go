@@ -306,7 +306,13 @@ func (inc *incarnation) applyNormal(e *raftpb.Entry) bool {
 			inc.harnessError(fmt.Errorf("command decode: %w", err))
 			return false
 		}
-		_, dup = inc.kv.Apply(cmd)
+		var res kv.Result
+		res, dup = inc.kv.Apply(cmd)
+		var data []byte
+		if cmd.Op == kv.OpConfRead {
+			data = wal.Marshal(inc.confState)
+		}
+		inc.reply(cmd.Client, cmd.ID, res, data)
 	}
 	inc.c.o.Apply(inc.now(), inc.n.Name(), inc.s.id, e)
 	inc.emitApply(e, cmd, dup)
@@ -372,6 +378,9 @@ func (inc *incarnation) applyConf(e *raftpb.Entry) bool {
 			}
 		}
 		cs = inc.rn.ApplyConfChange(cc)
+		if cmd.Op != 0 {
+			inc.reply(cmd.Client, cmd.ID, kv.Result{}, wal.Marshal(cs))
+		}
 	}
 	inc.confState = cs
 	c.o.ConfApplied(inc.now(), inc.n.Name(), e.GetIndex(), cs)
