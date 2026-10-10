@@ -148,6 +148,11 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
+      - name: golangci-lint (harness/etcdraft)
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          working-directory: harness/etcdraft
 
   golden-trailer:
     if: github.event_name == 'pull_request'

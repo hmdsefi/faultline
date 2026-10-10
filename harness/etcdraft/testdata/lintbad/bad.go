@@ -1,10 +1,12 @@
 // Package lintbad breaks every rule TestDeterminismRules enforces, in each form the rule
-// must see: a call, a function value, an explicit instantiation (dot.go adds the dot
-// imports). Each violating line ends in a `// want` comment that quotes its findings;
-// TestDeterminismRulesCatch checks them. It is never built.
+// must see: a call, a function or method value, a method expression, an explicit
+// instantiation (dot.go and dotreflect.go add the dot imports). Each violating line ends in a
+// `// want` comment that quotes its findings; TestDeterminismRulesCatch checks them. It is never
+// built.
 package lintbad
 
 import (
+	"context"
 	crand "crypto/rand" // want `import "crypto/rand"`
 	"fmt"
 	"log"      // want `import "log"`
@@ -17,8 +19,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/kernel/simnet"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/encoding/protojson" // want `import "google.golang.org/protobuf/encoding/protojson"`
 	"google.golang.org/protobuf/encoding/prototext" // want `import "google.golang.org/protobuf/encoding/prototext"`
@@ -52,13 +57,42 @@ func each[M ~map[string]int](m M) {
 	}
 }
 
-func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.Entry, ch chan int, f string, sb *strings.Builder) {
+// mapLike allows only maps; the constraints below reach it through embedding.
+type mapLike interface{ ~map[string]int }
+
+type nestedMap interface{ mapLike }
+
+func eachEmbedded[M interface{ mapLike }](m M) {
+	for range m { // want `range over a map`
+	}
+}
+
+func eachNested[M nestedMap](m M) {
+	for range m { // want `range over a map`
+	}
+}
+
+func eachUnion[M interface{ mapLike | nestedMap }](m M) {
+	for range m { // want `range over a map`
+	}
+}
+
+func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.Entry, ch chan int, f string, sb *strings.Builder, nw *simnet.Network, n *kernel.Node) {
 	// Statements.
 	go func() {}() // want `go statement`
 	select {       // want `select statement`
 	case <-ch:
 	default:
 	}
+
+	// Library calls that start a goroutine.
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Go(func() {})                      // want `use of (*sync.WaitGroup).Go`
+	spawn := wg.Go                        // want `use of (*sync.WaitGroup).Go`
+	_ = (*sync.WaitGroup).Go              // want `use of (*sync.WaitGroup).Go`
+	_ = context.AfterFunc(ctx, func() {}) // want `use of context.AfterFunc`
+	_ = spawn
 
 	// Maps are accessed by key only.
 	for range m { // want `range over a map`
@@ -81,6 +115,12 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = reflect.ValueOf(m).MapRange() // want `unordered iteration: (reflect.Value).MapRange`
 	var syncMap sync.Map
 	syncMap.Range(func(k, v any) bool { return true }) // want `unordered iteration: (*sync.Map).Range`
+	rng := syncMap.Range                               // want `unordered iteration: (*sync.Map).Range`
+	_ = rng
+	_ = (*sync.Map).Range                   // want `unordered iteration: (*sync.Map).Range`
+	_ = reflect.Value.MapKeys               // want `unordered iteration: (reflect.Value).MapKeys`
+	mapRange := reflect.ValueOf(m).MapRange // want `unordered iteration: (reflect.Value).MapRange`
+	_ = mapRange
 
 	// Floating point.
 	_ = 1.5             // want `floating-point value`
@@ -104,6 +144,12 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_, _ = os.LookupEnv("X") // want `use of os.LookupEnv`
 	getenv := os.Getenv      // want `use of os.Getenv`
 	_ = getenv
+	_ = os.Environ()           // want `use of os.Environ`
+	_ = os.ExpandEnv("$X")     // want `use of os.ExpandEnv`
+	_, _ = syscall.Getenv("X") // want `use of syscall.Getenv`
+	_ = syscall.Environ()      // want `use of syscall.Environ`
+	environ := os.Environ      // want `use of os.Environ`
+	_ = environ
 	_, _ = crand.Read(nil)
 
 	// Wall-clock time, as calls and as function values.
@@ -121,7 +167,13 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = now
 	sleep := time.Sleep // want `use of time.Sleep`
 	sleep(1)
-	_ = time.AfterFunc // want `use of time.AfterFunc`
+	_ = time.AfterFunc                            // want `use of time.AfterFunc`
+	_, _ = context.WithTimeout(ctx, 1)            // want `use of context.WithTimeout`
+	_, _ = context.WithTimeoutCause(ctx, 1, nil)  // want `use of context.WithTimeoutCause`
+	_, _ = context.WithDeadline(ctx, t)           // want `use of context.WithDeadline`
+	_, _ = context.WithDeadlineCause(ctx, t, nil) // want `use of context.WithDeadlineCause`
+	withTimeout := context.WithTimeout            // want `use of context.WithTimeout`
+	_ = withTimeout
 
 	// Global randomness: every package-level function, also as a value or instantiated.
 	_ = rand.IntN(3)                // want `use of math/rand/v2.IntN`
@@ -175,4 +227,12 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = (*raftpb.HardState).String // want `String() of a proto message`
 	_ = prototext.Format(hs)
 	_ = protojson.Format(hs)
+
+	// Proto messages described with kernel.Describe, which calls String (KRN-100).
+	_ = kernel.Describe(hs)                                          // want `proto message passed to Describe`
+	_ = (kernel.Describe)(hs)                                        // want `proto message passed to Describe`
+	nw.Send(n, 1, hs)                                                // want `proto message passed to Send`
+	_ = nw.SendRaw(n, 1, hs, simnet.RawOptions{})                    // want `proto message passed to SendRaw`
+	(*simnet.Network).Send(nw, n, 1, hs)                             // want `proto message passed to Send`
+	_ = (*simnet.Network).SendRaw(nw, n, 1, hs, simnet.RawOptions{}) // want `proto message passed to SendRaw`
 }

@@ -3,6 +3,7 @@
 package lintok
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -11,8 +12,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/kernel/simnet"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
 )
@@ -34,7 +38,18 @@ func sum[S ~[]int](s S) int {
 	return n
 }
 
-func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Entry, f string, err error, d time.Duration, lg logger, sb *strings.Builder) string {
+// sliceLike is embedded like the map constraints of lintbad, but allows only slices.
+type sliceLike interface{ ~[]int }
+
+func sumEmbedded[S interface{ sliceLike }](s S) int {
+	n := 0
+	for _, v := range s {
+		n += v
+	}
+	return n
+}
+
+func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Entry, f string, err error, d time.Duration, lg logger, sb *strings.Builder, nw *simnet.Network, n *kernel.Node) string {
 	// Methods on a stream from the kernel are allowed, and so are the types of math/rand/v2.
 	var stream *rand.Rand = r
 	_ = stream.IntN(3) + int(r.Uint64()%2)
@@ -59,9 +74,19 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 		_ = e.GetIndex()
 	}
 	_ = sum([]int{1, 2})
+	_ = sumEmbedded([]int{1, 2})
 	_ = reflect.ValueOf(m).MapIndex(reflect.ValueOf("a"))
 
 	_ = Stdout + Stderr
+
+	// A WaitGroup without Go, and a context without a deadline or AfterFunc.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	wg.Done()
+	wg.Wait()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = ctx.Err()
 
 	// Durations are integers; no clock is read.
 	_ = d + 2*time.Second + time.Duration(3)*time.Millisecond
@@ -94,5 +119,10 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 	s += raftpb.MsgApp.String() + ents[0].GetType().String()
 	_ = proto.Equal(hs, hs)
 	_ = proto.Clone(hs)
+
+	// kernel.Describe prints the type name of a value that only holds a message, and an enum's name.
+	s += kernel.Describe(ents) + kernel.Describe(raftpb.MsgApp)
+	nw.Send(n, 1, []byte("x"))
+	_ = nw.SendRaw(n, 1, ents, simnet.RawOptions{})
 	return s
 }
