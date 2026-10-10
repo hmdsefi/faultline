@@ -181,7 +181,8 @@ func (rule Rule) problem(ctx *PlanContext) string {
 		return "Shape is only allowed for partition"
 	}
 	if rule.Shape != nil {
-		return "shape " + strconv.Quote(rule.Shape.Name()) + " requires the partition planner (Phase 3)"
+		return "Shape " + strconv.Quote(rule.Shape.Name()) + " is set, but the partition planner is not in this release yet; " +
+			"set it to nil, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"
 	}
 	if rule.Link != nil && rule.Kind != KindLink {
 		return "Link is only allowed for link"

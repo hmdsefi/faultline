@@ -34,7 +34,7 @@ func resolveWith(t *testing.T, opts Options, env map[string]string, short bool) 
 // turned on is logged once, in API-017's order, and the option still wins.
 func TestResolveEnvBelowOptions(t *testing.T) {
 	const (
-		running  = "faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"
+		running  = "faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)"
 		check    = "faultline: FAULTLINE_CHECK_DETERMINISM=0 does not turn off Options.CheckDeterminism; the determinism check still runs (set Options.CheckDeterminism to false to turn it off)"
 		trace    = "faultline: FAULTLINE_TRACE=hash does not lower Options.Trace.Level from kernel.TraceFull; runs still record full traces (set Options.Trace.Level to kernel.TraceHash to lower it)"
 		minimize = "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"
@@ -96,7 +96,7 @@ func TestResolveSeeds(t *testing.T) {
 		{"defaults", Options{}, nil, false, scenarioSeeds(20), "derived",
 			[]string{"faultline: running 20 seeds from base 0xb83f592e2ee6cccf (test name)"}},
 		{"blank is unset", Options{Seeds: 1}, map[string]string{"FAULTLINE_SEED": "  ", "FAULTLINE_TRACE": ""}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)"}},
 		// strings.TrimSpace: a value from a YAML block scalar ends in a newline.
 		{"newline and tab trimmed", Options{}, map[string]string{"FAULTLINE_SEED": "\t42\n", "FAULTLINE_TRACE": "\n"}, false, []uint64{42}, "env",
 			[]string{"faultline: FAULTLINE_SEED=0x000000000000002a: running 1 seed"}},
@@ -125,7 +125,7 @@ func TestResolveSeeds(t *testing.T) {
 		{"env base under -short", Options{}, map[string]string{"FAULTLINE_BASE_SEED": "0x2a"}, true, derivedSeeds(0x2a, 5), "derived",
 			[]string{"faultline: running 5 seeds from base 0x000000000000002a (FAULTLINE_BASE_SEED)", "faultline: -short: running 5 of 20 seeds"}},
 		{"explore", Options{Seeds: 1}, map[string]string{"FAULTLINE_EXPLORE": "1"}, false, []uint64{DeriveSeed(7, 0)}, "derived",
-			[]string{"faultline: running 1 seeds from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"}},
+			[]string{"faultline: running 1 seed from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"}},
 		{"short, then explore", Options{}, map[string]string{"FAULTLINE_EXPLORE": "1"}, true, derivedSeeds(7, 5), "derived",
 			[]string{"faultline: running 5 seeds from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: -short: running 5 of 20 seeds", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"}},
 		// The rerun hint repeats FAULTLINE_SEEDS, or the rerun would run the default count (API-016).
@@ -134,23 +134,26 @@ func TestResolveSeeds(t *testing.T) {
 		// Full traces with artifacts off write no artifacts, so Run says so (API-017 item 5), before
 		// the minimize line of API-092.
 		{"full traces, artifacts off", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "full", "FAULTLINE_ARTIFACTS": "Off", "FAULTLINE_MINIMIZE": "1"}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)", "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them", "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)", "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them", "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"}},
 		{"full traces, artifacts on", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "full", "FAULTLINE_ARTIFACTS": "/tmp/x"}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)"}},
 		{"hash traces, artifacts off", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "hash", "FAULTLINE_ARTIFACTS": "off"}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)"}},
 		// -short does not cap a seed list.
 		{"seed list", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x1,0x2,0x1,3,4,5,6", "FAULTLINE_SEEDS": "3", "FAULTLINE_BASE_SEED": "2", "FAULTLINE_EXPLORE": "0"}, true, []uint64{1, 2, 3, 4, 5, 6}, "list",
 			[]string{"faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_SEEDS", "faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_BASE_SEED", "faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_EXPLORE", "faultline: FAULTLINE_SEED_LIST: running 6 seeds"}},
 		{"minimize", Options{Seeds: 1}, map[string]string{"FAULTLINE_MINIMIZE": "runs=3,out=/tmp/a,b"}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)", "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)", "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"}},
 		{"minimize 0", Options{Seeds: 1}, map[string]string{"FAULTLINE_MINIMIZE": "0"}, false, scenarioSeeds(1), "derived",
-			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
+			[]string{"faultline: running 1 seed from base 0xb83f592e2ee6cccf (test name)"}},
 		// Decimal values are base 10 even with leading zeros, and CR LF separates seed-list entries.
 		{"leading zeros", Options{}, map[string]string{"FAULTLINE_SEEDS": "010"}, false, scenarioSeeds(10), "derived",
 			[]string{"faultline: running 10 seeds from base 0xb83f592e2ee6cccf (test name)"}},
 		{"CRLF list", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0042\r\n2\r\n"}, false, []uint64{42, 2}, "list",
 			[]string{"faultline: FAULTLINE_SEED_LIST: running 2 seeds"}},
+		// One seed, after duplicates are removed, is "1 seed".
+		{"list of one seed", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x7,7"}, false, []uint64{7}, "list",
+			[]string{"faultline: FAULTLINE_SEED_LIST: running 1 seed"}},
 	}
 	for _, c := range cases {
 		p, err := resolveWith(t, c.opts, c.env, c.short)
@@ -297,21 +300,21 @@ func TestResolveErrors(t *testing.T) {
 		{Options{}, map[string]string{"FAULTLINE_SEED": "1", "FAULTLINE_SEED_LIST": "2"}, `faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one`},
 		{Options{}, map[string]string{"FAULTLINE_SCHEDULE": "/nonexistent.json"}, `faultline: FAULTLINE_SCHEDULE=/nonexistent.json: open /nonexistent.json: no such file or directory`},
 		{Options{}, map[string]string{"FAULTLINE_MINIMIZE": "fast"}, `faultline: invalid FAULTLINE_MINIMIZE "fast": parameter "fast" is not key=value`},
-		{Options{}, map[string]string{"FAULTLINE_SWARM": "0"}, `faultline: FAULTLINE_SWARM is not available until Phase 3; unset it`},
-		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3; unset it`},
-		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is not available until Phase 2b; unset it`},
+		{Options{}, map[string]string{"FAULTLINE_SWARM": "0"}, `faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
 		{Options{Seeds: -1}, nil, `faultline: Options.Seeds is -1; want 0 (default 20) or more`},
 		{Options{Seeds: MaxSeeds + 1}, nil, `faultline: Options.Seeds is 1000001; want at most 1000000`},
 		{Options{Duration: -time.Second}, nil, `faultline: Options.Duration is -1s; want 0 (default 1m0s) or more`},
 		{Options{Trace: kernel.TraceConfig{Level: 7}}, nil, `faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull`},
 		{Options{Trace: kernel.TraceConfig{Buffer: -1}}, nil, `faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more`},
-		{Options{Mode: ModeGoroutine}, nil, `faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)`},
+		{Options{Mode: ModeGoroutine}, nil, `faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
 		{Options{Mode: 9}, nil, `faultline: unknown Options.Mode 9; want ModeEvent (the zero value)`},
-		{Options{Procs: 2}, nil, `faultline: Options.Procs is not available until Phase 2; want 0`},
-		{Options{Drain: time.Second}, nil, `faultline: Options.Drain is not available until Phase 2; want 0`},
-		{Options{StallTimeout: -1}, nil, `faultline: Options.StallTimeout is not available until Phase 2; want 0`},
-		{Options{FailOnLeak: true}, nil, `faultline: Options.FailOnLeak is not available until Phase 2; want false`},
-		{Options{Swarm: true}, nil, `faultline: Options.Swarm is not available until Phase 3; want false`},
+		{Options{Procs: 2}, nil, `faultline: Options.Procs is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{Drain: time.Second}, nil, `faultline: Options.Drain is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{StallTimeout: -1}, nil, `faultline: Options.StallTimeout is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{FailOnLeak: true}, nil, `faultline: Options.FailOnLeak is set, but goroutine mode is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{Swarm: true}, nil, `faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
 		// table order: FAULTLINE_SEED is checked before FAULTLINE_TRACE, env before options
 		{Options{Seeds: -1}, map[string]string{"FAULTLINE_TRACE": "x", "FAULTLINE_SEED": "y"}, `faultline: invalid FAULTLINE_SEED value "y": want a decimal or 0x-prefixed hexadecimal uint64`},
 	}
