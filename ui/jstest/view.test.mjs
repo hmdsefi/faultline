@@ -309,6 +309,23 @@ test("the stage fills the window below the title, at least 520 px (ART-079 item 
   assert.equal(stageHeight(300), "520px");
 });
 
+test("the cards sit under the stage and the side column runs beside both (ART-079 items 12 and 13)", () => {
+  const part = (e) => e.classNames().find((c) => ["fl-stage", "fl-side", "fl-cards"].includes(c));
+  const heading = (e) => byClass(e, "fl-label")[0].textContent;
+  const { root } = mount(faultData());
+  const body = byClass(root, "fl-body")[0];
+  assert.deepEqual(body.children.map(part), ["fl-stage", "fl-side", "fl-cards"]);
+  assert.deepEqual(byClass(body.children[0], "fl-glass").map((e) => e.getAttribute("aria-label")), ["Timeline", "Timeline controls"]);
+  assert.deepEqual(byClass(body.children[2], "fl-panel").map(heading), ["Report", "Legend and keys"]);
+  const doc = new FakeDocument();
+  const err = doc.createElement("div");
+  mountError(err, richData(), new SyntaxError("x"), null);
+  assert.deepEqual(byClass(err, "fl-body")[0].children.map(part), ["fl-stage", "fl-side", "fl-cards"]);
+  const bare = doc.createElement("div");
+  mountError(bare, null, new SyntaxError("x"), null);
+  assert.deepEqual(byClass(bare, "fl-body")[0].children.map(part), ["fl-stage"]);
+});
+
 test("faults panel rows select their record", () => {
   const { root, inspector } = mount(faultData());
   const rows = byClass(root, "fl-row").filter((e) => e.tagName === "BUTTON");

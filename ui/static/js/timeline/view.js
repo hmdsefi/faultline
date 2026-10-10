@@ -121,12 +121,12 @@ export function mountTimeline(root, data, host) {
   const faults = faultsPanel(doc, model, (seq) => api.select(seq));
   const side = h(doc, "aside", { class: "fl-side", "aria-label": "Details" },
     failurePanel(doc, data, model, (seq) => api.select(seq)), faults.el, panel(doc, "Inspector", null, insp));
-  const stage = h(doc, "div", { class: "fl-stage" }, tl, ctl, side);
+  const stage = h(doc, "div", { class: "fl-stage" }, tl, ctl);
   const page = h(doc, "main", { class: "fl-main", "aria-label": "Run view" }, titleRow(doc, data, announce));
   if (data.window) {
     page.append(banner(doc, data, model.records.length));
   }
-  page.append(stage, h(doc, "div", { class: "fl-cards" }, reportCard(doc, data, model, announce), legendCard(doc)));
+  page.append(h(doc, "div", { class: "fl-body" }, stage, side, h(doc, "div", { class: "fl-cards" }, reportCard(doc, data, model, announce), legendCard(doc))));
   const skip = ok ? h(doc, "button", { class: "fl-skip fl-primary", type: "button", text: "Skip to timeline", onclick: () => canvas.focus() }) : null;
   root.append(...[skip, headerBar(doc, rep, theme.el), page, live].filter((e) => e !== null));
 
@@ -531,10 +531,10 @@ function errorPage(root, data, rep, err, host) {
   const stage = h(doc, "div", { class: "fl-stage" }, tl);
   const page = h(doc, "main", { class: "fl-main", "aria-label": "Run view" });
   if (rep !== null) {
-    stage.append(h(doc, "aside", { class: "fl-side", "aria-label": "Details" }, failurePanel(doc, data, null, () => {})));
-    page.append(titleRow(doc, data, announce), stage, h(doc, "div", { class: "fl-cards" }, reportCard(doc, data, null, announce)));
+    const side = h(doc, "aside", { class: "fl-side", "aria-label": "Details" }, failurePanel(doc, data, null, () => {}));
+    page.append(titleRow(doc, data, announce), h(doc, "div", { class: "fl-body" }, stage, side, h(doc, "div", { class: "fl-cards" }, reportCard(doc, data, null, announce))));
   } else {
-    page.append(stage);
+    page.append(h(doc, "div", { class: "fl-body" }, stage));
   }
   root.append(headerBar(doc, rep || {}, theme.el), page, live);
   return {

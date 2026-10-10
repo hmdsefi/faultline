@@ -239,11 +239,13 @@ func TestThemeCSSTokens(t *testing.T) {
 	}
 }
 
-// designRules are declarations of the approved design that a spec requirement depends on: the
-// focus ring and the scroller padding that keeps it whole (UI-175, UI-193), 24 px and larger
-// targets (UI-175), the stage's 520 px height and the 760 px breakpoint (ART-079 item 13), the
-// side width of 304 px, 280 px under 1180 px (UI-195: the approved design, design-system.md), no
-// filter layer on solid glass (UI-193) and no motion (UI-181).
+// designRules are declarations of the approved design that a spec requirement depends on: the focus
+// ring and the scroller padding that keeps it whole (UI-175, UI-193), 24 px and larger targets
+// (UI-175), the stage's 520 px height and its column that never outgrows it, the cards under the
+// stage, side by side while each gets 380 px, the side column beside both with the Inspector
+// filling it, and the 760 px breakpoint (ART-079 items 8, 12 and 13), the side width of 304 px,
+// 280 px under 1180 px (UI-195: the approved design, design-system.md), no filter layer on solid
+// glass (UI-193) and no motion (UI-181).
 var designRules = []struct{ at, selector, decl string }{
 	{"", ".fl-run :focus-visible", "outline: 2px solid var(--fl-focus)"},
 	{"", ".fl-run :focus-visible", "outline-offset: 2px"},
@@ -259,21 +261,35 @@ var designRules = []struct{ at, selector, decl string }{
 	{"", ".fl-run .fl-seg button, .fl-run .fl-toggle", "height: 24px"},
 	{"", ".fl-run .fl-chip", "height: 26px"},
 	{"", ".fl-run .fl-stage", "min-height: 520px"},
+	{"", ".fl-run .fl-stage", "grid-template: minmax(0, 1fr) auto / minmax(0, 1fr)"},
+	{"", ".fl-run .fl-side", "height: 0"},
+	{"", ".fl-run .fl-side", "min-height: 100%"},
 	{"", ".fl-run", "--fl-side-w: 304px"},
 	{"@media (max-width: 1180px)", ".fl-run", "--fl-side-w: 280px"},
+	{"", ".fl-run .fl-body", `grid-template: "stage side" auto "cards side" auto / minmax(0, 1fr) var(--fl-side-w)`},
+	{"", ".fl-run .fl-cards", "grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr))"},
+	{"@media (max-width: 760px)", ".fl-run .fl-body", "display: flex"},
+	{"@media (max-width: 760px)", ".fl-run .fl-body", "flex-direction: column"},
 	{"@media (max-width: 760px)", ".fl-run .fl-stage", "display: flex"},
 	{"@media (max-width: 760px)", ".fl-run .fl-stage", "flex-direction: column"},
 	{"@media (max-width: 760px)", ".fl-run .fl-side", "grid-template-rows: none"},
 	{"@media (prefers-reduced-motion: reduce)", ".fl-run *, .fl-run ::before, .fl-run ::after", "transition: none !important"},
 }
 
-// TestThemeCSSRules checks that theme.css keeps designRules, and that the Legend's rows, which do
-// nothing, do not show the pointer that the Faults rows show.
+// TestThemeCSSRules checks that theme.css keeps designRules, that the Legend's rows, which do
+// nothing, do not show the pointer that the Faults rows show, and that the Inspector fills the side
+// column.
 func TestThemeCSSRules(t *testing.T) {
 	rules := themeRules(t)
 	for _, d := range decls(t, rules, "", ".fl-run .fl-row") {
 		if strings.HasPrefix(d, "cursor:") {
 			t.Errorf(".fl-run .fl-row { %s }: only button.fl-row is clickable", d)
+		}
+	}
+	// The Inspector fills the side column (ART-079 item 8); align-self would shrink it to its content.
+	for _, d := range decls(t, rules, "", ".fl-run .fl-side > .fl-panel:last-child") {
+		if strings.HasPrefix(d, "align-self:") {
+			t.Errorf(".fl-run .fl-side > .fl-panel:last-child { %s }: the Inspector must fill the side column", d)
 		}
 	}
 	for _, want := range designRules {
