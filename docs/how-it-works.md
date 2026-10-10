@@ -74,7 +74,8 @@ this way.
 
 Fault events are the exception. A fault goes to the front of its instant and draws nothing from
 `kernel/sched`. It runs before the other events of the same virtual time. A replay of a recorded
-fault schedule therefore makes the same scheduling decisions as the run that recorded it.
+fault schedule therefore makes the same scheduling decisions as the run that recorded it. [Replay a
+failing seed](guides/replay-a-seed.md#when-a-schedule-replay-is-not-exact) lists two exceptions.
 
 ## Named random streams
 
@@ -200,7 +201,9 @@ That is why the test above creates `/wal` with `WriteFileDurable` before the ser
 
 A failed `Sync` returns an error. By default, the writes it covered never become durable, even
 though reads return them until the next crash. Files opened before a crash return an error when used
-after it.
+after it. Neither the server above nor the fixed one in [Get
+started](getting-started.md#fix-the-bug) survives a failed `Sync`: under a `fault.KindSyncFail`
+rule, each loses an acknowledged put.
 
 ## Faults and fault schedules
 

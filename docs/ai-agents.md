@@ -24,7 +24,7 @@ once, a passing re-run proves nothing. faultline answers both inside `go test`:
 ## Prerequisites
 
 You need Go 1.26 or newer, which `go version` reports, and a test that calls `faultline.Run`.
-[How faultline works](how-it-works.md) shows one, `TestKV`, and the commands on this page use it.
+[Get started](getting-started.md) builds one, `TestKV`, and the commands on this page use it.
 To check that the test is in the current package, list it:
 
 ```sh
@@ -164,8 +164,9 @@ Two rules keep a failure replayable:
 - Never call `t.Parallel` in a test that calls `faultline.Run`. faultline seeds `crypto/rand` for
   every run, and Go does not allow that in a parallel test.
 
-How faultline works explains the reason for each rule. A broken rule that changes the run shows up
-as a determinism failure. The failure names the first record where two runs of the seed differ.
+[How faultline works](how-it-works.md#the-determinism-rules-your-code-follows) explains the reason
+for each rule. A broken rule that changes the run shows up as a determinism failure. The failure
+names the first record where two runs of the seed differ.
 
 ## What v0.1.0 cannot do
 

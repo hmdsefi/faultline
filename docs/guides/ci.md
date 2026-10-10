@@ -18,7 +18,7 @@ FAULTLINE_CHECK_DETERMINISM=1 go test -count=1 ./...
 ```
 
 `-count=1` makes `go test` run the tests even when it holds a cached result. For a faster local
-loop, `go test -short` runs 5 seeds per test unless `FAULTLINE_SEEDS` is set:
+loop, `go test -short` runs at most 5 seeds per test unless `FAULTLINE_SEEDS` is set:
 
 ```text
     kv_test.go:14: faultline: -short: running 5 of 50 seeds
@@ -141,9 +141,10 @@ example a different Go version:
     warning: previous artifact was recorded with go1.26; this run uses go1.27
 ```
 
-Expect the test binary warning as well: a binary built on another machine differs from yours.
-faultline itself gives the same run on every machine: its own CI runs its golden seeds on Linux on
-amd64 and on macOS on arm64, with Go 1.26 and Go 1.27, and checks that every trace hash matches.
+Expect the test binary warning as well: a binary built on another machine differs from yours. The
+run itself stays the same across the platforms faultline checks: its own CI runs its golden seeds
+on Linux on amd64 and on macOS on arm64, with Go 1.26 and Go 1.27, and checks that every trace hash
+matches.
 
 ## Next steps
 

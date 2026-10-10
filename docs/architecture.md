@@ -46,8 +46,8 @@ The packages do these jobs:
 
 - `faultline`, the module root, is the test entry point: `Run`, `Options` and `World`. It reads the
   `FAULTLINE_*` environment variables, derives the seed list and runs each seed as a subtest. It
-  runs the checks, classifies failures, re-runs failing seeds and prints the report. It is the only
-  package that imports `testing`.
+  runs the checks, classifies failures, runs failing seeds a second time and prints the report. It
+  is the only package that imports `testing`.
 - `kernel` is the discrete-event simulator. It owns virtual time, the event queue and its seeded
   tie-break, the named random streams, and nodes with their incarnations, crashes, pauses and
   clocks. It also keeps the trace and its running hash. It starts no goroutines and imports only the

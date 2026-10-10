@@ -1,7 +1,7 @@
 # Environment variables
 
 The `FAULTLINE_*` environment variables change how `faultline.Run` runs a test, without a code
-change. They choose the seeds, the faults, the artifact folder and the checks. This page lists every
+change. They choose the seeds, the faults, the artifact root and the checks. This page lists every
 variable that v0.1.0 reads, its values, its default and how it combines with `Options`.
 
 ## How Run reads them
@@ -212,9 +212,9 @@ faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this 
 Any value of the other three is a setup error, with these messages:
 
 ```text
-faultline: FAULTLINE_SWARM is not available until Phase 3; unset it
-faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3; unset it
-faultline: FAULTLINE_EXACT is not available until Phase 2b; unset it
+faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
+faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
+faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
 ```
 
 ## Options and the environment

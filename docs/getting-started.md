@@ -349,7 +349,7 @@ event for event, so you can debug it as often as you need.
 
 `timeline.txt` in the artifact directory lists every record of the run, one per line. Each line has
 the record's number, the virtual time, the node, the record's kind and its text. The node carries
-its boot count: `n1#6` is the server's sixth boot. `<-3589` at the end names the record that caused
+its incarnation: `n1#6` is the server's sixth boot. `<-3589` at the end names the record that caused
 it. `!` marks the failure, and `*` marks the records that led to it.
 
 Search for the `!` line and read upward. These are the lines around `k169`, with a gap before the

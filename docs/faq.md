@@ -154,7 +154,7 @@ runs your code inside a `testing/synctest` bubble.
 
 Yes. Package `kernel` is a plain Go API: `kernel.New` creates a simulator, and you drive it with
 `Run`, `RunUntil` or `RunFor`. Without `faultline.Run` you give up the seed list, the subtests, the
-checks, the re-run of failing seeds and the artifacts.
+checks, the second run of failing seeds and the artifacts.
 
 ### Does faultline make network calls?
 
