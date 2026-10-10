@@ -56,8 +56,8 @@ type TraceConfig struct {
 // hash-only trace.
 type Config struct {
 	Seed      uint64
-	MaxEvents uint64 // 0 = no limit; see KRN-034
-	MaxTime   Time   // 0 = no limit; see KRN-035
+	MaxEvents uint64 // stop once this many events have run and another is due; 0 = no limit
+	MaxTime   Time   // never process an event later than this; 0 = no limit
 	TieBreak  TieBreak
 	Trace     TraceConfig
 }

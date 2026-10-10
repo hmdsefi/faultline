@@ -23,7 +23,7 @@ type RenderOptions struct {
 }
 
 // Render regenerates timeline.txt, hb.mmd and timeline.html in dir from report.json and
-// trace.jsonl, and returns the absolute paths it wrote, in that order (ART-090). It changes no other
+// trace.jsonl, and returns the absolute paths it wrote, in that order. It changes no other
 // file, except that it removes the temporary files of an interrupted Render.
 func Render(dir string, opts RenderOptions) ([]string, error) {
 	fail := func(format string, args ...any) error {

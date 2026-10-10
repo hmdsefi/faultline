@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Load schedules every event of s to be applied at its At (FLT-040). Node names are looked up
+// Load schedules every event of s to be applied at its At. Node names are looked up
 // when an event fires. It panics if s is invalid or has a Role, or, outside replay mode, has an
 // event before Now. In replay mode it schedules nothing and records fault.suppressed.
 func (in *Injector) Load(s Schedule) {
@@ -29,9 +29,10 @@ func (in *Injector) Load(s Schedule) {
 	in.schedule(ns.Events, "fault/load", "load")
 }
 
-// Replay loads s and enters replay mode: from then on s is the only source of faults
-// (FLT-042, FLT-043). It returns an error, and changes nothing, if the injector is already
-// replaying, s is invalid or has a Role, or s has an event before Now.
+// Replay loads s and enters replay mode: from then on s is the only source of faults. Inject,
+// Load and planners then emit a fault.suppressed record and apply nothing. It
+// returns an error, and changes nothing, if the injector is already replaying, s is invalid or
+// has a Role, or s has an event before Now.
 func (in *Injector) Replay(s Schedule) error {
 	if in.replaying {
 		return errors.New("fault: Replay: already replaying")

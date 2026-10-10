@@ -47,7 +47,9 @@ func escape(s string) string {
 // needsEscape reports whether escape rewrites r.
 func needsEscape(r rune) bool { return r == '\\' || !strconv.IsPrint(r) }
 
-// WriteTimelineText writes timeline.txt (ART-040).
+// WriteTimelineText writes timeline.txt: a header that summarizes the run, then one line per
+// trace record with its Seq, time, node, kind, text, attributes and cause. A "!" marks the root of
+// the causal slice s and a "*" its other records.
 func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 	if rep == nil {
 		return errors.New("artifact: report is nil")

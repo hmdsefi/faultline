@@ -44,7 +44,9 @@ type line struct {
 // lineKeys are the op line keys in HIS-020 order.
 var lineKeys = []string{"id", "process", "f", "status", "call", "return", "call_index", "return_index", "input", "output"}
 
-// WriteJSONL writes the history in history.jsonl format v1 (HIS-020).
+// WriteJSONL writes the history in history.jsonl format v1. The first line holds the format
+// version and the number of ops; then comes one JSON object per op in ID order, pending ops
+// included.
 func (r *Recorder) WriteJSONL(w io.Writer) error { return writeOps(w, r.ops) }
 
 // writeOps writes ops with the HIS-020 encoding and returns the first error from w, or the error of
@@ -104,7 +106,8 @@ func parseStatus(s string) (Status, bool) {
 	return 0, false
 }
 
-// Read reads a history.jsonl stream (HIS-022). It returns the operations in ID order.
+// Read reads and validates a history.jsonl stream in the format WriteJSONL writes. It returns the
+// operations in ID order.
 func Read(rd io.Reader) ([]Op, error) {
 	br := bufio.NewReader(rd)
 	// next returns the next line without its "\n" and one "\r". Each line must be a new slice, as

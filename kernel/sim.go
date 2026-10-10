@@ -36,7 +36,7 @@ type Sim struct {
 }
 
 // New validates cfg, creates a Sim at time 0 and emits the kernel.start record.
-// It panics on an invalid cfg (KRN §7).
+// It panics on an unknown TieBreak or Trace.Level, or a negative Trace.Buffer or MaxTime.
 func New(cfg Config) *Sim {
 	cfg.validate()
 	s := &Sim{

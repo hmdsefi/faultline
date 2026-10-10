@@ -58,7 +58,7 @@ type TraceRecord struct {
 }
 
 // FromRecord converts r; T is set from r.At, and Kind, Text and the attrs are made valid UTF-8
-// (each run of invalid bytes becomes U+FFFD, ART-030).
+// (each run of invalid bytes becomes one U+FFFD).
 func FromRecord(r kernel.Record) TraceRecord {
 	t := TraceRecord{
 		Seq:   r.Seq,
@@ -147,7 +147,8 @@ func headerFor(t *Trace) TraceHeader {
 	return h
 }
 
-// WriteTrace writes t as trace.jsonl (ART-030). It does not change t.
+// WriteTrace writes t as trace.jsonl: the header line, then one JSON line per record. It does
+// not change t.
 func WriteTrace(w io.Writer, t *Trace) error {
 	if t == nil {
 		return errors.New("artifact: trace is nil")
@@ -185,7 +186,8 @@ type rawRecordLine struct {
 	Attrs []json.RawMessage `json:"attrs"`
 }
 
-// ReadTrace reads and validates trace.jsonl (ART-031).
+// ReadTrace reads and validates trace.jsonl. It rejects a trace with a newer version than this
+// package writes.
 func ReadTrace(r io.Reader) (*Trace, error) {
 	br := bufio.NewReader(r)
 	lineErr := func(n int, format string, args ...any) error {

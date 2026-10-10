@@ -17,10 +17,11 @@ import (
 type Mode uint8
 
 const (
-	// ModeEvent runs event-style code on the kernel's event loop. Determinism level 1 (exact).
+	// ModeEvent runs code written as kernel callbacks (boot functions, timers, network handlers)
+	// on the kernel's event loop. A run is exactly reproducible from its seed.
 	ModeEvent Mode = iota
-	// ModeGoroutine runs processes inside a testing/synctest bubble (Phase 2, spec GOR).
-	// In Phase 1, Run rejects it with a setup error.
+	// ModeGoroutine is reserved for running goroutine code inside a testing/synctest bubble. Run
+	// rejects it with a setup error.
 	ModeGoroutine
 )
 
@@ -65,18 +66,20 @@ type Options struct {
 	// 0 means DefaultMaxEvents. math.MaxUint64 means no practical limit.
 	MaxEvents uint64
 
-	// Mode is ModeEvent (default). ModeGoroutine is a Phase 1 setup error.
+	// Mode selects how code under test runs. ModeEvent, the zero value, is the only mode Run
+	// accepts.
 	Mode Mode
 
-	// Net configures the simulated network. The zero value means simnet.DefaultConfig().
-	// (A zero-latency network needs a non-zero field, for example Default.Latency = 1.)
+	// Net configures the simulated network. The zero value means simnet.DefaultConfig(), so a
+	// network with no latency at all cannot be configured here. The closest is a config with one
+	// non-zero field, for example Default.Latency = 1, which gives every message 1 ns of latency.
 	Net simnet.Config
 
-	// Disk configures simulated volumes. Passed to simdisk.New unchanged; the zero value
-	// selects DSK's defaults.
+	// Disk configures the simulated volumes and is passed to simdisk.New unchanged. The zero
+	// value behaves like simdisk.DefaultConfig().
 	Disk simdisk.Config
 
-	// Trace configures the primary attempt of every seed. The zero value is TraceHash.
+	// Trace configures the first run of every seed. The zero value is TraceHash.
 	// FAULTLINE_TRACE=full upgrades it to TraceFull and writes artifacts for passing seeds.
 	Trace kernel.TraceConfig
 
@@ -88,35 +91,34 @@ type Options struct {
 	// seeds after the first failing seed. Forced on by FAULTLINE_SEED_LIST.
 	KeepGoing bool
 
-	// NoCryptoSeed disables cryptotest.SetGlobalRandom. crypto/rand in code under test is then
-	// not deterministic, and in ModeEvent the parent test may be parallel (API-104).
+	// NoCryptoSeed stops Run from seeding crypto/rand with cryptotest.SetGlobalRandom. crypto/rand
+	// in code under test is then not deterministic. In exchange, the test may call t.Parallel,
+	// which cryptotest.SetGlobalRandom forbids.
 	NoCryptoSeed bool
 
 	// AllowLimit makes hitting MaxEvents (or the kernel's MaxTime) a normal end of the run
 	// instead of a failure. Final checks are skipped for such a run.
 	AllowLimit bool
 
-	// The fields below belong to later phases. Their behavior and validation are the owning
-	// spec's. Until that phase ships, a non-zero value is a setup error (API-005).
-	// Options.NetSim (GOR and NSM) is declared in Phase 2 together with package shims/netsim.
-
-	// Procs is GOMAXPROCS during goroutine-mode attempts. 0 means 1. (GOR, Phase 2)
+	// Procs is reserved for goroutine mode: GOMAXPROCS during its runs. Run rejects a non-zero
+	// value with a setup error.
 	Procs int
 
-	// Drain is the virtual time processes get after the run ends to exit on their own.
-	// 0 means DefaultDrain (60 s). (GOR, Phase 2)
+	// Drain is reserved for goroutine mode: the virtual time processes get after the run ends to
+	// exit on their own. Run rejects a non-zero value with a setup error.
 	Drain time.Duration
 
-	// StallTimeout is the wall-clock time without driver progress after which the stall
-	// watchdog ends the test binary with a report. 0 means DefaultStallTimeout (60 s);
-	// negative disables the watchdog. (GOR, Phase 2)
+	// StallTimeout is reserved for goroutine mode: the wall-clock time without progress after
+	// which a watchdog ends the test binary with a report. Run rejects a non-zero value with a
+	// setup error.
 	StallTimeout time.Duration
 
-	// FailOnLeak makes goroutines still alive after the drain a failure of kind "leak".
-	// (GOR, Phase 2)
+	// FailOnLeak is reserved for goroutine mode: it makes goroutines still alive after the drain
+	// a failure. Run rejects true with a setup error.
 	FailOnLeak bool
 
-	// Swarm enables per-seed swarm configs. FAULTLINE_SWARM overrides it. (EXP, Phase 3)
+	// Swarm is reserved for swarm testing, where each seed also picks which fault kinds are on.
+	// Run rejects true with a setup error.
 	Swarm bool
 }
 

@@ -9,7 +9,10 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 )
 
-// Corrupt flips one bit in each durable byte of [off, off+n) (see DSK-033).
+// Corrupt flips one random bit in each durable byte of [off, off+n); bytes past the durable size
+// are left alone. When the file has no unsynced writes, reads see the damage at once; otherwise
+// it shows after the next crash. Corrupt works in every node state and returns ErrInvalid for a
+// negative off or n.
 func (v *Volume) Corrupt(path string, off int64, n int) error {
 	p, err := clean("corrupt", path)
 	if err != nil {

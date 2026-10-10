@@ -62,15 +62,15 @@ type Config struct {
 	// harness restarts it. Default 500ms.
 	CrashRestartDelay time.Duration
 
-	// SnapshotEvery enables stage 1b: a server creates a local snapshot when its applied
-	// index is at least SnapshotEvery past its latest snapshot, then compacts
+	// SnapshotEvery enables periodic snapshots: a server creates a local snapshot when its
+	// applied index is at least SnapshotEvery past its latest snapshot, then compacts
 	// MemoryStorage. 0 disables periodic snapshots.
 	SnapshotEvery uint64
 	// CompactKeep is how many entries below a new local snapshot's index stay in
 	// MemoryStorage. Default 10.
 	CompactKeep uint64
 
-	// Membership enables and configures stage 1c.
+	// Membership enables and configures membership changes.
 	Membership Membership
 	// Workload configures the clients.
 	Workload Workload
@@ -99,7 +99,8 @@ type Config struct {
 	earlySend      bool // sends before persisting without BugSendBeforePersist, so ETC-114 rule 4 is evaluated
 }
 
-// Membership configures stage 1c.
+// Membership configures membership changes. When enabled, an admin client adds spare servers as
+// learners, promotes learners, and demotes, removes or replaces voters, one change at a time.
 type Membership struct {
 	// Enabled adds spare servers and the admin client.
 	Enabled bool
@@ -128,15 +129,27 @@ type Workload struct {
 	OpTimeout time.Duration
 }
 
-// FaultPreset selects a fault planner for Test (see Faults).
+// FaultPreset selects the fault planner that Test plans (see Faults). The presets combine these
+// rules; each fault starts on average every given interval and lasts for a time in the range:
+//
+//   - A: partition the cluster in two, every 6s, for 1s to 4s
+//   - B: isolate the leader, every 10s, for 1s to 3s
+//   - C: cut one direction of one link, every 9s, for 1s to 3s
+//   - D: slow one direction of one link (20ms latency, 80ms jitter, 20% loss), every 7s, for 1s
+//     to 3s
+//   - E: crash a server, every 6s, for 200ms to 3s
+//   - F: crash the leader, every 12s, for 200ms to 2s
+//   - G: pause a server, every 9s, for 100ms to 1.5s
+//   - H: fail the next sync of a server, every 15s
+//   - I: set a server's clock drift to up to 5% either way, every 20s
 type FaultPreset uint8
 
 const (
-	FaultsDefault  FaultPreset = iota // partitions, isolations, crashes, pauses, sync failures, clock drift
+	FaultsDefault  FaultPreset = iota // rules A to I
 	FaultsNone                        // no faults
-	FaultsNetwork                     // partitions and isolations only
-	FaultsCrash                       // crashes and sync failures only
-	FaultsSelfTest                    // aggressive preset for bug-switch self-tests
+	FaultsNetwork                     // rules A to D: partitions, isolations, cuts and slow links
+	FaultsCrash                       // rules E, F and H: crashes and sync failures
+	FaultsSelfTest                    // partitions, isolations, crashes, pauses and sync failures, two to four times as often, for the bug-switch self-tests
 )
 
 // LogLevel is a raft log verbosity threshold.
@@ -187,7 +200,9 @@ func (b Bug) names() string {
 	return strings.Join(out, ",")
 }
 
-// DefaultConfig returns the recommended stage 1a configuration (table in ETC-010).
+// DefaultConfig returns the recommended configuration: three voters, three clients and the
+// FaultsDefault preset. Servers tick every 100ms, hold elections after 10 ticks, and run with
+// PreVote and CheckQuorum. Periodic snapshots and membership changes are off.
 func DefaultConfig() Config {
 	return Config{
 		Nodes:                     3,
@@ -230,8 +245,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// SelfTestConfig returns the configuration used by the bug-switch self-tests with
-// Bugs set to b (table in ETC-191).
+// SelfTestConfig returns the configuration of the bug-switch self-tests, with Bugs set to b. It
+// is DefaultConfig with the FaultsSelfTest preset, slower syncs, a snapshot every 50 entries, and
+// a shorter recovery window.
 func SelfTestConfig(b Bug) Config {
 	c := DefaultConfig()
 	c.Faults = FaultsSelfTest
@@ -243,7 +259,8 @@ func SelfTestConfig(b Bug) Config {
 	return c
 }
 
-// NetConfig returns the link configuration Test uses when Options.Net is zero (ETC-022).
+// NetConfig returns the network configuration Test uses when Options.Net is zero. Messages take
+// 1ms plus up to 2ms of jitter, and 1% of them up to 50ms more; 0.1% are lost and 0.1% duplicated.
 func NetConfig() simnet.Config {
 	return simnet.Config{Default: simnet.Link{
 		Latency: time.Millisecond,

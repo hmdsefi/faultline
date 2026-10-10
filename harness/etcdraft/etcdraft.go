@@ -18,8 +18,8 @@ import (
 
 // Setup adds the cluster to w: servers, clients, roles, invariants, and final checks.
 // It plans no faults. Call it exactly once per World, before any other World call that
-// adds nodes. Callers must not set Options.NoCryptoSeed (ETC-024): Setup cannot detect
-// it, and etcd/raft's election timeouts are then not deterministic.
+// adds nodes. Callers must not set Options.NoCryptoSeed: Setup cannot detect it, and
+// etcd/raft's election timeouts are then not deterministic.
 func Setup(w *faultline.World, cfg Config) *Cluster {
 	if w.Sim.Lookup("n1") != nil {
 		panic("etcdraft: Setup called twice on this World")
@@ -103,8 +103,10 @@ func (c *Cluster) onCrash(n *kernel.Node) {
 	}
 }
 
-// Test runs the harness under faultline.Run: it fills in options (ETC-022), then for
-// every seed calls Setup and plans Faults(cfg).
+// Test runs the harness under faultline.Run. It first fills in zero values: Options.Duration
+// (60s), Options.MaxEvents (50,000,000), Options.Net (NetConfig) and Config.Duration
+// (Options.Duration). Then for every seed it calls Setup and plans Faults(cfg). It fails t at once
+// if Options.NoCryptoSeed is set, Mode is not ModeEvent, or the two durations differ.
 func Test(t *testing.T, cfg Config, opts faultline.Options) {
 	t.Helper()
 	cfg, opts, err := validateOptions(cfg, opts)
