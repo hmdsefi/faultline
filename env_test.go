@@ -30,6 +30,45 @@ func resolveWith(t *testing.T, opts Options, env map[string]string, short bool) 
 	return resolve(resolveInput{opts: opts, testName: "TestScenario", short: short, lookup: fakeEnv(env), exploreBase: func() uint64 { return 7 }})
 }
 
+// AT-API-53; API-012, API-013, API-017 items 6 and 7: a variable that cannot turn off what Options
+// turned on is logged once, in API-017's order, and the option still wins.
+func TestResolveEnvBelowOptions(t *testing.T) {
+	const (
+		running  = "faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"
+		check    = "faultline: FAULTLINE_CHECK_DETERMINISM=0 does not turn off Options.CheckDeterminism; the determinism check still runs (set Options.CheckDeterminism to false to turn it off)"
+		trace    = "faultline: FAULTLINE_TRACE=hash does not lower Options.Trace.Level from kernel.TraceFull; runs still record full traces (set Options.Trace.Level to kernel.TraceHash to lower it)"
+		minimize = "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"
+	)
+	full := kernel.TraceConfig{Level: kernel.TraceFull}
+	cases := []struct {
+		name string
+		opts Options
+		env  map[string]string
+		logs []string
+	}{
+		{"check", Options{Seeds: 1, CheckDeterminism: true}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "0"}, []string{running, check}},
+		{"trace", Options{Seeds: 1, Trace: full}, map[string]string{"FAULTLINE_TRACE": "hash"}, []string{running, trace}},
+		{"both, then minimize", Options{Seeds: 1, CheckDeterminism: true, Trace: full}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": " 0 ", "FAULTLINE_TRACE": "hash", "FAULTLINE_MINIMIZE": "1"}, []string{running, check, trace, minimize}},
+		{"check, option off", Options{Seeds: 1}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "0"}, []string{running}},
+		{"trace, option hash", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "hash"}, []string{running}},
+		{"variables that agree", Options{Seeds: 1, CheckDeterminism: true, Trace: full}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "1", "FAULTLINE_TRACE": "full"}, []string{running}},
+		{"options alone", Options{Seeds: 1, CheckDeterminism: true, Trace: full}, nil, []string{running}},
+	}
+	for _, c := range cases {
+		p, err := resolveWith(t, c.opts, c.env, false)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if !slices.Equal(p.logs, c.logs) {
+			t.Errorf("%s: logs %q\nwant %q", c.name, p.logs, c.logs)
+		}
+		if (c.opts.CheckDeterminism && !p.opts.CheckDeterminism) || (c.opts.Trace.Level == kernel.TraceFull && p.opts.Trace.Level != kernel.TraceFull) {
+			t.Errorf("%s: a variable turned an option off: %+v", c.name, p.opts)
+		}
+	}
+}
+
 // derivedSeeds returns the first n seeds derived from base.
 func derivedSeeds(base uint64, n int) []uint64 {
 	out := make([]uint64, n)
@@ -89,6 +128,17 @@ func TestResolveSeeds(t *testing.T) {
 			[]string{"faultline: running 1 seeds from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"}},
 		{"short, then explore", Options{}, map[string]string{"FAULTLINE_EXPLORE": "1"}, true, derivedSeeds(7, 5), "derived",
 			[]string{"faultline: running 5 seeds from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: -short: running 5 of 20 seeds", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"}},
+		// The rerun hint repeats FAULTLINE_SEEDS, or the rerun would run the default count (API-016).
+		{"explore with FAULTLINE_SEEDS", Options{}, map[string]string{"FAULTLINE_EXPLORE": "1", "FAULTLINE_SEEDS": "3"}, true, derivedSeeds(7, 3), "derived",
+			[]string{"faultline: running 3 seeds from base 0x0000000000000007 (FAULTLINE_EXPLORE)", "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007 FAULTLINE_SEEDS=3)"}},
+		// Full traces with artifacts off write no artifacts, so Run says so (API-017 item 5), before
+		// the minimize line of API-092.
+		{"full traces, artifacts off", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "full", "FAULTLINE_ARTIFACTS": "Off", "FAULTLINE_MINIMIZE": "1"}, false, scenarioSeeds(1), "derived",
+			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)", "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them", "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring"}},
+		{"full traces, artifacts on", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "full", "FAULTLINE_ARTIFACTS": "/tmp/x"}, false, scenarioSeeds(1), "derived",
+			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
+		{"hash traces, artifacts off", Options{Seeds: 1}, map[string]string{"FAULTLINE_TRACE": "hash", "FAULTLINE_ARTIFACTS": "off"}, false, scenarioSeeds(1), "derived",
+			[]string{"faultline: running 1 seeds from base 0xb83f592e2ee6cccf (test name)"}},
 		// -short does not cap a seed list.
 		{"seed list", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x1,0x2,0x1,3,4,5,6", "FAULTLINE_SEEDS": "3", "FAULTLINE_BASE_SEED": "2", "FAULTLINE_EXPLORE": "0"}, true, []uint64{1, 2, 3, 4, 5, 6}, "list",
 			[]string{"faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_SEEDS", "faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_BASE_SEED", "faultline: FAULTLINE_SEED_LIST is set; ignoring FAULTLINE_EXPLORE", "faultline: FAULTLINE_SEED_LIST: running 6 seeds"}},
@@ -163,7 +213,7 @@ func TestResolveBaseSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007)"; calls != 1 || p.base != 7 || p.logs[len(p.logs)-1] != want {
+	if want := "faultline: FAULTLINE_EXPLORE: base seed 0x0000000000000007 (rerun this set with FAULTLINE_BASE_SEED=0x0000000000000007 FAULTLINE_SEEDS=1)"; calls != 1 || p.base != 7 || p.logs[len(p.logs)-1] != want {
 		t.Errorf("explore: %d calls, base %#x, logs %q", calls, p.base, p.logs)
 	}
 }
@@ -241,26 +291,27 @@ func TestResolveErrors(t *testing.T) {
 		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "TRUE"}, artifactsErr("TRUE")},
 		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "Yes"}, artifactsErr("Yes")},
 		{Options{}, map[string]string{"FAULTLINE_ARTIFACTS": " on "}, artifactsErr("on")},
-		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": "1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ": want a decimal or 0x-prefixed hexadecimal uint64`},
-		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": " , "}, `faultline: FAULTLINE_SEED_LIST contains no seeds`},
+		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": "1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ" on line 1: want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space`},
+		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": "1\r\n\n2 3,\n0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 4 "0xZZ" on line 4: want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space`},
+		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": " , "}, `faultline: FAULTLINE_SEED_LIST contains no seeds; want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space`},
 		{Options{}, map[string]string{"FAULTLINE_SEED": "1", "FAULTLINE_SEED_LIST": "2"}, `faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one`},
 		{Options{}, map[string]string{"FAULTLINE_SCHEDULE": "/nonexistent.json"}, `faultline: FAULTLINE_SCHEDULE=/nonexistent.json: open /nonexistent.json: no such file or directory`},
 		{Options{}, map[string]string{"FAULTLINE_MINIMIZE": "fast"}, `faultline: invalid FAULTLINE_MINIMIZE "fast": parameter "fast" is not key=value`},
-		{Options{}, map[string]string{"FAULTLINE_SWARM": "0"}, `faultline: FAULTLINE_SWARM is not available until Phase 3`},
-		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3`},
-		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is not available until Phase 2b`},
+		{Options{}, map[string]string{"FAULTLINE_SWARM": "0"}, `faultline: FAULTLINE_SWARM is not available until Phase 3; unset it`},
+		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3; unset it`},
+		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is not available until Phase 2b; unset it`},
 		{Options{Seeds: -1}, nil, `faultline: Options.Seeds is -1; want 0 (default 20) or more`},
 		{Options{Seeds: MaxSeeds + 1}, nil, `faultline: Options.Seeds is 1000001; want at most 1000000`},
 		{Options{Duration: -time.Second}, nil, `faultline: Options.Duration is -1s; want 0 (default 1m0s) or more`},
 		{Options{Trace: kernel.TraceConfig{Level: 7}}, nil, `faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull`},
 		{Options{Trace: kernel.TraceConfig{Buffer: -1}}, nil, `faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more`},
 		{Options{Mode: ModeGoroutine}, nil, `faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)`},
-		{Options{Mode: 9}, nil, `faultline: unknown Options.Mode 9`},
-		{Options{Procs: 2}, nil, `faultline: Options.Procs is not available until Phase 2`},
-		{Options{Drain: time.Second}, nil, `faultline: Options.Drain is not available until Phase 2`},
-		{Options{StallTimeout: -1}, nil, `faultline: Options.StallTimeout is not available until Phase 2`},
-		{Options{FailOnLeak: true}, nil, `faultline: Options.FailOnLeak is not available until Phase 2`},
-		{Options{Swarm: true}, nil, `faultline: Options.Swarm is not available until Phase 3`},
+		{Options{Mode: 9}, nil, `faultline: unknown Options.Mode 9; want ModeEvent (the zero value)`},
+		{Options{Procs: 2}, nil, `faultline: Options.Procs is not available until Phase 2; want 0`},
+		{Options{Drain: time.Second}, nil, `faultline: Options.Drain is not available until Phase 2; want 0`},
+		{Options{StallTimeout: -1}, nil, `faultline: Options.StallTimeout is not available until Phase 2; want 0`},
+		{Options{FailOnLeak: true}, nil, `faultline: Options.FailOnLeak is not available until Phase 2; want false`},
+		{Options{Swarm: true}, nil, `faultline: Options.Swarm is not available until Phase 3; want false`},
 		// table order: FAULTLINE_SEED is checked before FAULTLINE_TRACE, env before options
 		{Options{Seeds: -1}, map[string]string{"FAULTLINE_TRACE": "x", "FAULTLINE_SEED": "y"}, `faultline: invalid FAULTLINE_SEED value "y": want a decimal or 0x-prefixed hexadecimal uint64`},
 	}
@@ -284,6 +335,18 @@ func TestResolveErrors(t *testing.T) {
 	}
 	if _, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_SEED_LIST": "@" + filepath.Join(dir, "missing")}, false); err == nil || !strings.HasPrefix(err.Error(), "faultline: FAULTLINE_SEED_LIST: open ") {
 		t.Fatalf("missing @file: %v", err)
+	}
+	// An @file error names the file and the line, so a long list can be fixed (§7.1).
+	for _, c := range []struct{ content, want string }{
+		{"0x1\n0x2 zz,0x2\n", `faultline: invalid FAULTLINE_SEED_LIST entry 3 "zz" on line 2 of ` + listFile + `: ` + "want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space"},
+		{"\n , \n", `faultline: FAULTLINE_SEED_LIST file ` + listFile + ` contains no seeds; ` + "want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space"},
+	} {
+		if err := os.WriteFile(listFile, []byte(c.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_SEED_LIST": "@" + listFile}, false); err == nil || err.Error() != c.want {
+			t.Errorf("@file %q: err = %v\nwant %s", c.content, err, c.want)
+		}
 	}
 }
 

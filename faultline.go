@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -61,8 +62,8 @@ type seedResult struct {
 //   - FAULTLINE_ARTIFACTS sets the artifact root, faultline-<uid> under os.TempDir() by default
 //     (faultline on Windows), or turns artifacts off with "off" in any letter case.
 //   - FAULTLINE_CHECK_DETERMINISM=1 runs every passing seed twice and compares the trace hashes.
-//   - FAULTLINE_TRACE=full keeps full traces and writes artifacts for passing seeds too, but never
-//     over the failing artifact that a FAULTLINE_SEED replay reads.
+//   - FAULTLINE_TRACE=full keeps full traces and writes artifacts for passing seeds too, but a
+//     pass artifact replaces only another pass artifact.
 //   - FAULTLINE_SEED_LIST runs exactly the listed seeds, and FAULTLINE_RESULTS appends one JSON
 //     line per seed to a file.
 //
@@ -146,6 +147,14 @@ func (r *runner) parentSetupError(msg string) {
 	r.t.Fatalf("%s", msg)
 }
 
+// seedSetupError reports a setup error of a seed (§7.1): the message goes to st.Output, so it has
+// no file:line prefix (st.Fatalf would name a line in faultline, since st.Helper cannot reach the
+// user's frame on the parent's goroutine), and st.FailNow stops the seed.
+func seedSetupError(st *testing.T, msg string) {
+	fmt.Fprintln(st.Output(), strings.TrimRight(msg, "\n"))
+	st.FailNow()
+}
+
 // hex16 formats a seed or a trace hash as 0x and 16 lowercase hex digits.
 func hex16(v uint64) string { return fmt.Sprintf("0x%016x", v) }
 
@@ -224,7 +233,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	if a1.setupErr != "" {
 		res.status = "fail"
 		res.fail = &failure{kind: "setup", message: a1.setupErr}
-		st.Fatalf("%s", a1.setupErr)
+		seedSetupError(st, a1.setupErr)
 	}
 	res.events, res.traceHash, res.hashes = &a1.executed, hex16(a1.hash), []uint64{a1.hash}
 	res.primary = a1.fail
@@ -260,9 +269,10 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			outcome = newDeterminismFailure("check_determinism", seed, []attemptResult{a1, a2, a3, a4}, nil, a3.records, a4.records, a3)
 			art = a3
 		case st.Failed(): // t.Error, t.Errorf or t.Fail in the check attempt: API-061 row 8 caught any earlier one (API-072)
-			stop := "marked the test failed (t.Error, t.Errorf or t.Fail) at t=" + a2.now.String()
+			// Run sees the mark only when the attempt ends, so the time is a bound: by t=<end> (API-072).
+			stop := "marked the test failed (t.Error, t.Errorf or t.Fail) by t=" + a2.now.String()
 			res.status, res.fail = "fail", laterDeterminism(res, "determinism check", stop, a2.now)
-			r.laterNote(st, res, "determinism check", stop, "mark the test failed")
+			r.laterNote(st, res, "determinism check", stop)
 			completed = true
 			return
 		}
@@ -277,14 +287,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		// The pass note stands in for the pass log. A report without a failure object gets it only
 		// under FAULTLINE_TRACE=full, and without the signature and the warnings (API-083).
 		if failedBefore && (prev.Failure != nil || r.plan.passArtifacts) {
-			lines := []string{fmt.Sprintf("faultline: seed 0x%016x passed; kept the failing artifact at %s%c", seed, prevDir, os.PathSeparator)}
-			if prev.Failure != nil {
-				lines[0] += ", which recorded " + prev.Failure.Signature
-				for _, w := range compareReports(prev, versions(r.build), optionsHash(r.plan.opts, r.plan.env.scheduleHash)) {
-					lines = append(lines, "warning: "+w)
-				}
-			}
-			fmt.Fprint(st.Output(), joinLines(lines, ""))
+			keptFailingNote(st, seed, prevDir, prev, r.compare(prev))
 		}
 		completed = true
 		return
@@ -293,7 +296,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	res.status, res.fail = "fail", outcome
 	var warnings []string
 	if prev != nil {
-		warnings = compareReports(prev, versions(r.build), optionsHash(r.plan.opts, r.plan.env.scheduleHash))
+		warnings = r.compare(prev)
 	}
 	rep := r.replay(seed, outcome)
 	dir := r.artifactDir(seed)
@@ -318,15 +321,21 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	completed = true
 }
 
+// compare returns API-083's warnings for the previous report prev.
+func (r *runner) compare(prev *artifact.Report) []string {
+	p := r.plan
+	return compareReports(prev, versions(r.build), runOptions(p.opts, p.env), optionsHash(p.opts, p.env.scheduleHash))
+}
+
 // rerun runs a later attempt of the seed (API-070). A setup error there stops the seed through
-// t.Fatalf, and handleGoexit reports it like any other stop in a later attempt (API-072).
+// st.FailNow, and handleGoexit reports it like any other stop in a later attempt (API-072).
 func (r *runner) rerun(st *testing.T, res *seedResult, cfg kernel.TraceConfig) attemptResult {
 	res.attempts++
 	r.cur = nil
 	a := r.attempt(st, res.seed, cfg, r.plan.env.schedule, false)
 	if a.setupErr != "" {
 		res.setupStop = true
-		st.Fatalf("%s", a.setupErr)
+		seedSetupError(st, a.setupErr)
 	}
 	res.hashes = append(res.hashes, a.hash)
 	return a
@@ -383,16 +392,45 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 	return a
 }
 
-// writePassArtifact writes the artifact of a passing seed under FAULTLINE_TRACE=full (API-073).
+// keptFailingNote writes the line of a seed that passed while dir kept the failing report rep
+// (API-073, API-083). It ends with the recorded signature when rep has a failure object, and a
+// warning line follows for each of warnings.
+func keptFailingNote(st *testing.T, seed uint64, dir string, rep *artifact.Report, warnings []string) {
+	lines := []string{fmt.Sprintf("faultline: seed 0x%016x passed; kept the failing artifact at %s%c", seed, dir, os.PathSeparator)}
+	if rep.Failure != nil {
+		lines[0] += ", which recorded " + printable(rep.Failure.Signature)
+		for _, w := range warnings {
+			lines = append(lines, "warning: "+w)
+		}
+	}
+	fmt.Fprint(st.Output(), joinLines(lines, ""))
+}
+
+// writePassArtifact writes the artifact of a passing seed under FAULTLINE_TRACE=full (API-073). A
+// pass artifact replaces only a pass artifact: when the directory holds a failing report, or a
+// report.json that cannot be read, it keeps the directory and writes one line instead of the pass
+// log.
 func (r *runner) writePassArtifact(st *testing.T, res *seedResult, a1 attemptResult) {
-	if r.artifactDir(res.seed) == "" {
+	if r.artifactRoot() == "" {
+		return
+	}
+	dir, rep, err := r.ownReport(res.seed) // rep is nil when err is not
+	if rep != nil && rep.Status == "fail" {
+		keptFailingNote(st, res.seed, dir, rep, nil)
+		return
+	}
+	if rep != nil && rep.Status != "pass" {
+		err = fmt.Errorf("status %q is neither pass nor fail", rep.Status)
+	}
+	if err != nil {
+		fmt.Fprintf(st.Output(), "faultline: seed 0x%016x passed; kept the artifact at %s%c, whose report.json could not be read: %s\n", res.seed, dir, os.PathSeparator, printable(err.Error()))
 		return
 	}
 	passed := fmt.Sprintf("faultline: seed 0x%016x passed: %d events, ended at t=%s (%s)", res.seed, a1.executed, a1.now, a1.stop)
 	lines := func(dir string) []string {
 		return []string{passed, fmt.Sprintf("artifacts: %s%c", dir, os.PathSeparator)}
 	}
-	dir, err := r.writeArtifact(res.seed, r.buildArtifact(st, res, nil, a1, nil), func(dir string) string {
+	dir, err = r.writeArtifact(res.seed, r.buildArtifact(st, res, nil, a1, nil), func(dir string) string {
 		return "--- PASS: " + st.Name() + "\n" + joinLines(lines(dir), "    ")
 	})
 	if err != nil {
@@ -405,48 +443,62 @@ func (r *runner) writePassArtifact(st *testing.T, res *seedResult, a1 attemptRes
 }
 
 // previousReport reads the report of a previous run of the same seed (API-083): only when the
-// seed list came from FAULTLINE_SEED and artifacts are on. When the seed's directory holds the
-// report of another test whose name maps to the same folder, it reads the one in artifact.AltDir,
-// where writeArtifact put this test's. It also returns the directory it read the report from,
-// which differs from the report's Dir when the artifact root moved, as after a CI download.
+// seed list came from FAULTLINE_SEED and artifacts are on, and a report that cannot be read is
+// skipped silently. It also returns the directory it read the report from, which differs from the
+// report's Dir when the artifact root moved, as after a CI download.
 func (r *runner) previousReport(seed uint64) (*artifact.Report, string) {
-	if r.plan.seedSource != "env" {
+	if r.plan.seedSource != "env" || r.artifactRoot() == "" {
 		return nil, ""
 	}
-	root := r.artifactRoot()
-	if root == "" {
+	dir, rep, _ := r.ownReport(seed)
+	if rep == nil {
 		return nil, ""
 	}
-	pkg, test := r.build.importPath, r.t.Name()
-	for _, dir := range []string{artifact.Dir(root, pkg, test, seed), artifact.AltDir(root, pkg, test, seed)} {
-		rep := readReportFile(dir)
-		if rep == nil {
-			return nil, ""
-		}
-		if rep.Package == pkg && rep.Test == test && rep.Seed == fmt.Sprintf("0x%016x", seed) {
-			return rep, dir
-		}
-	}
-	return nil, ""
+	return rep, dir
 }
 
-// readReportFile reads report.json in dir, or returns nil when it is missing or unreadable. Only a
-// regular file is opened, so a link is not followed and a FIFO does not block the run.
-func readReportFile(dir string) *artifact.Report {
+// ownReport reads the report of seed's artifact (API-073, API-083). Artifacts must be on. It reads
+// report.json in the seed's directory, or in artifact.AltDir when the seed's directory holds a
+// readable report of another test whose name maps to the same folder, where writeArtifact puts
+// this test's. dir is the directory it read last. rep is nil when that report.json is missing,
+// cannot be read (err says why) or belongs to another test again.
+func (r *runner) ownReport(seed uint64) (dir string, rep *artifact.Report, err error) {
+	root := r.artifactRoot()
+	pkg, test := r.build.importPath, r.t.Name()
+	for _, dir = range []string{artifact.Dir(root, pkg, test, seed), artifact.AltDir(root, pkg, test, seed)} {
+		if rep, err = readReportFile(dir); rep == nil {
+			return dir, nil, err
+		}
+		if rep.Package == pkg && rep.Test == test && rep.Seed == hex16(seed) {
+			return dir, rep, nil
+		}
+	}
+	return dir, nil, nil
+}
+
+// readReportFile reads report.json in dir. It returns nil and a nil error when report.json is
+// missing or out of reach (artifact.Write then says what it finds), and nil and the reason when it
+// cannot be read (API-073). Only a regular file is opened, so a link is not followed and a FIFO
+// does not block the run.
+func readReportFile(dir string) (*artifact.Report, error) {
 	path := filepath.Join(dir, artifact.FileReport)
-	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
-		return nil
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil // nothing here to keep
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer f.Close()
 	rep, err := artifact.ReadReport(f)
 	if err != nil {
-		return nil
+		return nil, errors.New(strings.TrimPrefix(err.Error(), "artifact: report.json: "))
 	}
-	return rep
+	return rep, nil
 }
 
 // goexitMessage is the message of a seed that its primary attempt stopped through Goexit (API-101).
@@ -456,8 +508,8 @@ const goexitMessage = "stopped by t.FailNow, t.Fatal or t.SkipNow"
 // primary attempt decides the seed's outcome: a Goexit there goes through API-101's cases. A
 // Goexit in a later attempt never changes the outcome (API-072). The seed keeps the primary
 // attempt's failure, or the determinism failure that a diagnostic attempt was looking into. The
-// one exception is the check attempt after a passing primary attempt: the first run did not stop,
-// so a stop there is a determinism failure, as is a check attempt that marked the test failed
+// one exception is the check attempt after a passing primary attempt: the first run passed, so a
+// stop there is a determinism failure, as is a check attempt that marked the test failed
 // (runSeed). No Goexit writes artifacts, and events and trace_hash stay as the primary attempt set
 // them (API-087).
 func (r *runner) handleGoexit(st *testing.T, res *seedResult) {
@@ -479,19 +531,24 @@ func (r *runner) handleGoexit(st *testing.T, res *seedResult) {
 		name = "diagnostic re-run"
 		res.fail = laterDeterminism(res, name, s.text(), s.at)
 	}
-	r.laterNote(st, res, name, s.text(), "stop")
+	r.laterNote(st, res, name, s.text())
 }
 
 // laterNote writes API-072's lines for a seed whose later attempt name ended with stop: the seed's
-// failure without its replay and artifacts lines, then the note, which says the first run did not
-// do what first names, and the replay command.
-func (r *runner) laterNote(st *testing.T, res *seedResult, name, stop, first string) {
-	lines := consoleLines(res.fail, "", "", nil, false, false)
-	lines = lines[:len(lines)-2] // the failure without its replay and artifacts lines (API-075)
-	lines = append(lines,
-		fmt.Sprintf("faultline: the %s of seed %s %s; no artifacts were written", name, hex16(res.seed), stop),
-		"  the first run did not "+first+", so the test depends on something outside the seed; the failure above is the seed's outcome",
-		"replay:    "+r.replay(res.seed, res.fail).Command)
+// failure without its replay and artifacts lines, then the note and the replay command. A
+// determinism failure's message already says how the attempt stopped, so its note only says that
+// no artifacts were written; after the artifact re-run the note gives the stop and says why the
+// seed keeps the first run's failure.
+func (r *runner) laterNote(st *testing.T, res *seedResult, name, stop string) {
+	lines := failureLines(res.fail, false, false) // the failure without its replay and artifacts lines (API-075)
+	if res.fail.kind == "determinism" {
+		lines = append(lines, "faultline: no artifacts were written for seed "+hex16(res.seed))
+	} else {
+		lines = append(lines,
+			fmt.Sprintf("faultline: the %s of seed %s %s; no artifacts were written", name, hex16(res.seed), stop),
+			"  the first run did not stop this way, so the test depends on something outside the seed; the failure above is the seed's outcome")
+	}
+	lines = append(lines, "replay:    "+r.replay(res.seed, res.fail).Command)
 	fmt.Fprint(st.Output(), joinLines(lines, ""))
 }
 
@@ -556,17 +613,18 @@ func laterDeterminism(res *seedResult, name, stop string, at kernel.Time) *failu
 	d := &determinism{context: "check_determinism", seed: res.seed, hashes: res.hashes, original: res.primary}
 	f := &failure{kind: "determinism", context: "determinism-check", at: at, determinism: d}
 	stop = "the " + name + " " + stop
+	var lines []string
 	switch {
 	case res.primary != nil: // a diagnostic attempt after an artifact re-run mismatch
 		d.context, f.context = "artifact_rerun", "determinism-artifact"
-		f.message = "the first run failed: " + res.primary.headline() + "\n" + stop + ", so the first differing record was not found\n"
+		lines = append(firstRunLines(res.primary), stop+", so the first differing record was not found")
 	case res.attempts > 2: // a diagnostic attempt after a check mismatch
-		f.message = stop + ", so the first differing record was not found\n"
+		lines = []string{stop + ", so the first differing record was not found"}
 	default: // the check attempt: no second hash, or an equal one, so the headline is "determinism failure at t=<at>"
 		f.context = ""
-		f.message = stop + "; the first run passed with trace hash " + hex16(res.hashes[0]) + "\n"
+		lines = []string{stop + "; the first run passed with trace hash " + hex16(res.hashes[0])}
 	}
-	f.message += commonCauses
+	f.message = strings.Join(append(lines, commonCauses, nextStep), "\n")
 	return f
 }
 

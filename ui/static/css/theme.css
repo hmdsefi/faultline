@@ -343,10 +343,12 @@
 .fl-run .fl-overview::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--fl-fg); box-shadow: 0 0 0 3px var(--fl-on-line); }
 .fl-run .fl-overview:focus-visible { outline-offset: 4px; }
 
-/* The side column is as tall as the stage and the cards; the Inspector takes what the Failure and
-   Faults panels leave, and long panels scroll inside. */
-.fl-run .fl-side { grid-area: side; display: grid; grid-template-rows: max-content minmax(0, max-content) minmax(0, 1fr); gap: var(--fl-space-3); height: 0; min-height: 100%; }
+/* The side column is as tall as the stage and the cards. Failure keeps its size, its message well
+   scrolling past min(40vh, 18em); Faults takes at most 40 % and scrolls inside; the Inspector takes
+   what is left, so long content never pushes it out. */
+.fl-run .fl-side { grid-area: side; display: grid; grid-template-rows: max-content fit-content(40%) minmax(0, 1fr); gap: var(--fl-space-3); height: 0; min-height: 100%; }
 .fl-run .fl-side > .fl-panel:last-child { max-height: 100%; }
+.fl-run .fl-side > .fl-panel:first-child > .fl-well { max-height: min(40vh, 18em); overflow: auto; overscroll-behavior: contain; }
 .fl-run .fl-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 10px 12px 12px; }
 .fl-run .fl-panel > .fl-label { flex: none; }
 /* 4 px of padding inside a scroller, given back by the margin, keeps focus rings unclipped. */
@@ -427,6 +429,7 @@
   .fl-run .fl-primary { width: 40px; padding: 0; justify-content: center; }
   .fl-run .fl-side { grid-template-rows: none; gap: 10px; height: auto; }
   .fl-run .fl-side > .fl-panel:last-child { max-height: none; }
+  .fl-run .fl-side > .fl-panel:first-child > .fl-well { max-height: none; overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {

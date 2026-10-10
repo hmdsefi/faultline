@@ -143,12 +143,12 @@ func TestRunInvalidEnv(t *testing.T) {
 		{[]string{"FAULTLINE_ARTIFACTS=True"}, artifactsErr("True")},
 		{[]string{"FAULTLINE_ARTIFACTS=yes"}, artifactsErr("yes")},
 		{[]string{"FAULTLINE_ARTIFACTS=ON"}, artifactsErr("ON")},
-		{[]string{"FAULTLINE_SEED_LIST=1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ": want a decimal or 0x-prefixed hexadecimal uint64`},
+		{[]string{"FAULTLINE_SEED_LIST=1,,0xZZ"}, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ" on line 1: want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space`},
 		{[]string{"FAULTLINE_SEED=1", "FAULTLINE_SEED_LIST=2"}, `faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one`},
 	}
 	for _, c := range cases {
 		o, code := runScenario(t, "ticker-seeds", c.env)
-		if code != 1 || len(ranSeeds(o)) != 0 || !strings.Contains(o, c.want) {
+		if code != 1 || len(ranSeeds(o)) != 0 || !strings.Contains(o, c.want+"\n") {
 			t.Errorf("%v: exit %d, want 1 and %q\n%s", c.env, code, c.want, o)
 		}
 	}
@@ -794,7 +794,7 @@ func TestRunWorkerProtocol(t *testing.T) {
 		t.Fatalf("setup line %v", lines)
 	}
 	setup := `{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"","index":-1,"status":"fail","kind":"setup","signature":"setup:",` +
-		`"message":"faultline: invalid FAULTLINE_SEED_LIST entry 1 \"0xZZ\": want a decimal or 0x-prefixed hexadecimal uint64","wall_ns":0}`
+		`"message":"faultline: invalid FAULTLINE_SEED_LIST entry 1 \"0xZZ\" on line 1: want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space","wall_ns":0}`
 	if raw := readLines(t, results2); raw[0] != setup {
 		t.Fatalf("setup line:\n%s\nwant\n%s", raw[0], setup)
 	}
@@ -906,6 +906,33 @@ func TestRunStepInBody(t *testing.T) {
 	}
 }
 
+var _ = scenario("misuse-in-body", func(t *testing.T) {
+	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
+		addTicker(w)
+		w.RunFor(-time.Second)
+	})
+})
+
+// AT-API-50; §7.1: a seed-level setup error prints on the seed subtest without a file:line
+// prefix, which st.Fatalf would set to a line inside faultline; so does a body panic before the
+// first event, stack included.
+func TestRunSeedSetupError(t *testing.T) {
+	const misuse = "faultline: World.RunFor: negative duration -1s; want 0 or more"
+	o, code, lines := runResults(t, "misuse-in-body", "FAULTLINE_SEED=0x1")
+	if code != 1 || !strings.Contains(o, "\n=== RUN   TestScenario/seed=0x0000000000000001\n    "+misuse+"\n--- FAIL: ") || len(lines) != 1 {
+		t.Fatalf("exit %d, %d results lines\n%s", code, len(lines), o)
+	}
+	checkLine(t, "misuse", lines[0], "status", "fail", "kind", "setup", "signature", "setup:", "message", misuse)
+	o, code = runScenario(t, "body-panic", []string{"FAULTLINE_SEED=0x1"})
+	if code != 1 || !regexp.MustCompile(`\n    faultline: body panicked during setup \(before the first event\) for seed 0x0000000000000001: boom\n    goroutine \d+ \[running\]:\n`).MatchString(o) || regexp.MustCompile(`\n\s*faultline\.go:\d+: `).MatchString(o) {
+		t.Fatalf("body panic: exit %d\n%s", code, o)
+	}
+	// The stack's trailing newline adds no blank line: its last line ends the seed's output.
+	if !regexp.MustCompile(`\n    \t\S[^\n]*\n--- FAIL: TestScenario `).MatchString(o) {
+		t.Fatalf("body panic: the stack does not end the seed's output\n%s", o)
+	}
+}
+
 var _ = scenario("fail-first-event", func(t *testing.T) {
 	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
 		addTicker(w)
@@ -941,16 +968,16 @@ func TestRunLaterPhase(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{[]string{"ROW=procs"}, "faultline: Options.Procs is not available until Phase 2"},
-		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is not available until Phase 2"},
-		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is not available until Phase 3"},
-		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is not available until Phase 3"},
-		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3"},
-		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is not available until Phase 2b"},
+		{[]string{"ROW=procs"}, "faultline: Options.Procs is not available until Phase 2; want 0"},
+		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is not available until Phase 2; want false"},
+		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is not available until Phase 3; want false"},
+		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is not available until Phase 3; unset it"},
+		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is not available until Phase 3; unset it"},
+		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is not available until Phase 2b; unset it"},
 	}
 	for _, c := range cases {
 		o, code := runScenario(t, "later-phase", c.env)
-		if code != 1 || len(ranSeeds(o)) != 0 || !strings.Contains(o, c.want) {
+		if code != 1 || len(ranSeeds(o)) != 0 || !strings.Contains(o, c.want+"\n") {
 			t.Errorf("%v: exit %d\n%s", c.env, code, o)
 		}
 	}
@@ -1018,7 +1045,7 @@ func TestRunFatalInRerun(t *testing.T) {
 	o, code := runScenario(t, "fatal-rerun", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results, "OUT=" + out})
 	note := `faultline: invariant "tick 5" violated at t=0.050000000s (event 6)` + "\n      five\n" +
 		"    faultline: the artifact re-run of seed 0x0000000000000001 stopped by t.FailNow or t.Fatal at t=0.030000000s (event 4); no artifacts were written\n" +
-		"      the first run did not stop, so the test depends on something outside the seed; the failure above is the seed's outcome\n"
+		"      the first run did not stop this way, so the test depends on something outside the seed; the failure above is the seed's outcome\n"
 	if code != 1 || !strings.Contains(o, note) || strings.Contains(o, "artifacts:") {
 		t.Fatalf("exit %d\n%s", code, o)
 	}

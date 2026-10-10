@@ -46,7 +46,7 @@ func TestWorldRand(t *testing.T) {
 			defer func() {
 				v := recover()
 				err, ok := v.(error)
-				if !ok || err.Error() != "faultline: World.Rand: empty label" {
+				if !ok || err.Error() != `faultline: World.Rand: empty label; pass a non-empty label such as "load"` {
 					t.Errorf("w.Rand(\"\") panicked with %v", v)
 				}
 			}()
@@ -120,13 +120,13 @@ func TestWorldOptionsAndMisuse(t *testing.T) {
 			}()
 			fn()
 		}
-		mustPanic(`faultline: World.Invariant: empty name`, func() { w.Invariant("", func() error { return nil }) })
-		mustPanic(`faultline: World.Final "f": nil function`, func() { w.Final("f", nil) })
+		mustPanic(`faultline: World.Invariant: empty name; the name identifies the check in failure reports`, func() { w.Invariant("", func() error { return nil }) })
+		mustPanic(`faultline: World.Final "f": nil function; pass the check to run when the run ends`, func() { w.Final("f", nil) })
 		w.Invariant("i", func() error { return nil })
-		mustPanic(`faultline: World.Invariant: duplicate name "i"`, func() { w.Invariant("i", func() error { return nil }) })
+		mustPanic(`faultline: World.Invariant: duplicate name "i"; give each one a distinct name`, func() { w.Invariant("i", func() error { return nil }) })
 		w.Final("i", func() error { return nil }) // separate namespace
-		mustPanic(`faultline: World.Role: empty name`, func() { w.Role("", func() []kernel.NodeID { return nil }) })
-		mustPanic(`faultline: World.Plan: nil planner`, func() { w.Plan(nil) })
-		mustPanic(`faultline: World.RunFor: negative duration -1s`, func() { w.RunFor(-time.Second) })
+		mustPanic(`faultline: World.Role: empty name; planners target a role by its name`, func() { w.Role("", func() []kernel.NodeID { return nil }) })
+		mustPanic(`faultline: World.Plan: nil planner; pass a non-nil fault.Planner`, func() { w.Plan(nil) })
+		mustPanic(`faultline: World.RunFor: negative duration -1s; want 0 or more`, func() { w.RunFor(-time.Second) })
 	})
 }

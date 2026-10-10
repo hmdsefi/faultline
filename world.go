@@ -98,7 +98,7 @@ func (w *World) Options() Options { return w.r.plan.opts }
 
 func (w *World) checkNotEnded(method string) {
 	if w.phase == phaseFinal || w.phase == phaseDone {
-		panicMisuse("faultline: World.%s called after the run ended", method)
+		panicMisuse("faultline: World.%s called after the run ended; call it from body or from a callback during the run", method)
 	}
 }
 
@@ -132,17 +132,18 @@ func (w *World) Servers() []*kernel.Node { return w.tagged("server") }
 // Clients returns the nodes tagged "client", in NodeID order.
 func (w *World) Clients() []*kernel.Node { return w.tagged("client") }
 
-// register implements the checks of API-055 for Invariant and Final.
-func (w *World) register(method string, list *[]namedCheck, name string, check func() error) {
+// register implements the checks of API-055 for Invariant and Final; when says when the check
+// runs, for the nil-function message (§7.2).
+func (w *World) register(method, when string, list *[]namedCheck, name string, check func() error) {
 	if name == "" {
-		panicMisuse("faultline: World.%s: empty name", method)
+		panicMisuse("faultline: World.%s: empty name; the name identifies the check in failure reports", method)
 	}
 	if check == nil {
-		panicMisuse("faultline: World.%s %q: nil function", method, name)
+		panicMisuse("faultline: World.%s %q: nil function; pass the check to run %s", method, name, when)
 	}
 	for _, c := range *list {
 		if c.name == name {
-			panicMisuse("faultline: World.%s: duplicate name %q", method, name)
+			panicMisuse("faultline: World.%s: duplicate name %q; give each one a distinct name", method, name)
 		}
 	}
 	w.checkNotEnded(method)
@@ -152,25 +153,25 @@ func (w *World) register(method string, list *[]namedCheck, name string, check f
 // Invariant registers a check that runs after every executed event. It must be cheap and
 // must not change the world. The first non-nil error fails the run (kind "invariant").
 func (w *World) Invariant(name string, check func() error) {
-	w.register("Invariant", &w.invariants, name, check)
+	w.register("Invariant", "after every event", &w.invariants, name, check)
 }
 
 // Final registers a check that runs once after the run ends normally. All final checks run,
 // in registration order; the first failing one is the seed's failure (kind "final").
 func (w *World) Final(name string, check func() error) {
-	w.register("Final", &w.finals, name, check)
+	w.register("Final", "when the run ends", &w.finals, name, check)
 }
 
 // Role registers a named node selector that planners can target (fault.Rule.Target).
 func (w *World) Role(name string, fn func() []kernel.NodeID) {
 	if name == "" {
-		panicMisuse("faultline: World.Role: empty name")
+		panicMisuse("faultline: World.Role: empty name; planners target a role by its name")
 	}
 	if fn == nil {
-		panicMisuse("faultline: World.Role %q: nil function", name)
+		panicMisuse("faultline: World.Role %q: nil function; pass a function that returns the role's nodes", name)
 	}
 	if _, ok := w.roles[name]; ok {
-		panicMisuse("faultline: World.Role: duplicate name %q", name)
+		panicMisuse("faultline: World.Role: duplicate name %q; give each one a distinct name", name)
 	}
 	w.checkNotEnded("Role")
 	w.roles[name] = fn
@@ -194,7 +195,7 @@ func (w *World) Plan(p fault.Planner) {
 	w.checkNotEnded("Plan")
 	r, isRandom := p.(*fault.Random)
 	if p == nil || (isRandom && r == nil) {
-		panicMisuse("faultline: World.Plan: nil planner")
+		panicMisuse("faultline: World.Plan: nil planner; pass a non-nil fault.Planner")
 	}
 	d := w.r.plan.opts.Duration
 	if isRandom && (r.Quiet < 0 || r.Quiet >= d) {
@@ -252,7 +253,7 @@ func (w *World) End() kernel.Time {
 // Rand returns the PRNG stream "workload/<label>". label must not be empty.
 func (w *World) Rand(label string) *rand.Rand {
 	if label == "" {
-		panicMisuse("faultline: World.Rand: empty label")
+		panicMisuse(`faultline: World.Rand: empty label; pass a non-empty label such as "load"`)
 	}
 	return w.Sim.Rand("workload/" + label)
 }
@@ -263,16 +264,16 @@ func (w *World) Rand(label string) *rand.Rand {
 // later RunFor, also a deferred one, stops body again.
 func (w *World) RunFor(d time.Duration) {
 	if w.driving {
-		panicMisuse("faultline: World.RunFor called from inside the simulation (a callback, invariant or final check)")
+		panicMisuse("faultline: World.RunFor called from inside the simulation (a callback or an invariant); schedule later work with Node.After instead")
 	}
 	if w.phase != phaseBody {
-		panicMisuse("faultline: World.RunFor called after body returned")
+		panicMisuse("faultline: World.RunFor called after body returned; call it only from body (final checks cannot advance virtual time)")
 	}
 	if w.aborted {
 		panic(abortBody{})
 	}
 	if d < 0 {
-		panicMisuse("faultline: World.RunFor: negative duration %v", d)
+		panicMisuse("faultline: World.RunFor: negative duration %v; want 0 or more", d)
 	}
 	target := w.Sim.Now().Add(d)
 	if target > w.End() {
