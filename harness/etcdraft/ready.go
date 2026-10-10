@@ -42,7 +42,7 @@ func (inc *incarnation) onReady() {
 		inc.requiredHS = rd.HardState
 	}
 	inc.persisted, inc.sentEarly = false, false
-	if cfg.earlySend {
+	if cfg.Bugs&BugSendBeforePersist != 0 || cfg.earlySend {
 		inc.sendMessages(rd)
 		inc.sentEarly = true
 	}
@@ -133,7 +133,7 @@ func (inc *incarnation) writeReady(rd raft.Ready) (wrote, ok bool) {
 		wrote = true
 		inc.walLast = e.GetIndex()
 	}
-	if !raft.IsEmptyHardState(rd.HardState) {
+	if !raft.IsEmptyHardState(rd.HardState) && inc.cfg().Bugs&BugForgetHardState == 0 {
 		if !inc.append(wal.RecHardState, wal.Marshal(rd.HardState)) {
 			return false, false
 		}
@@ -155,6 +155,10 @@ func (inc *incarnation) onSync() {
 // syncStep implements ETC-064. It returns false if a WAL error crashed the node.
 func (inc *incarnation) syncStep(rd raft.Ready) bool {
 	c := inc.c
+	if inc.cfg().Bugs&BugSkipSync != 0 {
+		inc.persistPoint(rd, false) // the persist point is still recorded (ETC-190)
+		return true
+	}
 	if err := inc.wal.Sync(); err != nil {
 		inc.walError("sync", err)
 		return false
@@ -219,17 +223,20 @@ func (inc *incarnation) finish(rd raft.Ready) {
 	inc.afterEvent()
 }
 
-// sendMessages implements ETC-066, checking ETC-114 rule 4 for every message.
+// sendMessages implements ETC-066, checking ETC-114 rule 4 for every message unless
+// BugSendBeforePersist is set.
 func (inc *incarnation) sendMessages(rd raft.Ready) {
 	c, cfg := inc.c, inc.cfg()
 	for _, m := range rd.Messages {
-		switch {
-		case !inc.persisted:
-			inc.contract(4, "%s to %d sent before the persist point", m.GetType().String(), m.GetTo())
-		case m.GetFrom() != inc.s.id && m.GetType() != raftpb.MsgProp: // a forwarded proposal keeps its originator
-			inc.contract(4, "%s from %d sent by %d", m.GetType().String(), m.GetFrom(), inc.s.id)
-		case m.GetTo() == inc.s.id:
-			inc.contract(4, "%s addressed to itself", m.GetType().String())
+		if cfg.Bugs&BugSendBeforePersist == 0 {
+			switch {
+			case !inc.persisted:
+				inc.contract(4, "%s to %d sent before the persist point", m.GetType().String(), m.GetTo())
+			case m.GetFrom() != inc.s.id && m.GetType() != raftpb.MsgProp: // a forwarded proposal keeps its originator
+				inc.contract(4, "%s from %d sent by %d", m.GetType().String(), m.GetFrom(), inc.s.id)
+			case m.GetTo() == inc.s.id:
+				inc.contract(4, "%s addressed to itself", m.GetType().String())
+			}
 		}
 		to := c.server(m.GetTo())
 		if to == nil {
@@ -269,6 +276,14 @@ func (inc *incarnation) apply(rd raft.Ready) bool {
 		c.stats.SnapshotsInstalled++
 		c.emit(inc.n, "etcdraft.snapshot", fmt.Sprintf("snapshot install %d", idx),
 			attr("action", "install"), attr("index", u64(idx)), attr("data_hash", fmt.Sprintf("%016x", h)))
+	}
+	// ETC-067 step 2: BugApplyBeforeCommit applies the new normal entries before they commit.
+	if inc.cfg().Bugs&BugApplyBeforeCommit != 0 {
+		for _, e := range rd.Entries {
+			if e.GetType() == raftpb.EntryNormal && e.GetIndex() > inc.applied && !inc.applyNormal(e) {
+				return false
+			}
+		}
 	}
 	for _, e := range rd.CommittedEntries {
 		if e.GetIndex() != inc.raftApplied+1 {
