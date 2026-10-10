@@ -56,6 +56,8 @@ type incarnation struct {
 	snapIndex   uint64            // latest snapshot index (durable view)
 	confState   *raftpb.ConfState // configuration after the last applied conf change or snapshot
 
+	waiters map[waiterKey]waiter // ETC-093, accessed by key only
+
 	readyPending bool
 	inflight     *raft.Ready       // Ready waiting for its sync event (ETC-061 step 7)
 	requiredHS   *raftpb.HardState // HardState of the Ready being persisted; nil if none
@@ -139,7 +141,8 @@ func (inc *incarnation) walError(op string, err error) {
 // boot is the server's kernel.BootFunc (ETC-030 to ETC-036).
 func (s *server) boot(n *kernel.Node) {
 	c := s.c
-	inc := &incarnation{s: s, c: c, n: n, log: &raftLogger{sim: c.w.Sim, node: n, level: c.cfg.LogLevel}}
+	inc := &incarnation{s: s, c: c, n: n, log: &raftLogger{sim: c.w.Sim, node: n, level: c.cfg.LogLevel},
+		waiters: map[waiterKey]waiter{}}
 	s.inc = inc
 	c.stats.Boots++
 	st, ok := inc.openWAL()
@@ -375,6 +378,10 @@ func (inc *incarnation) onPacket(from kernel.NodeID, payload any) {
 			}
 			c.emit(inc.n, "etcdraft.step_error", fmt.Sprintf("step %s from %d: %v", m.GetType().String(), m.GetFrom(), err),
 				attr("err", err.Error()), attr("msg_type", m.GetType().String()), attr("from", u64(m.GetFrom())))
+		}
+	case wire.TagRequest:
+		if !inc.onRequest(from, sender, p) {
+			return
 		}
 	default:
 		inc.harnessError(fmt.Errorf("unexpected %s packet from %s", tagName(p.data[0]), sender))
