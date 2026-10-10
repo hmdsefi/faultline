@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package simdisk simulates one volume per node with crash semantics for unsynced data and
 // metadata. All methods must be called from the simulation goroutine. Types are not safe for
 // concurrent use.

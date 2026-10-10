@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 package simdisk
 
 // SetCapacity sets the capacity in bytes; 0 means unlimited.

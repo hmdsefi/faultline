@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 import { formatTime, shortTime, formatCount, counted, windowBanner } from "./format.js";
 import { listFaults } from "./model.js";
 import { h, icon, glyphIcon, bandSwatch, lineSwatch, brandMark } from "./dom.js";

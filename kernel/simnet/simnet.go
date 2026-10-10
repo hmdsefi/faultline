@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package simnet simulates a datagram network between kernel nodes: per-link latency, jitter,
 // tail latency, loss, duplication and FIFO order, and a gograph topology with partitions.
 //

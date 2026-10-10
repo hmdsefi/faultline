@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package wire encodes the bytes servers and clients exchange over simnet.
 //
 // Every encoding starts with its tag byte; multi-byte integers are big-endian.

@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package faultline runs deterministic simulation tests: faultline.Run turns one Go test into
 // many simulated worlds, one subtest per seed, checks invariants after every event and final
 // checks after the run, and on failure writes a replayable artifact and prints a one-line replay

@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 import { buildModel } from "./model.js";
 import { formatCount, counted, shortTime } from "./format.js";
 import { AXIS_HEIGHT, GUTTER, PALETTE, GLYPHS, namespace, isVisible, category, axisValue, axisExtent, timeValue, toX, laneHeight, gutterWidth, laneTop, laneIndex, fitView, zoomView, panView, centerOn, failureView, hitTest, sliceEdges, shownEdges, draw } from "./render.js";

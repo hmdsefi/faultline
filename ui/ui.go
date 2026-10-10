@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package ui embeds faultline's web assets: the Phase 1 run view renderer that timeline.html
 // inlines, and (Phase 4) the faultline view app. It imports only the standard library.
 package ui

@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package history records client operations of a simulation run: invocations, completions,
 // virtual times and their exact order. It writes and reads the history.jsonl format.
 //

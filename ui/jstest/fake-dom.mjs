@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // A small DOM for the run view tests: elements, attributes, text, events and focus, a window with
 // the APIs the view calls, and a canvas whose 2D context records what it draws. It implements only
 // what ui/static/js uses.

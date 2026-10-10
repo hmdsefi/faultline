@@ -1,3 +1,6 @@
+/* Copyright 2026 Hamed Yousefi */
+/* SPDX-License-Identifier: MPL-2.0 */
+
 /* faultline run view tokens, v2. UI-179 and UI-191 names; light in :root, dark in
    [data-theme="dark"] and the prefers-color-scheme block (UI-178). Additions: --fl-backdrop-4,
    --fl-grid-dot, --fl-glass-saturate, --fl-accent-glow, --fl-on-accent, --fl-radius-pill, scales. */

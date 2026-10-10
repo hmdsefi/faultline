@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Run view model (ART-078): parses the embedded trace text and derives the lanes, the seq index,
 // messages, drops, bands, the failure root and the causal slice. Pure and DOM-free.
 

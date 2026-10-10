@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 package kernel
 
 // entry is one scheduled event: in the queue, or deferred while its node is paused.

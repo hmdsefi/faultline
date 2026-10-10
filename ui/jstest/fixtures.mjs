@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Timeline data fixtures of AT-ART-18, shared by the ui/jstest suites.
 
 // FIXTURE_TRACE is the trace.jsonl example of ART §5.4 (the AT-ART-10 (a) timeline data's trace).
