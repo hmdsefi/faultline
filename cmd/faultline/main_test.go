@@ -248,8 +248,16 @@ func TestRunInProcess(t *testing.T) {
 		{[]string{"render", "a", "b"}, "", renderErr("want exactly one artifact directory"), 2},
 		{[]string{"render", "a", "-slice-cap", "5"}, "", renderErr("flags must come before the artifact directory"), 2},
 		{[]string{"render", "a", "b", "-h"}, "", renderErr("flags must come before the artifact directory"), 2},
+		{[]string{"render", "a", "-h"}, "", renderErr("flags must come before the artifact directory"), 2},
 		// "-" ends the flags: only the arguments after the first are checked for flags (ART-098).
 		{[]string{"render", "-", "x"}, "", renderErr("want exactly one artifact directory"), 2},
+		// A lone "-" is not a flag, and nothing after "--" is (ART-098).
+		{[]string{"render", "a", "-"}, "", renderErr("want exactly one artifact directory"), 2},
+		{[]string{"render", "--", "a", "-b"}, "", renderErr("want exactly one artifact directory"), 2},
+		{[]string{"render", "-slice-cap", "5", "--", "a", "-b"}, "", renderErr("want exactly one artifact directory"), 2},
+		{[]string{"render", "a", "--", "-b"}, "", renderErr("want exactly one artifact directory"), 2},
+		{[]string{"render", "a", "b", "--"}, "", renderErr("want exactly one artifact directory"), 2},
+		{[]string{"render", "a", "-b", "--", "c"}, "", renderErr("flags must come before the artifact directory"), 2},
 		{[]string{"render", "-slice-cap", "0", "d"}, "", renderErr("-slice-cap must be at least 1"), 2},
 		{[]string{"render", "-max-records", "999", "d"}, "", renderErr("-max-records must be at least 1000"), 2},
 		{[]string{"render", "-h"}, renderFlagUsage, "", 0},
