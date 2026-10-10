@@ -35,6 +35,7 @@ var selfTestCases = []selfTestCase{
 		[]string{oracle.StateMachineSafety, oracle.AckedWritesSurvive, oracle.ReplicasAgree},
 		[]string{"unexpected error when getting unapplied entries"}},
 	{"ForgetHardState", BugForgetHardState, 50, []string{oracle.DurableState, oracle.WALAgreesWithMemory}, nil},
+	{"SnapshotOffByOne", BugSnapshotOffByOne, 50, []string{oracle.StateMachineSafety}, nil},
 }
 
 // selfTestOptions are the ETC-192 options.
