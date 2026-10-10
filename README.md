@@ -2,6 +2,7 @@
 [![coverage](https://img.shields.io/github/issues/detail/title/hmdsefi/faultline/172?label=coverage&color=brightgreen)](https://github.com/hmdsefi/faultline/actions/workflows/ci.yml?query=branch%3Amain)
 ![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/hmdsefi/faultline?utm_source=oss&utm_medium=github&utm_campaign=hmdsefi%2Ffaultline&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 [![Go Reference](https://pkg.go.dev/badge/github.com/hmdsefi/faultline.svg)](https://pkg.go.dev/github.com/hmdsefi/faultline)
+[![Sponsor](https://img.shields.io/badge/sponsor-hmdsefi-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/hmdsefi)
 
 <p align="center">
   <picture>
