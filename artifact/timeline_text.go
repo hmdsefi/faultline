@@ -104,7 +104,7 @@ func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 	for _, r := range tr.Records {
 		wSeq = max(wSeq, len(strconv.FormatUint(r.Seq, 10)))
 		wTime = max(wTime, len(r.At.String()))
-		wNode = max(wNode, len(esc(nodeLabel(r, names, "-"))))
+		wNode = max(wNode, len(esc(nodeLabel(r, names))))
 		wKind = max(wKind, len(esc(r.Kind)))
 	}
 	row := func(mark, seq, t, node, kind, rest string) string {
@@ -134,7 +134,7 @@ func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 		if r.Cause != 0 {
 			rest.WriteString(" <-" + strconv.FormatUint(r.Cause, 10))
 		}
-		line(row(mark, strconv.FormatUint(r.Seq, 10), r.At.String(), esc(nodeLabel(r, names, "-")), esc(r.Kind), rest.String()))
+		line(row(mark, strconv.FormatUint(r.Seq, 10), r.At.String(), esc(nodeLabel(r, names)), esc(r.Kind), rest.String()))
 	}
 	return bw.Flush()
 }

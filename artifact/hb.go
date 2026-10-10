@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -22,11 +21,11 @@ import (
 // numeric order (ART-055).
 func hbKey(seq uint64) string { return fmt.Sprintf("%020d", seq) }
 
-// nodeLabel returns "<name>#<inc>" for a node record; names come from the node table and fall
-// back to "node<id>" (ART-040). Global records use global.
-func nodeLabel(r kernel.Record, names map[int32]string, global string) string {
+// nodeLabel returns "<name>#<inc>" for a node record, with the name from the node table or
+// "node<id>", and "global" for node 0, in timeline.txt and hb.mmd alike (ART-040, ART-055).
+func nodeLabel(r kernel.Record, names map[int32]string) string {
 	if r.Node == 0 {
-		return global
+		return "global"
 	}
 	name, ok := names[int32(r.Node)]
 	if !ok {
@@ -47,27 +46,16 @@ func nodeNames(nodes []Node) map[int32]string {
 	return m
 }
 
-// labelEsc writes the backslash as two and every rune that strconv.IsPrint rejects the way
-// strconv.QuoteRune writes it, without the quotes, so no control character, line or paragraph
-// separator or bidi override reaches the Mermaid text (ART-055, as ART-040 does for timeline.txt).
-func labelEsc(s string) string {
-	if !strings.ContainsFunc(s, func(r rune) bool { return r == '\\' || !strconv.IsPrint(r) }) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\\':
-			b.WriteString(`\\`)
-		case !strconv.IsPrint(r):
-			q := strconv.QuoteRune(r)
-			b.WriteString(q[1 : len(q)-1])
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+// labelEsc escapes s as timeline.txt's text is escaped (escape), so no control character, line or
+// paragraph separator or bidi override reaches the Mermaid text. It then writes a word joiner
+// (U+2060) between every backslash and a following n or N (ART-055): Mermaid shows a backslash
+// and n in a label as a line break, and a backslash and N too in an SVG label. Mermaid decodes
+// entity codes before it looks for the pair, so only a rune between the two keeps them on the
+// line, and the joiner has no width.
+func labelEsc(s string) string { return joinBreaks.Replace(escape(s)) }
+
+// joinBreaks writes a word joiner between a backslash and a following n or N (labelEsc).
+var joinBreaks = strings.NewReplacer(`\n`, "\\\u2060n", `\N`, "\\\u2060N")
 
 // truncateRunes returns s cut to n runes plus "..." when it is longer.
 func truncateRunes(s string, n int) string {
@@ -162,7 +150,7 @@ func renderHB(tr *Trace, s Slice) ([]byte, int, error) {
 		mermaid.WithVertexLabel(func(v *gograph.Vertex[string]) string {
 			r := bySeqKey[v.Label()]
 			text := labelEsc(truncateRunes(validUTF8(r.Text), 40)) // cut first, so no escape is split
-			return fmt.Sprintf("%d %s %s\n%s: %s", r.Seq, r.At.String(), labelEsc(nodeLabel(r, names, "global")), labelEsc(validUTF8(r.Kind)), text)
+			return fmt.Sprintf("%d %s %s\n%s: %s", r.Seq, r.At.String(), labelEsc(nodeLabel(r, names)), labelEsc(validUTF8(r.Kind)), text)
 		}),
 		mermaid.WithVertexClass(func(v *gograph.Vertex[string]) string {
 			r := bySeqKey[v.Label()]

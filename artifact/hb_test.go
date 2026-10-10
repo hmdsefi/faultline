@@ -114,7 +114,7 @@ const hbTraceText = `flowchart TD
     n0["1 0.000000000s global<br>run.phase: body"]
     n1["2 0.000000000s n~1#35;1<br>fault.crash: crash"]
     n2["3 0.000000000s node7#35;2<br>net.recv: éééééééééééééééééééééééééééééééééééééééé"]
-    n3["4 0.000000000s n~1#35;1<br>app.b: a\nb#124;#lt;c#gt;#quot;#35;"]
+    n3["4 0.000000000s n~1#35;1<br>app.b: a\` + wj + `nb#124;#lt;c#gt;#quot;#35;"]
     n4["5 0.000000000s n~1#35;1<br>app.~k: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~b..."]
     n5["6 0.000000000s global<br>net.send: éééééééééééééééééééééééééééééééééééééééé..."]
     n0 --> n1
@@ -154,11 +154,14 @@ func TestWriteHBRules(t *testing.T) {
 	if err := WriteHB(&buf, back, 6, 200); err != nil || buf.String() != want {
 		t.Fatalf("after WriteTrace and ReadTrace: %v\n%s", err, buf.String())
 	}
-	// nodeLabel writes the placeholder it is given for node 0 (timeline.txt passes "-").
-	if got := nodeLabel(kernel.Record{}, nil, "-"); got != "-" {
-		t.Errorf("nodeLabel of a global record = %q, want -", got)
+	// nodeLabel labels node 0 "global", for timeline.txt as for hb.mmd.
+	if got := nodeLabel(kernel.Record{}, nil); got != "global" {
+		t.Errorf("nodeLabel of a global record = %q, want global", got)
 	}
 }
+
+// wj is the word joiner (U+2060) that labelEsc writes between a backslash and a following n or N.
+const wj = "\u2060"
 
 // hbDefs are the three classDef lines of every hb.mmd with a slice.
 const hbDefs = `    classDef violation fill:#fdd,stroke:#c00,stroke-width:2px
@@ -214,7 +217,7 @@ func TestWriteHBProgramOrderAndClasses(t *testing.T) {
 			{Seq: 3, Kind: "fault.crash", Cause: 2, Text: "r"},
 		}, 3, 200, `flowchart TD
     %% faultline causal slice v1: root=3 records=3 cap=200 truncated=false
-    n0["1 0.000000000s global<br>faultline.x: a#amp;b#96;c\r\nd"]
+    n0["1 0.000000000s global<br>faultline.x: a#amp;b#96;c\r\` + wj + `nd"]
     n1["2 0.000000000s global<br>network.y: x"]
     n2["3 0.000000000s global<br>fault.crash: r"]
     n0 --> n1
@@ -423,5 +426,28 @@ func TestWriteHBControlRunes(t *testing.T) {
 	buf.Reset()
 	if err := WriteHB(&buf, back, 2, 200); err != nil || buf.String() != want {
 		t.Fatalf("control runes after WriteTrace and ReadTrace: %v\n%q", err, buf.String())
+	}
+}
+
+// ART-055: Mermaid shows a backslash followed by n (or N, in an SVG label) as a line break, after
+// it decodes entity codes, so a word joiner goes between them. A newline in the text then shows
+// as \n and a backslash-n in the text as \\n, in a node name, a kind and a text alike. Other
+// escapes keep no joiner, and a word joiner in the input is escaped like any rune that
+// strconv.IsPrint rejects.
+func TestWriteHBMermaidLineBreaks(t *testing.T) {
+	tr := &Trace{
+		Header: TraceHeader{Nodes: []Node{{ID: 1, Name: "n\n1"}}},
+		Records: []kernel.Record{
+			{Seq: 1, Node: 1, Inc: 1, Kind: `k\n`, Text: "C:\\new\na"},
+			{Seq: 2, Kind: "check.violation", Text: "x\\Ny\t\\z" + wj, Cause: 1},
+		},
+	}
+	want := "flowchart TD\n    %% faultline causal slice v1: root=2 records=2 cap=200 truncated=false\n" +
+		`    n0["1 0.000000000s n\` + wj + `n1#35;1<br>k\\` + wj + `n: C:\\` + wj + `new\` + wj + `na"]` + "\n" +
+		`    n1["2 0.000000000s global<br>check.violation: x\\` + wj + `Ny\t\\z\u2060"]` + "\n" +
+		"    n0 --> n1\n" + hbDefs + "    class n1 violation\n"
+	var buf bytes.Buffer
+	if err := WriteHB(&buf, tr, 2, 200); err != nil || buf.String() != want {
+		t.Fatalf("line breaks: %v\n got: %q\nwant: %q", err, buf.String(), want)
 	}
 }
