@@ -4,6 +4,7 @@
 package faultline
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"testing"
@@ -50,12 +51,18 @@ func TestNameBaseAndDeriveSeed(t *testing.T) {
 			t.Errorf("DeriveSeed(%#x, %d) = %#016x, want %#016x", c.base, c.i, got, c.want)
 		}
 	}
-	defer func() {
-		if recover() == nil {
-			t.Error("DeriveSeed(0, -1) did not panic")
-		}
-	}()
-	DeriveSeed(0, -1)
+	// The panic names the index and the values allowed (API-015).
+	for _, i := range []int{-1, -7} {
+		want := fmt.Sprintf("faultline: DeriveSeed: negative index %d; want 0 or more", i)
+		func() {
+			defer func() {
+				if v := recover(); v != want {
+					t.Errorf("DeriveSeed(0, %d) panicked with %v, want %q", i, v, want)
+				}
+			}()
+			DeriveSeed(0, i)
+		}()
+	}
 }
 
 // AT-API-06 (a) needs DeriveSeed(1, 2).

@@ -8,6 +8,7 @@
 package faultline
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
@@ -29,7 +30,7 @@ func NameBase(testName string) uint64 {
 // It panics if i < 0.
 func DeriveSeed(base uint64, i int) uint64 {
 	if i < 0 {
-		panic("faultline: DeriveSeed: negative index")
+		panic(fmt.Sprintf("faultline: DeriveSeed: negative index %d; want 0 or more", i))
 	}
 	z := base + (uint64(i)+1)*gamma
 	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9

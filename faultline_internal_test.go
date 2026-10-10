@@ -6,6 +6,7 @@ package faultline
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hmdsefi/faultline/artifact"
@@ -78,24 +79,42 @@ func TestDefaultArtifactRoot(t *testing.T) {
 	}
 }
 
-// API-083: readReportFile opens report.json only when it is a regular file, so a symbolic link
-// is not followed; a missing report.json gives nil.
+// API-073, API-083: readReportFile opens report.json only when it is a regular file, so a symbolic
+// link is not followed and gives a reason; a missing report.json, or one out of reach, gives nil
+// and no reason.
 func TestReadReportFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a")
 	if err := artifact.Write(dir, minimalArtifact("T")); err != nil {
 		t.Fatal(err)
 	}
-	if readReportFile(dir) == nil {
-		t.Fatal("regular report.json not read")
+	if rep, err := readReportFile(dir); rep == nil || err != nil {
+		t.Fatalf("regular report.json not read: %v", err)
 	}
 	link := t.TempDir()
 	if err := os.Symlink(filepath.Join(dir, artifact.FileReport), filepath.Join(link, artifact.FileReport)); err != nil {
 		t.Fatal(err)
 	}
-	if rep := readReportFile(link); rep != nil {
-		t.Fatalf("symbolic link followed: %+v", rep)
+	if rep, err := readReportFile(link); rep != nil || err == nil || err.Error() != "not a regular file" {
+		t.Fatalf("symbolic link: %+v, %v", rep, err)
 	}
-	if rep := readReportFile(t.TempDir()); rep != nil {
-		t.Fatalf("missing report.json read: %+v", rep)
+	if rep, err := readReportFile(t.TempDir()); rep != nil || err != nil {
+		t.Fatalf("missing report.json: %+v, %v", rep, err)
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := readReportFile(filepath.Join(file, "a")); rep != nil || err != nil {
+		t.Fatalf("a path through a file: %+v, %v", rep, err)
+	}
+	// A report.json that cannot be opened gives the open error.
+	if err := os.Chmod(filepath.Join(dir, artifact.FileReport), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(filepath.Join(dir, artifact.FileReport)); err == nil {
+		t.Skip("report.json still opens without permissions (root, or a file system without them)")
+	}
+	if rep, err := readReportFile(dir); rep != nil || err == nil || !strings.HasPrefix(err.Error(), "open ") {
+		t.Fatalf("report.json without permissions: %+v, %v", rep, err)
 	}
 }

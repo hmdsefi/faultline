@@ -176,9 +176,9 @@ func (e *environment) parse(name, v string) error {
 		}
 		e.minimize = on
 	case envSwarm, envSwarmConfig:
-		return fmt.Errorf("faultline: %s is not available until Phase 3", name)
+		return fmt.Errorf("faultline: %s is not available until Phase 3; unset it", name)
 	case envExact:
-		return fmt.Errorf("faultline: %s is not available until Phase 2b", name)
+		return fmt.Errorf("faultline: %s is not available until Phase 2b; unset it", name)
 	case envSeedList:
 		list, err := parseSeedList(v)
 		if err != nil {
@@ -243,10 +243,14 @@ func parseBool(s string) (bool, bool) {
 	return false, false
 }
 
+// seedListFormat is the end of the seed-list errors (§7.1): the format a list must have.
+const seedListFormat = "want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space"
+
 // parseSeedList parses FAULTLINE_SEED_LIST (API-010): an inline list or "@file", entries
 // separated by commas and white space; duplicates are removed, first occurrence kept (API-011).
+// An error names the entry and its line, and the file of an @file list (§7.1).
 func parseSeedList(v string) ([]uint64, error) {
-	text := v
+	text, file := v, ""
 	if strings.HasPrefix(v, "@") {
 		path, err := filepath.Abs(v[1:])
 		if err != nil {
@@ -256,18 +260,25 @@ func parseSeedList(v string) ([]uint64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("faultline: FAULTLINE_SEED_LIST: %v", err)
 		}
-		text = string(data)
+		text, file = string(data), path
 	}
-	fields := strings.FieldsFunc(text, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+	fields := seedFields(text)
 	if len(fields) == 0 {
-		return nil, errors.New("faultline: FAULTLINE_SEED_LIST contains no seeds")
+		if file != "" {
+			return nil, fmt.Errorf("faultline: FAULTLINE_SEED_LIST file %s contains no seeds; %s", file, seedListFormat)
+		}
+		return nil, errors.New("faultline: FAULTLINE_SEED_LIST contains no seeds; " + seedListFormat)
 	}
 	seen := map[uint64]bool{} // lookups only
 	var list []uint64
 	for i, f := range fields {
-		s, ok := parseSeed(f)
+		s, ok := parseSeed(f.text)
 		if !ok {
-			return nil, fmt.Errorf("faultline: invalid FAULTLINE_SEED_LIST entry %d %q: want a decimal or 0x-prefixed hexadecimal uint64", i+1, f)
+			where := fmt.Sprintf("line %d", f.line)
+			if file != "" {
+				where += " of " + file
+			}
+			return nil, fmt.Errorf("faultline: invalid FAULTLINE_SEED_LIST entry %d %q on %s: %s", i+1, f.text, where, seedListFormat)
 		}
 		if !seen[s] {
 			seen[s] = true
@@ -275,6 +286,39 @@ func parseSeedList(v string) ([]uint64, error) {
 		}
 	}
 	return list, nil
+}
+
+// seedField is one entry of a seed list and the 1-based line it is on.
+type seedField struct {
+	text string
+	line int
+}
+
+// seedFields splits a seed list as strings.FieldsFunc does with commas and white space as
+// separators (API-010), and keeps the line of each field; a line ends at '\n'.
+func seedFields(text string) []seedField {
+	var fields []seedField
+	line, start := 1, -1
+	for i, r := range text {
+		if r != ',' && !unicode.IsSpace(r) {
+			if start < 0 {
+				start = i
+				fields = append(fields, seedField{line: line})
+			}
+			continue
+		}
+		if start >= 0 {
+			fields[len(fields)-1].text = text[start:i]
+			start = -1
+		}
+		if r == '\n' {
+			line++
+		}
+	}
+	if start >= 0 {
+		fields[len(fields)-1].text = text[start:]
+	}
+	return fields
 }
 
 // parseMinimize validates FAULTLINE_MINIMIZE with MIN §4.1's grammar. It returns whether the
@@ -410,7 +454,11 @@ func resolve(in resolveInput) (*plan, error) {
 			p.base, p.baseSource, label = env.baseSeed, "env", "FAULTLINE_BASE_SEED"
 		case env.explore:
 			p.base, p.baseSource, label = in.exploreBase(), "explore", "FAULTLINE_EXPLORE"
-			exploreLog = fmt.Sprintf("faultline: FAULTLINE_EXPLORE: base seed 0x%016x (rerun this set with FAULTLINE_BASE_SEED=0x%016x)", p.base, p.base)
+			rerun := fmt.Sprintf("FAULTLINE_BASE_SEED=0x%016x", p.base)
+			if env.set[envSeeds] {
+				rerun += fmt.Sprintf(" FAULTLINE_SEEDS=%d", env.seeds) // or the rerun runs the default count
+			}
+			exploreLog = fmt.Sprintf("faultline: FAULTLINE_EXPLORE: base seed 0x%016x (rerun this set with %s)", p.base, rerun)
 		case o.BaseSeed != 0:
 			p.base, p.baseSource, label = o.BaseSeed, "options", "Options.BaseSeed"
 		default:
@@ -431,6 +479,16 @@ func resolve(in resolveInput) (*plan, error) {
 	}
 	if env.schedule != nil {
 		p.logs = append(p.logs, fmt.Sprintf("faultline: FAULTLINE_SCHEDULE=%s: %d events; planners are disabled", env.schedulePath, len(env.schedule.Events)))
+	}
+	if env.traceFull && env.artifactsOff {
+		p.logs = append(p.logs, "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them")
+	}
+	// A variable never turns off what Options turned on (API-012, API-013), so say so when it tries.
+	if env.set[envCheckDeterminism] && !env.checkDeterminism && o.CheckDeterminism {
+		p.logs = append(p.logs, "faultline: FAULTLINE_CHECK_DETERMINISM=0 does not turn off Options.CheckDeterminism; the determinism check still runs (set Options.CheckDeterminism to false to turn it off)")
+	}
+	if env.set[envTrace] && !env.traceFull && o.Trace.Level == kernel.TraceFull {
+		p.logs = append(p.logs, "faultline: FAULTLINE_TRACE=hash does not lower Options.Trace.Level from kernel.TraceFull; runs still record full traces (set Options.Trace.Level to kernel.TraceHash to lower it)")
 	}
 	if env.minimize {
 		p.logs = append(p.logs, "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring")

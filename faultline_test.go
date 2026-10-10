@@ -505,7 +505,8 @@ func TestLimitRing(t *testing.T) {
 var goexitCalls = map[uint64]int{}
 
 // Scenario goexit ends each seed through Goexit as GOEXIT says: "<how>" in the primary attempt,
-// "<how>-rerun" in the artifact re-run after invariant "tick 5" failed, "<how>-check" in the
+// "<how>-rerun" in the artifact re-run after invariant "tick 5" failed, "<how>-deeprerun" in the
+// artifact re-run after a panic with a stack longer than the console's window, "<how>-check" in the
 // CheckDeterminism attempt after the primary attempt passed, "<how>-checkdiff" in that attempt when
 // it also differs from the primary attempt, "<how>-diag" in the first diagnostic attempt after a
 // CheckDeterminism mismatch, or "<how>-rediag" in the diagnostic attempt after an artifact re-run
@@ -516,7 +517,7 @@ var goexitCalls = map[uint64]int{}
 // error (w.T().Errorf in the 3rd tick, which does not stop the attempt).
 var _ = scenario("goexit", func(t *testing.T) {
 	how, where, _ := strings.Cut(os.Getenv("GOEXIT"), "-")
-	stop := map[string]int{"": 1, "rerun": 2, "check": 2, "checkdiff": 2, "diag": 3, "rediag": 3}[where] // the body call that stops
+	stop := map[string]int{"": 1, "rerun": 2, "deeprerun": 2, "check": 2, "checkdiff": 2, "diag": 3, "rediag": 3}[where] // the body call that stops
 	faultline.Run(t, faultline.Options{Seeds: 2, Duration: time.Second, CheckDeterminism: where == "check" || where == "checkdiff" || where == "diag"}, func(w *faultline.World) {
 		goexitCalls[w.Seed()]++
 		tk := addTicker(w)
@@ -530,6 +531,13 @@ var _ = scenario("goexit", func(t *testing.T) {
 		}
 		if where == "checkdiff" || where == "diag" || where == "rediag" {
 			w.Logf("call %d", goexitCalls[w.Seed()])
+		}
+		if where == "deeprerun" && goexitCalls[w.Seed()] == 1 {
+			tk.onTick = func(n *kernel.Node, c int) {
+				if c == 3 {
+					panicDeep(30)
+				}
+			}
 		}
 		if goexitCalls[w.Seed()] != stop {
 			return
@@ -582,7 +590,7 @@ var _ = scenario("goexit", func(t *testing.T) {
 func TestGoexitOutcomes(t *testing.T) {
 	s0 := fmt.Sprintf("0x%016x", seedK(0))
 	stopped := "stopped by t.FailNow, t.Fatal or t.SkipNow"
-	misuse := "faultline: World.RunFor: negative duration -1s"
+	misuse := "faultline: World.RunFor: negative duration -1s; want 0 or more"
 	fatal, skip, setup := "t.FailNow or t.Fatal", "t.SkipNow or t.Skip", "a setup error"
 	tick3, early := " at t=0.030000000s (event 4)", " before its first event"
 	replay := "replay:    FAULTLINE_SEED=" + s0 + " go test -v"
@@ -591,35 +599,40 @@ func TestGoexitOutcomes(t *testing.T) {
 		return []string{"faultline: seed " + s0 + " stopped by " + how + tick3 + "; no artifacts were written",
 			"  report failures with an Invariant, a Final check or w.Sim.Fail(err) to get a replayable report", replay}
 	}
-	// later is the seed's failure, then API-072's note.
+	// later is the seed's failure, then API-072's note after a stop in the artifact re-run.
 	later := func(attempt, stop string, failure ...string) []string {
 		return append(failure, "faultline: the "+attempt+" of seed "+s0+" stopped by "+stop+"; no artifacts were written",
-			"  the first run did not stop, so the test depends on something outside the seed; the failure above is the seed's outcome", replay)
+			"  the first run did not stop this way, so the test depends on something outside the seed; the failure above is the seed's outcome", replay)
 	}
-	// marked is the determinism failure of t.Errorf in the check attempt, then API-072's note.
-	marked := "marked the test failed (t.Error, t.Errorf or t.Fail) at t=1.000000000s"
-	markedCheck := []string{"faultline: determinism failure at t=1.000000000s",
-		"  the determinism check " + marked + "; the first run passed with trace hash HASH",
-		"  common causes: state kept between runs in the same process (package-level variables, sync.Once, caches), map iteration order, global math/rand, wall-clock time, goroutines",
-		"faultline: the determinism check of seed " + s0 + " " + marked + "; no artifacts were written",
-		"  the first run did not mark the test failed, so the test depends on something outside the seed; the failure above is the seed's outcome", replay}
-	tick5 := []string{`faultline: invariant "tick 5" violated at t=0.050000000s (event 6)`, "  five"}
 	causes := "  common causes: state kept between runs in the same process (package-level variables, sync.Once, caches), map iteration order, global math/rand, wall-clock time, goroutines"
+	next := "  next step: fix the cause; until the seed gives the same run every time, the replay command may not reproduce this failure"
+	// determinism is a determinism failure, whose message holds the stop, then API-072's short note.
+	determinism := func(failure ...string) []string {
+		return append(failure, causes, next, "faultline: no artifacts were written for seed "+s0, replay)
+	}
+	// markedCheck is the determinism failure of t.Errorf in the check attempt (AT-API-49).
+	markedCheck := determinism("faultline: determinism failure at t=1.000000000s",
+		"  the determinism check marked the test failed (t.Error, t.Errorf or t.Fail) by t=1.000000000s; the first run passed with trace hash HASH")
+	tick5 := []string{`faultline: invariant "tick 5" violated at t=0.050000000s (event 6)`, "  five"}
+	// deep is a panic whose stack is longer than the console's window: STACK stands for the window
+	// and its truncation line, which does not say that report.txt holds the rest, because the
+	// artifact re-run wrote no artifacts. The goroutine number, paths and offsets differ per run.
+	deep := []string{"faultline: panic at t=0.030000000s on n1 (event 4)", "  deep", "stack:", "STACK"}
 	// check is the determinism failure of a stop in the check attempt, diag that of a stop in a
 	// diagnostic attempt after a CheckDeterminism mismatch, and rediag after an artifact re-run
-	// mismatch. HASH stands for any trace hash.
+	// mismatch, which keeps the first run's message. HASH stands for any trace hash.
 	check := func(stop, at string) []string {
-		return later("determinism check", stop, "faultline: determinism failure at t="+at,
-			"  the determinism check stopped by "+stop+"; the first run passed with trace hash HASH", causes)
+		return determinism("faultline: determinism failure at t="+at,
+			"  the determinism check stopped by "+stop+"; the first run passed with trace hash HASH")
 	}
 	diag := func(stop string) []string {
-		return later("diagnostic re-run", stop, "faultline: determinism failure: two runs of seed "+s0+" gave trace hashes HASH and HASH",
-			"  the diagnostic re-run stopped by "+stop+", so the first differing record was not found", causes)
+		return determinism("faultline: determinism failure: two runs of seed "+s0+" gave trace hashes HASH and HASH",
+			"  the diagnostic re-run stopped by "+stop+", so the first differing record was not found")
 	}
 	rediag := func(stop string) []string {
-		return later("diagnostic re-run", stop, "faultline: determinism failure: re-running seed "+s0+" gave trace hash HASH; the first run gave HASH",
-			"  the first run failed: "+tick5[0][len("faultline: "):],
-			"  the diagnostic re-run stopped by "+stop+", so the first differing record was not found", causes)
+		return determinism("faultline: determinism failure: re-running seed "+s0+" gave trace hash HASH; the first run gave HASH",
+			"  the first run failed: "+tick5[0][len("faultline: "):], "    five",
+			"  the diagnostic re-run stopped by "+stop+", so the first differing record was not found")
 	}
 	cases := []struct {
 		goexit         string
@@ -639,6 +652,7 @@ func TestGoexitOutcomes(t *testing.T) {
 		{"setup-rerun", 1, 1, "fail", "invariant:tick 5", "five", 5e7, later("artifact re-run", setup+early, tick5...), true},
 		{"body-rerun", 1, 1, "fail", "invariant:tick 5", "five", 5e7, later("artifact re-run", fatal+early, tick5...), true},
 		{"tick-rerun", 1, 1, "fail", "invariant:tick 5", "five", 5e7, later("artifact re-run", fatal+tick3, tick5...), true},
+		{"body-deeprerun", 1, 1, "fail", "panic:github.com/hmdsefi/faultline_test.panicDeep", "deep", 3e7, later("artifact re-run", fatal+early, deep...), true},
 		{"tickskip-rerun", 1, 1, "fail", "invariant:tick 5", "five", 5e7, later("artifact re-run", skip+tick3, tick5...), true},
 		{"skip-check", 1, 1, "fail", "determinism:", anyValue{}, 0.0, check(skip+early, "0.000000000s"), true},
 		{"setup-check", 1, 1, "fail", "determinism:", anyValue{}, 0.0, check(setup+early, "0.000000000s"), true},
@@ -654,6 +668,7 @@ func TestGoexitOutcomes(t *testing.T) {
 		note := strings.Contains(o, "no artifacts were written")
 		verdict := fmt.Sprintf("--- %s: TestScenario/seed=%s (", strings.ToUpper(c.status), s0)
 		console := strings.ReplaceAll(regexp.QuoteMeta(strings.Join(c.console, "\n    ")), "HASH", "0x[0-9a-f]{16}")
+		console = strings.ReplaceAll(console, "STACK", `(?:  [^\n]*\n    )*  \.\.\. [0-9]+ more lines`)
 		if code != c.code || len(lines) != c.lines || note != (c.console != nil) || !regexp.MustCompile(console).MatchString(o) || !strings.Contains(o, verdict) {
 			t.Errorf("%s: exit %d, %d results lines, note %v; want %d, %d, these lines and %q:\n%s\n\n%s", c.goexit, code, len(lines), note, c.code, c.lines, strings.Join(c.console, "\n"), verdict, o)
 			continue
@@ -671,6 +686,10 @@ func TestGoexitOutcomes(t *testing.T) {
 		}
 		if _, err := os.Stat(seedDir(root, seedK(0))); !os.IsNotExist(err) {
 			t.Errorf("%s: artifacts written", c.goexit)
+		}
+		// A setup error prints on the seed subtest without a file:line prefix (§7.1).
+		if strings.HasPrefix(c.goexit, "setup") && !strings.Contains(o, "\n    "+misuse+"\n") {
+			t.Errorf("%s: no line %q indented by testing alone\n%s", c.goexit, misuse, o)
 		}
 	}
 }
@@ -796,8 +815,9 @@ var _ = scenario("deep-panic", func(t *testing.T) {
 	})
 })
 
-// API-075, API-076: the console prints the first 40 stack lines and counts the rest; report.txt
-// has the whole stack.
+// AT-API-51; API-075, API-076: the console prints a window of the stack that starts at the
+// goroutine line and the panicking function's frame, holds whole frames, at most 40 lines, and
+// counts the lines after it; report.txt has the whole stack.
 func TestStackTruncation(t *testing.T) {
 	root := t.TempDir()
 	o, code := runScenario(t, "deep-panic", []string{"FAULTLINE_ARTIFACTS=" + root})
@@ -812,10 +832,43 @@ func TestStackTruncation(t *testing.T) {
 		t.Fatalf("failure %+v", a.Report.Failure)
 	}
 	stack := strings.Split(strings.TrimSuffix(a.Report.Failure.Panic.Stack, "\n"), "\n")
-	if len(stack) <= 40 {
-		t.Fatalf("the stack has %d lines; the test needs more than 40", len(stack))
+	// first is the panicking function's frame: the first frame after the last panic( line.
+	first := -1
+	for i, l := range stack {
+		if strings.HasPrefix(l, "panic(") {
+			first = i + 2
+		}
 	}
-	mustContainInOrder(t, o, "stack:\n", "  "+stack[39]+"\n", fmt.Sprintf("  ... %d more lines (full stack in report.txt)\n", len(stack)-40), "replay:    ")
+	if first < 0 || first >= len(stack) || !strings.HasPrefix(stack[first], "github.com/hmdsefi/faultline_test.panicDeep(") || len(stack)-first <= 40 {
+		t.Fatalf("the test needs a panicDeep frame after the panic and more than 40 lines after it:\n%s", strings.Join(stack, "\n"))
+	}
+	// shown holds the console's stack lines, without the indentation.
+	_, after, _ := strings.Cut(o, "    stack:\n")
+	var shown []string
+	more := ""
+	for _, l := range strings.Split(after, "\n") {
+		l, ok := strings.CutPrefix(l, "      ")
+		if !ok {
+			break
+		}
+		if strings.HasPrefix(l, "... ") {
+			more = l
+			break
+		}
+		shown = append(shown, l)
+	}
+	end := first + len(shown) - 1 // the index after the window in stack
+	if len(shown) < 2 || len(shown) > 40 || shown[0] != stack[0] || !strings.HasPrefix(shown[0], "goroutine ") ||
+		!slices.Equal(shown[1:], stack[first:end]) || !strings.HasPrefix(shown[len(shown)-1], "\t") {
+		t.Fatalf("console stack window:\n%s\nfull stack:\n%s", strings.Join(shown, "\n"), strings.Join(stack, "\n"))
+	}
+	// The window ends before a frame (a function line and its file line) that would not fit.
+	if !strings.HasPrefix(stack[end], "github.com/") || !strings.HasPrefix(stack[end+1], "\t") || len(shown)+2 <= 40 {
+		t.Fatalf("the window of %d lines stopped at %q", len(shown), stack[end])
+	}
+	if want := fmt.Sprintf("... %d more lines (full stack in report.txt)", len(stack)-end); more != want {
+		t.Fatalf("truncation line %q, want %q", more, want)
+	}
 	var full strings.Builder
 	for _, l := range stack {
 		full.WriteString("      " + l + "\n")

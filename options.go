@@ -151,22 +151,23 @@ func validateOptions(o Options) error {
 	case o.Mode == ModeGoroutine:
 		return fmt.Errorf("faultline: Options.Mode is ModeGoroutine, which this version of faultline does not support (goroutine mode arrives in Phase 2)")
 	case o.Mode != ModeEvent:
-		return fmt.Errorf("faultline: unknown Options.Mode %d", o.Mode)
+		return fmt.Errorf("faultline: unknown Options.Mode %d; want ModeEvent (the zero value)", o.Mode)
 	}
 	later := []struct {
 		name  string
 		set   bool
 		phase string
+		zero  string // the value to use until the phase ships
 	}{
-		{"Options.Procs", o.Procs != 0, "2"},
-		{"Options.Drain", o.Drain != 0, "2"},
-		{"Options.StallTimeout", o.StallTimeout != 0, "2"},
-		{"Options.FailOnLeak", o.FailOnLeak, "2"},
-		{"Options.Swarm", o.Swarm, "3"},
+		{"Options.Procs", o.Procs != 0, "2", "0"},
+		{"Options.Drain", o.Drain != 0, "2", "0"},
+		{"Options.StallTimeout", o.StallTimeout != 0, "2", "0"},
+		{"Options.FailOnLeak", o.FailOnLeak, "2", "false"},
+		{"Options.Swarm", o.Swarm, "3", "false"},
 	}
 	for _, l := range later {
 		if l.set {
-			return fmt.Errorf("faultline: %s is not available until Phase %s", l.name, l.phase)
+			return fmt.Errorf("faultline: %s is not available until Phase %s; want %s", l.name, l.phase, l.zero)
 		}
 	}
 	return nil

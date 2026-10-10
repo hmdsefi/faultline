@@ -164,7 +164,8 @@ export function failurePanel(doc, data, model, onSelect) {
   if (f) {
     const kids = [];
     if (f.message) {
-      kids.push(h(doc, "div", { class: "fl-well" }, h(doc, "pre", { translate: "no", text: f.message })));
+      // A long message scrolls inside the well, so Tab reaches it and the keys scroll it (ART-079 item 8).
+      kids.push(h(doc, "div", { class: "fl-well", tabindex: "0", role: "region", "aria-label": "Failure message" }, h(doc, "pre", { translate: "no", text: f.message })));
     }
     const record = f.record_seq ? (model ? seqLink(doc, model, f.record_seq, onSelect) : "#" + f.record_seq + " (not in this view)") : null;
     kids.push(stats(doc, [

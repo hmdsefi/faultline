@@ -234,7 +234,7 @@ func TestAttemptSetupErrors(t *testing.T) {
 		want   string
 		prefix bool // the message goes on with a stack or a kernel error
 	}{
-		{"misuse in body", Options{}, func(w *World) { unitTicker(w, nil); w.RunFor(-1) }, "faultline: World.RunFor: negative duration -1ns", false},
+		{"misuse in body", Options{}, func(w *World) { unitTicker(w, nil); w.RunFor(-1) }, "faultline: World.RunFor: negative duration -1ns; want 0 or more", false},
 		{"panic before the first event", Options{}, func(w *World) { unitTicker(w, nil); panic("boom") },
 			"faultline: body panicked during setup (before the first event) for seed 0x0000000000000001: boom\ngoroutine ", true},
 		{"Step, then RunFor", Options{}, func(w *World) { unitTicker(w, nil); w.Sim.Step(); w.RunFor(time.Millisecond) }, advanced, false},
@@ -250,7 +250,7 @@ func TestAttemptSetupErrors(t *testing.T) {
 		{"disk construction", Options{Disk: simdisk.Config{SectorSize: -1}}, func(w *World) {},
 			"faultline: world construction for seed 0x0000000000000001: simdisk: New: ", true},
 		{"misuse in a planner's Start", Options{}, func(w *World) { w.Plan(funcPlanner{"m", func(*fault.PlanContext) { w.Rand("") }}) },
-			"faultline: World.Rand: empty label", false},
+			`faultline: World.Rand: empty label; pass a non-empty label such as "load"`, false},
 	}
 	for _, c := range cases {
 		c.opts.Seeds, c.opts.Duration = 1, time.Second
@@ -916,27 +916,27 @@ func TestWorldMisuseInBody(t *testing.T) {
 	sel := func() []kernel.NodeID { return nil }
 	const quiet = "; want 0 (default Duration/4) or a positive duration shorter than Options.Duration (1s)"
 	r := unitRunner(t, Options{Seeds: 1, Duration: time.Second}, func(w *World) {
-		expectMisuse(t, "faultline: World.Invariant: empty name", func() { w.Invariant("", ok) })
-		expectMisuse(t, "faultline: World.Final: empty name", func() { w.Final("", ok) })
-		expectMisuse(t, "faultline: World.Role: empty name", func() { w.Role("", sel) })
-		expectMisuse(t, `faultline: World.Invariant "a": nil function`, func() { w.Invariant("a", nil) })
-		expectMisuse(t, `faultline: World.Final "a": nil function`, func() { w.Final("a", nil) })
-		expectMisuse(t, `faultline: World.Role "a": nil function`, func() { w.Role("a", nil) })
+		expectMisuse(t, "faultline: World.Invariant: empty name; the name identifies the check in failure reports", func() { w.Invariant("", ok) })
+		expectMisuse(t, "faultline: World.Final: empty name; the name identifies the check in failure reports", func() { w.Final("", ok) })
+		expectMisuse(t, "faultline: World.Role: empty name; planners target a role by its name", func() { w.Role("", sel) })
+		expectMisuse(t, `faultline: World.Invariant "a": nil function; pass the check to run after every event`, func() { w.Invariant("a", nil) })
+		expectMisuse(t, `faultline: World.Final "a": nil function; pass the check to run when the run ends`, func() { w.Final("a", nil) })
+		expectMisuse(t, `faultline: World.Role "a": nil function; pass a function that returns the role's nodes`, func() { w.Role("a", nil) })
 		w.Invariant("a", ok)
 		w.Final("a", ok) // invariant and final names are separate namespaces
 		w.Role("a", sel)
-		expectMisuse(t, `faultline: World.Invariant: duplicate name "a"`, func() { w.Invariant("a", ok) })
-		expectMisuse(t, `faultline: World.Final: duplicate name "a"`, func() { w.Final("a", ok) })
-		expectMisuse(t, `faultline: World.Role: duplicate name "a"`, func() { w.Role("a", sel) })
-		expectMisuse(t, "faultline: World.Plan: nil planner", func() { w.Plan(nil) })
+		expectMisuse(t, `faultline: World.Invariant: duplicate name "a"; give each one a distinct name`, func() { w.Invariant("a", ok) })
+		expectMisuse(t, `faultline: World.Final: duplicate name "a"; give each one a distinct name`, func() { w.Final("a", ok) })
+		expectMisuse(t, `faultline: World.Role: duplicate name "a"; give each one a distinct name`, func() { w.Role("a", sel) })
+		expectMisuse(t, "faultline: World.Plan: nil planner; pass a non-nil fault.Planner", func() { w.Plan(nil) })
 		expectMisuse(t, "faultline: World.Plan: fault.Random.Quiet is 1s"+quiet, func() { w.Plan(&fault.Random{Quiet: time.Second}) })
 		expectMisuse(t, "faultline: World.Plan: fault.Random.Quiet is -1ns"+quiet, func() { w.Plan(&fault.Random{Quiet: -1}) })
 		w.Plan(&fault.Random{Quiet: time.Second - 1})
-		expectMisuse(t, "faultline: World.Rand: empty label", func() { w.Rand("") })
+		expectMisuse(t, `faultline: World.Rand: empty label; pass a non-empty label such as "load"`, func() { w.Rand("") })
 		if w.Rand("load") != w.Sim.Rand("workload/load") {
 			t.Error("Rand stream")
 		}
-		expectMisuse(t, "faultline: World.RunFor: negative duration -1ns", func() { w.RunFor(-1) })
+		expectMisuse(t, "faultline: World.RunFor: negative duration -1ns; want 0 or more", func() { w.RunFor(-1) })
 		expectMisuse(t, "faultline: World.RunFor(2s) at t=0.000000000s would run past the end of the run (1.000000000s); raise Options.Duration", func() { w.RunFor(2 * time.Second) })
 		w.RunFor(time.Second)
 		expectMisuse(t, "faultline: World.RunFor(1ns) at t=1.000000000s would run past the end of the run (1.000000000s); raise Options.Duration", func() { w.RunFor(1) })
@@ -964,13 +964,13 @@ func TestWorldMisuseInFinal(t *testing.T) {
 		t.Fatal("passed")
 	}
 	want := []string{
-		"faultline: World.Invariant called after the run ended",
-		"faultline: World.Final called after the run ended",
-		"faultline: World.Role called after the run ended",
-		"faultline: World.Plan called after the run ended",
-		"faultline: World.AddServer called after the run ended",
-		"faultline: World.AddClient called after the run ended",
-		"faultline: World.RunFor called after body returned",
+		"faultline: World.Invariant called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.Final called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.Role called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.Plan called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.AddServer called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.AddClient called after the run ended; call it from body or from a callback during the run",
+		"faultline: World.RunFor called after body returned; call it only from body (final checks cannot advance virtual time)",
 	}
 	var got []string
 	for _, f := range res.fail.finals {
@@ -984,7 +984,7 @@ func TestWorldMisuseInFinal(t *testing.T) {
 // API-041 step 1: RunFor from a callback or an invariant panics with "called from inside the
 // simulation", in body's RunFor and in the post-body drive; the check comes before the phase check.
 func TestWorldRunForInsideLoop(t *testing.T) {
-	const want = "faultline: World.RunFor called from inside the simulation (a callback, invariant or final check)"
+	const want = "faultline: World.RunFor called from inside the simulation (a callback or an invariant); schedule later work with Node.After instead"
 	for _, inBody := range []bool{false, true} {
 		r := unitRunner(t, Options{Seeds: 1, Duration: time.Second}, func(w *World) {
 			unitTicker(w, func(n *kernel.Node, c int) {
@@ -1044,10 +1044,10 @@ func TestWorldMisuseAfterRun(t *testing.T) {
 			t.Errorf("%s: outcome %q, r.cur is the attempt's World: %v", c.name, outcome, r.cur == saved)
 		}
 		executed := saved.Sim.Executed()
-		expectMisuse(t, "faultline: World.Invariant called after the run ended", func() { saved.Invariant("x", func() error { return nil }) })
-		expectMisuse(t, "faultline: World.AddServer called after the run ended", func() { saved.AddServer("z", func(*kernel.Node) {}) })
-		expectMisuse(t, "faultline: World.AddClient called after the run ended", func() { saved.AddClient("y", func(*kernel.Node) {}) })
-		expectMisuse(t, "faultline: World.RunFor called after body returned", func() { saved.RunFor(time.Second) })
+		expectMisuse(t, "faultline: World.Invariant called after the run ended; call it from body or from a callback during the run", func() { saved.Invariant("x", func() error { return nil }) })
+		expectMisuse(t, "faultline: World.AddServer called after the run ended; call it from body or from a callback during the run", func() { saved.AddServer("z", func(*kernel.Node) {}) })
+		expectMisuse(t, "faultline: World.AddClient called after the run ended; call it from body or from a callback during the run", func() { saved.AddClient("y", func(*kernel.Node) {}) })
+		expectMisuse(t, "faultline: World.RunFor called after body returned; call it only from body (final checks cannot advance virtual time)", func() { saved.RunFor(time.Second) })
 		if saved.Sim.Executed() != executed {
 			t.Errorf("%s: the World ran %d more events after the attempt", c.name, saved.Sim.Executed()-executed)
 		}

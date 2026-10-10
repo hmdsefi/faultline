@@ -68,6 +68,9 @@ test("header, title row and side panels of a failing run (ART-079 item 1)", () =
   assert.equal(byClass(byClass(root, "fl-tl-head")[0], "fl-count")[0].textContent, "3 lanes, 12 records");
   const failure = findAll(root, (e) => e.getAttribute("aria-label") === "Failure")[0];
   assert.equal(byTag(failure, "pre")[0].textContent, "got ping");
+  // The message well scrolls on its own when the message is long, so Tab reaches it (ART-079 item 8).
+  const well = byClass(failure, "fl-well")[0];
+  assert.deepEqual(["tabindex", "role", "aria-label"].map((a) => well.getAttribute(a)), ["0", "region", "Failure message"]);
   assert.deepEqual(texts(byTag(failure, "dt")), ["Check", "Kind", "Time", "Node", "Event", "Record"]);
   assert.equal(byTag(failure, "dd")[5].textContent, "#12 check.violation");
   assert.equal(byClass(failure, "fl-hint")[0].textContent, "The failure record #12 is on the global lane. n2 ran event 4, the last event before it, so n2's lane carries a star too.");

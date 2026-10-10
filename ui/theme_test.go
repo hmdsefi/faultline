@@ -245,10 +245,11 @@ func TestThemeCSSTokens(t *testing.T) {
 // designRules are declarations of the approved design that a spec requirement depends on: the focus
 // ring and the scroller padding that keeps it whole (UI-175, UI-193), 24 px and larger targets
 // (UI-175), the stage's 520 px height and its column that never outgrows it, the cards under the
-// stage, side by side while each gets 380 px, the side column beside both with the Inspector
-// filling it, and the 760 px breakpoint (ART-079 items 8, 12 and 13), the side width of 304 px,
-// 280 px under 1180 px (UI-195: the approved design, design-system.md), no filter layer on solid
-// glass (UI-193) and no motion (UI-181).
+// stage, side by side while each gets 380 px, the side column beside both with Faults capped at
+// 40 % and the Inspector filling it, the Failure message well that scrolls past min(40vh, 18em)
+// except on narrow screens, and the 760 px breakpoint (ART-079 items 8, 12 and 13), the side width
+// of 304 px, 280 px under 1180 px (UI-195: the approved design, design-system.md), no filter layer
+// on solid glass (UI-193) and no motion (UI-181).
 var designRules = []struct{ at, selector, decl string }{
 	{"", ".fl-run :focus-visible", "outline: 2px solid var(--fl-focus)"},
 	{"", ".fl-run :focus-visible", "outline-offset: 2px"},
@@ -267,6 +268,10 @@ var designRules = []struct{ at, selector, decl string }{
 	{"", ".fl-run .fl-stage", "grid-template: minmax(0, 1fr) auto / minmax(0, 1fr)"},
 	{"", ".fl-run .fl-side", "height: 0"},
 	{"", ".fl-run .fl-side", "min-height: 100%"},
+	{"", ".fl-run .fl-side", "grid-template-rows: max-content fit-content(40%) minmax(0, 1fr)"},
+	{"", ".fl-run .fl-side > .fl-panel:first-child > .fl-well", "max-height: min(40vh, 18em)"},
+	{"", ".fl-run .fl-side > .fl-panel:first-child > .fl-well", "overflow: auto"},
+	{"", ".fl-run .fl-side > .fl-panel:first-child > .fl-well", "overscroll-behavior: contain"},
 	{"", ".fl-run", "--fl-side-w: 304px"},
 	{"@media (max-width: 1180px)", ".fl-run", "--fl-side-w: 280px"},
 	{"", ".fl-run .fl-body", `grid-template: "stage side" auto "cards side" auto / minmax(0, 1fr) var(--fl-side-w)`},
@@ -276,6 +281,8 @@ var designRules = []struct{ at, selector, decl string }{
 	{"@media (max-width: 760px)", ".fl-run .fl-stage", "display: flex"},
 	{"@media (max-width: 760px)", ".fl-run .fl-stage", "flex-direction: column"},
 	{"@media (max-width: 760px)", ".fl-run .fl-side", "grid-template-rows: none"},
+	{"@media (max-width: 760px)", ".fl-run .fl-side > .fl-panel:first-child > .fl-well", "max-height: none"},
+	{"@media (max-width: 760px)", ".fl-run .fl-side > .fl-panel:first-child > .fl-well", "overflow: hidden"},
 	{"@media (prefers-reduced-motion: reduce)", ".fl-run *, .fl-run ::before, .fl-run ::after", "transition: none !important"},
 }
 

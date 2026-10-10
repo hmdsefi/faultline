@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -151,6 +153,30 @@ func TestRunArtifactCollision(t *testing.T) {
 // recorded it: it sets versions.faultline and options_hash to the values that are not empty.
 func editReport(t *testing.T, dir, faultlineVersion, optionsHash string) {
 	t.Helper()
+	editReportJSON(t, dir, func(m map[string]any) {
+		vers := object(t, m, "versions")
+		if faultlineVersion != "" {
+			vers["faultline"] = faultlineVersion
+		}
+		if optionsHash != "" {
+			m["options_hash"] = optionsHash
+		}
+	})
+}
+
+// object returns the JSON object under key in m.
+func object(t *testing.T, m map[string]any, key string) map[string]any {
+	t.Helper()
+	o, ok := m[key].(map[string]any)
+	if !ok {
+		t.Fatalf("report.json %s is %v, not an object", key, m[key])
+	}
+	return o
+}
+
+// editReportJSON rewrites report.json in dir with edit applied to its JSON object.
+func editReportJSON(t *testing.T, dir string, edit func(m map[string]any)) {
+	t.Helper()
 	path := filepath.Join(dir, "report.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -160,16 +186,7 @@ func editReport(t *testing.T, dir, faultlineVersion, optionsHash string) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	vers, ok := m["versions"].(map[string]any)
-	if !ok {
-		t.Fatalf("versions %v", m["versions"])
-	}
-	if faultlineVersion != "" {
-		vers["faultline"] = faultlineVersion
-	}
-	if optionsHash != "" {
-		m["options_hash"] = optionsHash
-	}
+	edit(m)
 	b, _ = json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
@@ -192,6 +209,19 @@ func TestRunReplayWarnings(t *testing.T) {
 	rep := readReport(t, seedDir(root, 1))
 	if len(rep.Warnings) != 2 {
 		t.Fatalf("warnings %q", rep.Warnings)
+	}
+
+	// API-083: the options warning names the option that changed, and text from the old
+	// report.json that holds a control character is quoted.
+	editReportJSON(t, seedDir(root, 1), func(m map[string]any) {
+		object(t, m, "options")["max_events"] = 5
+		m["options_hash"] = "0x0000000000000000"
+		object(t, m, "versions")["faultline"] = "v1\x1b[2J"
+	})
+	o, code = runScenario(t, "fails-for-0x1", env)
+	if code != 1 || !strings.Contains(o, "\n    warning: previous artifact was recorded with faultline \"v1\\x1b[2J\"; this run uses ") ||
+		!strings.Contains(o, "\n    warning: options differ from the previous artifact: Options.MaxEvents was 5, now 10000000 (options hash 0x0000000000000000, now 0x") || strings.Contains(o, "\x1b") {
+		t.Fatalf("third run: exit %d\n%s", code, o)
 	}
 }
 
@@ -253,6 +283,7 @@ func TestRunKeptWithoutFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(m, "failure")
+	object(t, m, "versions")["faultline"] = "v0.0.0-test" // a difference whose warning the note leaves out
 	if b, err = json.MarshalIndent(m, "", "  "); err != nil {
 		t.Fatal(err)
 	}
@@ -270,6 +301,127 @@ func TestRunKeptWithoutFailure(t *testing.T) {
 	if rep := readReport(t, dir); rep.Status != "fail" {
 		t.Fatalf("the failing artifact was replaced: %+v", rep)
 	}
+}
+
+// AT-API-52; API-073: under FAULTLINE_TRACE=full a pass artifact replaces only a pass artifact, in
+// a plain run and in a replay. A failing report, or a report.json this version cannot read, keeps
+// its directory unchanged, and the seed's whole output is one line that says why.
+func TestRunPassKeepsArtifacts(t *testing.T) {
+	// escKeyReport is a hand-made report.json whose decoding error names a map key that holds an
+	// ESC byte. Only Go 1.27 and later put map keys in that error: on Go 1.26 the reason holds no
+	// control character and the line prints it as it is.
+	const escKeyReport = `{"faultline_report": 1, "replay": {"env": {"\u001b[2J": 1}}}`
+	const pkg = "github.com/hmdsefi/faultline"
+	seed := fmt.Sprintf("0x%016x", seedK(0)) // pingpong-full's one seed
+	writeReport := func(content string) func(t *testing.T, dir string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "report.json"), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// ownStatus is a report of this test and seed whose status is the JSON value status.
+	ownStatus := func(status string) func(t *testing.T, dir string) {
+		return writeReport(`{"faultline_report": 1, "package": "` + pkg + `", "test": "TestScenario", "seed": "` + seed + `", "status": ` + status + `}`)
+	}
+	cases := []struct {
+		name   string
+		setup  func(t *testing.T, dir string)
+		why    string // "" for a failing report
+		replay bool
+	}{
+		{"failing report", func(t *testing.T, dir string) {
+			t.Helper()
+			a := &artifact.Artifact{
+				Report: artifact.Report{Package: pkg, Test: "TestScenario", Seed: seed, Status: "fail", Failure: &artifact.Failure{Kind: "invariant", Check: "x", Signature: "invariant:x"}},
+				Trace:  &artifact.Trace{},
+			}
+			if err := artifact.Write(dir, a); err != nil {
+				t.Fatal(err)
+			}
+		}, "", false},
+		{"newer report version", writeReport(`{"faultline_report": 99}`), "version 99 is newer than this faultline supports (1); upgrade faultline", false},
+		{"newer report version, replay", writeReport(`{"faultline_report": 99}`), "version 99 is newer than this faultline supports (1); upgrade faultline", true},
+		{"not a report", writeReport("{not json"), "not a faultline report", false},
+		{"damaged report", writeReport(`{"faultline_report": 1, "status": 5}`), "json: cannot unmarshal number into Go struct field Report.status of type string", true},
+		{"unknown status", ownStatus(`"ok\u001b"`), `status "ok\x1b" is neither pass nor fail`, false},
+		{"empty status", ownStatus(`""`), `status "" is neither pass nor fail`, false},
+		{"status in capitals", ownStatus(`"PASS"`), `status "PASS" is neither pass nor fail`, false},
+		{"control character in the reason", writeReport(escKeyReport), readReason(t, escKeyReport), false},
+		{"control character in the reason, replay", writeReport(escKeyReport), readReason(t, escKeyReport), true},
+		{"not a regular file", func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.MkdirAll(filepath.Join(dir, "report.json"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file", false},
+	}
+	for _, c := range cases {
+		root := t.TempDir()
+		dir := seedDir(root, seedK(0))
+		c.setup(t, dir)
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("kept"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		before := dirFiles(t, dir)
+		env := []string{"FAULTLINE_TRACE=full", "FAULTLINE_ARTIFACTS=" + root}
+		if c.replay {
+			env = append(env, "FAULTLINE_SEED="+seed)
+		}
+		o, code, lines := runResults(t, "pingpong-full", env...)
+		note := "faultline: seed " + seed + " passed; kept the failing artifact at " + dir + string(os.PathSeparator) + ", which recorded invariant:x"
+		if c.why != "" {
+			note = "faultline: seed " + seed + " passed; kept the artifact at " + dir + string(os.PathSeparator) + ", whose report.json could not be read: " + c.why
+		}
+		out := regexp.MustCompile(`\n=== RUN   TestScenario/seed=` + seed + `\n    ` + regexp.QuoteMeta(note) + `\n(?:---|===) `)
+		if code != 0 || !out.MatchString(o) || len(lines) != 1 || lines[0]["status"] != "pass" || lines[0]["artifact"] != nil || strings.Contains(o, "\x1b") {
+			t.Errorf("%s: exit %d, results %v\n%s", c.name, code, lines, o)
+			continue
+		}
+		if after := dirFiles(t, dir); !maps.Equal(after, before) {
+			t.Errorf("%s: the directory changed:\n%q\nwant\n%q", c.name, after, before)
+		}
+	}
+}
+
+// readReason is the reason that the kept line of API-073 gives for a report.json that
+// artifact.ReadReport rejects: its error without the prefix, in quotes when it holds a character
+// that is not printable (API-083).
+func readReason(t *testing.T, report string) string {
+	t.Helper()
+	_, err := artifact.ReadReport(strings.NewReader(report))
+	if err == nil {
+		t.Fatalf("ReadReport accepted %q", report)
+	}
+	reason := strings.TrimPrefix(err.Error(), "artifact: report.json: ")
+	if strings.IndexFunc(reason, func(r rune) bool { return !strconv.IsPrint(r) }) >= 0 {
+		return strconv.Quote(reason)
+	}
+	return reason
+}
+
+// dirFiles returns the regular files under dir by their slash-separated path relative to dir,
+// with their content.
+func dirFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	fsys := os.DirFS(dir)
+	files := map[string]string{}
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(fsys, path)
+		files[path] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 // API-083: which previous report a run compares with, and the pass note.
@@ -319,6 +471,23 @@ func TestRunPreviousReport(t *testing.T) {
 	}
 	if rep := readReport(t, passDir); rep.Status != "pass" || rep.Versions.Faultline == "v0.0.0-test" {
 		t.Fatalf("the pass artifact was not replaced: %+v", rep)
+	}
+
+	// The note quotes a signature that holds a control character. Without the failing report's
+	// failure object, a plain replay prints no note (API-083).
+	root = t.TempDir()
+	dir = seedDir(root, 1)
+	env = []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
+	noWarning("first run", env)
+	editReportJSON(t, dir, func(m map[string]any) { object(t, m, "failure")["signature"] = "invariant:x\x1b[2J" })
+	o, code = runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+	if note := "\n    " + keptNote(dir, `"invariant:x\x1b[2J"`) + "\n"; code != 0 || !strings.Contains(o, note) {
+		t.Fatalf("quoted signature: exit %d\n%s", code, o)
+	}
+	editReportJSON(t, dir, func(m map[string]any) { delete(m, "failure") })
+	o, code = runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+	if code != 0 || strings.Contains(o, "passed; kept the failing artifact") {
+		t.Fatalf("no failure object: exit %d\n%s", code, o)
 	}
 
 	// A missing Dir report is skipped: the AltDir report counts only after another test's report.

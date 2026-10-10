@@ -69,6 +69,10 @@ type determinism struct {
 	diff     *recordDiff
 	same     uint64 // trace hash of the last full-trace run
 	kept     int    // records each full-trace run kept, when diff is nil
+	// recorded holds the Seq of the last record of each full-trace run when their kept records
+	// start at different records (a limit re-run whose runs recorded different numbers of
+	// records), else zeros (API-071).
+	recorded [2]uint64
 }
 
 // attemptResult is the outcome and data of one attempt (API-093).
@@ -131,27 +135,8 @@ func panicText(v any) string {
 // panicSite implements API-063 (MIN-004): the function of the first non-runtime frame after the
 // last "panic(" line, or "unknown".
 func panicSite(stack string) string {
-	lines := strings.Split(stack, "\n")
-	last := -1
-	for i, l := range lines {
-		if strings.HasPrefix(l, "panic(") {
-			last = i
-		}
-	}
-	if last < 0 {
-		return "unknown"
-	}
-	for _, l := range lines[last+1:] {
-		if strings.HasPrefix(l, "\t") || strings.TrimSpace(l) == "" {
-			continue
-		}
-		fn := l
-		if k := strings.LastIndex(l, "("); k >= 0 {
-			fn = l[:k]
-		}
-		if strings.HasPrefix(fn, "runtime.") {
-			continue
-		}
+	runtimeFrame := func(fn string) bool { return strings.HasPrefix(fn, "runtime.") }
+	if i, fn := frameAfterPanic(strings.Split(stack, "\n"), 0, runtimeFrame); i >= 0 {
 		return fn
 	}
 	return "unknown"
