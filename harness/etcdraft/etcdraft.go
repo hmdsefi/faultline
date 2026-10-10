@@ -35,6 +35,7 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 		byNode:       map[kernel.NodeID]*server{},
 		clientByNode: map[kernel.NodeID]*client{},
 		opIDs:        map[int64]uint64{},
+		seen:         map[uint64]bool{},
 	}
 	if cfg.selfTestHook != nil {
 		hook, seed := cfg.selfTestHook, w.Seed()
@@ -44,11 +45,18 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 	c.recoveryStart = max(end.Add(-cfg.Quiet), 0)
 	c.drainStart = end.Add(-cfg.Drain)
 
-	for i := 1; i <= cfg.Nodes; i++ {
-		s := &server{c: c, id: uint64(i), initial: true}
+	spares := 0
+	if cfg.Membership.Enabled {
+		spares = cfg.Membership.Spares
+	}
+	for i := 1; i <= cfg.Nodes+spares; i++ {
+		s := &server{c: c, id: uint64(i), initial: i <= cfg.Nodes}
 		s.node = w.AddServer("n"+strconv.Itoa(i), s.boot)
 		c.servers = append(c.servers, s)
 		c.byNode[s.node.ID()] = s
+	}
+	for i := 1; i <= cfg.Nodes; i++ {
+		c.seen[uint64(i)] = true
 	}
 	addClient := func(name string, cid uint32, kind clientKind) *client {
 		cl := &client{c: c, name: name, cid: cid, kind: kind}
@@ -61,13 +69,17 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 	}
 	//nolint:gosec // Config.Clients is validated to 1..16
 	c.probe = addClient("probe", uint32(cfg.Clients+1), probeClient)
+	if cfg.Membership.Enabled {
+		//nolint:gosec // Config.Clients is validated to 1..16
+		c.admin = addClient("admin", uint32(cfg.Clients+2), adminClient)
+	}
 	w.Sim.OnCrash(c.onCrash)
 
 	c.registerRoles()
 	c.registerChecks()
 
-	c.emit(nil, "etcdraft.setup", fmt.Sprintf("setup nodes=%d clients=%d spares=0", cfg.Nodes, cfg.Clients),
-		attr("nodes", strconv.Itoa(cfg.Nodes)), attr("clients", strconv.Itoa(cfg.Clients)), attr("spares", "0"),
+	c.emit(nil, "etcdraft.setup", fmt.Sprintf("setup nodes=%d clients=%d spares=%d", cfg.Nodes, cfg.Clients, spares),
+		attr("nodes", strconv.Itoa(cfg.Nodes)), attr("clients", strconv.Itoa(cfg.Clients)), attr("spares", strconv.Itoa(spares)),
 		attr("snapshot_every", u64(cfg.SnapshotEvery)), attr("membership", boolStr(cfg.Membership.Enabled)),
 		attr("faults", strconv.Itoa(int(cfg.Faults))), attr("bugs", strconv.FormatUint(uint64(cfg.Bugs), 10)))
 	if cfg.Bugs != 0 {

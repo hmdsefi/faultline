@@ -24,6 +24,7 @@ type Cluster struct {
 	byNode       map[kernel.NodeID]*server // accessed by key only
 	clients      []*client                 // c1..cK
 	probe        *client
+	admin        *client                   // nil unless Membership.Enabled
 	clientByNode map[kernel.NodeID]*client // accessed by key only
 
 	stats         Stats // counters; history and oracle fields are filled by Stats()
@@ -34,6 +35,7 @@ type Cluster struct {
 	probeAcked    bool             // the probe write completed OK
 	probeAckedAt  kernel.Time      // when it did
 	opIDs         map[int64]uint64 // history op ID -> client op ID, accessed by key only
+	seen          map[uint64]bool  // ETC-173 raft IDs the admin has seen, accessed by key only
 }
 
 // KVInput is the check/history input of "read" ({"key": k}) and "write" ({"key": k, "value": v})
@@ -189,11 +191,13 @@ func (c *Cluster) clientName(cid uint32) string {
 		return c.clients[cid-1].name
 	case c.probe != nil && cid == c.probe.cid:
 		return c.probe.name
+	case c.admin != nil && cid == c.admin.cid:
+		return c.admin.name
 	}
 	return "client" + strconv.FormatUint(uint64(cid), 10)
 }
 
-// clientByName returns the client (workload or probe) named name, or nil.
+// clientByName returns the client (workload, probe or admin) named name, or nil.
 func (c *Cluster) clientByName(name string) *client {
 	n := c.w.Sim.Lookup(name)
 	if n == nil {
