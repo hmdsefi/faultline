@@ -56,7 +56,8 @@ type incarnation struct {
 	snapIndex   uint64            // latest snapshot index (durable view)
 	confState   *raftpb.ConfState // configuration after the last applied conf change or snapshot
 
-	waiters map[waiterKey]waiter // ETC-093, accessed by key only
+	waiters     map[waiterKey]waiter   // ETC-093, accessed by key only
+	pendingSnap map[uint64]pendingSnap // ETC-152, by peer raft ID, accessed by key only
 
 	readyPending bool
 	inflight     *raft.Ready       // Ready waiting for its sync event (ETC-061 step 7)
@@ -142,7 +143,7 @@ func (inc *incarnation) walError(op string, err error) {
 func (s *server) boot(n *kernel.Node) {
 	c := s.c
 	inc := &incarnation{s: s, c: c, n: n, log: &raftLogger{sim: c.w.Sim, node: n, level: c.cfg.LogLevel},
-		waiters: map[waiterKey]waiter{}}
+		waiters: map[waiterKey]waiter{}, pendingSnap: map[uint64]pendingSnap{}}
 	s.inc = inc
 	c.stats.Boots++
 	st, ok := inc.openWAL()
@@ -371,6 +372,9 @@ func (inc *incarnation) onPacket(from kernel.NodeID, payload any) {
 			inc.harnessError(fmt.Errorf("message to %d delivered to %d", m.GetTo(), inc.s.id))
 			return
 		}
+		if m.GetType() == raftpb.MsgSnap {
+			c.w.Net.Send(inc.n, from, snapAckPacket(m.GetSnapshot().GetMetadata().GetIndex())) // ETC-152 receipt
+		}
 		if err := inc.rn.Step(m); err != nil {
 			if !errors.Is(err, raft.ErrProposalDropped) && !errors.Is(err, raft.ErrStepPeerNotFound) {
 				inc.harnessError(fmt.Errorf("step: %w", err))
@@ -381,6 +385,10 @@ func (inc *incarnation) onPacket(from kernel.NodeID, payload any) {
 		}
 	case wire.TagRequest:
 		if !inc.onRequest(from, sender, p) {
+			return
+		}
+	case wire.TagSnapAck:
+		if !inc.onSnapAck(from, sender, p) {
 			return
 		}
 	default:

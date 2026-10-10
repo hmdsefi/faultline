@@ -220,6 +220,9 @@ func (inc *incarnation) finish(rd raft.Ready) {
 		joined := strings.Join(names, ",")
 		inc.c.emit(inc.n, "etcdraft.unreachable", "unreachable "+joined, attr("peers", joined))
 	}
+	if !inc.maybeSnapshot() {
+		return
+	}
 	inc.afterEvent()
 }
 
@@ -244,6 +247,10 @@ func (inc *incarnation) sendMessages(rd raft.Ready) {
 			return
 		}
 		c.w.Net.Send(inc.n, to.node.ID(), raftPacket(m))
+		if m.GetType() == raftpb.MsgSnap {
+			c.stats.SnapshotsSent++
+			inc.trackSnap(m)
+		}
 		if cfg.ReportUnreachable && (to.node.State() == kernel.NodeDown || !c.w.Net.Connected(inc.n.ID(), to.node.ID())) {
 			inc.unreachable = append(inc.unreachable, m.GetTo())
 		}
