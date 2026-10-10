@@ -31,11 +31,27 @@ var forbiddenImports = []string{
 
 // forbiddenFuncs are the package-level functions ETC-002 forbids, by import path. Every
 // package-level function of math/rand and math/rand/v2 is forbidden too (methods on
-// kernel streams are not).
+// kernel streams are not). The context functions read the wall clock and arm a runtime
+// timer, or start a goroutine (AfterFunc).
 var forbiddenFuncs = map[string][]string{
-	"time": {"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"},
-	"os":   {"Getenv", "LookupEnv"},
-	"fmt":  {"Print", "Printf", "Println"},
+	"time":    {"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"},
+	"context": {"AfterFunc", "WithDeadline", "WithDeadlineCause", "WithTimeout", "WithTimeoutCause"},
+	"os":      {"Getenv", "LookupEnv", "Environ", "ExpandEnv"},
+	"syscall": {"Getenv", "Environ"},
+	"fmt":     {"Print", "Printf", "Println"},
+}
+
+// forbiddenMethods are the methods ETC-002 forbids, by types.Func.FullName: they start a
+// goroutine without a go statement.
+var forbiddenMethods = []string{"(*sync.WaitGroup).Go"}
+
+// describedArgs maps the functions that turn an argument into trace text with
+// kernel.Describe, which calls String on a fmt.Stringer (KRN-100), to the index of that
+// argument, by types.Func.FullName (ETC-005).
+var describedArgs = map[string]int{
+	"github.com/hmdsefi/faultline/kernel.Describe":                  0,
+	"(*github.com/hmdsefi/faultline/kernel/simnet.Network).Send":    2,
+	"(*github.com/hmdsefi/faultline/kernel/simnet.Network).SendRaw": 2,
 }
 
 var (
@@ -87,8 +103,8 @@ func TestDeterminismRules(t *testing.T) {
 // TestDeterminismRulesCatch proves the linter is not vacuous: every line of
 // testdata/lintbad that ends in a `// want` comment must have exactly one finding per
 // backquoted text, containing it, and no other line may have a finding. The fixture
-// breaks every rule at least once, in each form the rule must see: a call, a function
-// value, a dot import and an explicit instantiation.
+// breaks every rule at least once, in each form the rule must see: a call, a function or
+// method value, a method expression, a dot import and an explicit instantiation.
 func TestDeterminismRulesCatch(t *testing.T) {
 	fset := token.NewFileSet()
 	dir := fixtureDir(t, "lintbad")
@@ -97,7 +113,7 @@ func TestDeterminismRulesCatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants := wantComments(t, dir)
-	if len(wants) < 80 {
+	if len(wants) < 129 {
 		t.Fatalf("only %d `// want` lines in %s: the fixture was trimmed", len(wants), dir)
 	}
 	got := map[string][]string{} // "file.go:line" -> messages
@@ -295,23 +311,27 @@ func isMap(t types.Type) bool {
 		return true
 	}
 	tp, ok := t.(*types.TypeParam)
-	if !ok {
-		return false
-	}
-	iface, ok := tp.Constraint().Underlying().(*types.Interface)
-	if !ok {
-		return false
-	}
-	for i := 0; i < iface.NumEmbeddeds(); i++ {
-		switch e := iface.EmbeddedType(i).(type) {
-		case *types.Union:
-			for j := 0; j < e.Len(); j++ {
-				if _, ok := e.Term(j).Type().Underlying().(*types.Map); ok {
-					return true
+	return ok && allowsMap(tp.Constraint())
+}
+
+// allowsMap reports whether the constraint t allows a map type: t is one, or t is an
+// interface that embeds one, directly, as a union term or through another interface
+// (`interface{ MapLike }` with `type MapLike interface{ ~map[K]V }`), at any depth. The
+// embedding cannot form a cycle: go/types rejects a recursive constraint.
+func allowsMap(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Map:
+		return true
+	case *types.Interface:
+		for i := 0; i < u.NumEmbeddeds(); i++ {
+			e := u.EmbeddedType(i)
+			if union, ok := e.(*types.Union); ok {
+				for j := 0; j < union.Len(); j++ {
+					if allowsMap(union.Term(j).Type()) {
+						return true
+					}
 				}
-			}
-		default:
-			if _, ok := e.Underlying().(*types.Map); ok {
+			} else if allowsMap(e) {
 				return true
 			}
 		}
@@ -398,6 +418,7 @@ func lintFile(fset *token.FileSet, f *ast.File, info *types.Info) []finding {
 			}
 		case *ast.CallExpr:
 			lintFormat(info, x, report)
+			lintDescribe(info, x, report)
 		}
 		if e, ok := n.(ast.Expr); ok && e.Pos() >= floatEnd {
 			if tv, ok := info.Types[e]; ok && tv.Type != nil && isFloat(tv.Type) {
@@ -433,6 +454,9 @@ func lintIdent(id *ast.Ident, stack []ast.Node, info *types.Info, report func(as
 		case obj.Signature().Recv() != nil:
 			if slices.Contains(unorderedMethods, obj.FullName()) {
 				report(id, "unordered iteration: %s", obj.FullName())
+			}
+			if slices.Contains(forbiddenMethods, obj.FullName()) {
+				report(id, "use of %s", obj.FullName())
 			}
 		case slices.Contains(forbiddenFuncs[pkg], name), pkg == "math/rand", pkg == "math/rand/v2":
 			report(id, "use of %s.%s", pkg, name)
@@ -506,6 +530,28 @@ func lintFormat(info *types.Info, call *ast.CallExpr, report func(ast.Node, stri
 		if v.arg < len(args) && strings.ContainsRune(formatVerbs, v.verb) && containsProto(info.Types[args[v.arg]].Type) {
 			report(args[v.arg], "proto message formatted with %%%c", v.verb)
 		}
+	}
+}
+
+// lintDescribe reports a proto message passed to kernel.Describe, or as the payload of
+// simnet's Send or SendRaw (ETC-005). Only the message itself counts: kernel.Describe prints
+// the type name of a slice, map or struct that holds one.
+func lintDescribe(info *types.Info, call *ast.CallExpr, report func(ast.Node, string, ...any)) {
+	fn := calledFunc(info, call.Fun)
+	if fn == nil {
+		return
+	}
+	i, ok := describedArgs[fn.FullName()]
+	if !ok {
+		return
+	}
+	if sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSel {
+		if s := info.Selections[sel]; s != nil && s.Kind() == types.MethodExpr {
+			i++ // a method expression takes the receiver as its first argument
+		}
+	}
+	if i < len(call.Args) && isProto(info.Types[call.Args[i]].Type) {
+		report(call.Args[i], "proto message passed to %s: kernel.Describe calls its String method", fn.Name())
 	}
 }
 
