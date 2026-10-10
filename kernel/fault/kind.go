@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package fault describes faults as data (events and schedules), applies them to a simulated
 // world (Injector), and decides them during a run (planners).
 //

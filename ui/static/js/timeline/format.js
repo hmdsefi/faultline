@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Formatting helpers of the run view (ART-077): time labels, tick steps, counts, lane labels, the
 // window banner and the theme cycle. DOM-free, so node --test can import it.
 

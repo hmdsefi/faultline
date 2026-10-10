@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // AT-ART-18: run view model and helpers. Run from the repository root:
 //   node --test ui/jstest/*.test.mjs
 import { test } from "node:test";

@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package etcdraft runs go.etcd.io/raft/v3 v3.7.0 clusters inside a faultline simulation:
 // RawNode servers with a WAL on simdisk, a replicated KV state machine, closed-loop clients
 // recorded in check/history, fault presets, and safety and liveness checks.

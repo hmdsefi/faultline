@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package toys holds tiny event-style systems with exactly specified behavior (DET §5.5). Kernel,
 // golden and determinism tests run them; a change to a toy changes golden hashes.
 package toys

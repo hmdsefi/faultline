@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 import { GLYPHS, glyphD } from "./render.js";
 
 // DOM building blocks of the run view (ART-077): elements, inline SVG icons (UI-194), glyph and

@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // AT-ART-18: the run view's DOM (ART-079), on the fake DOM of fake-dom.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";

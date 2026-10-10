@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package wal encodes and parses the harness's write-ahead log. It is pure: callers
 // do the file I/O.
 package wal

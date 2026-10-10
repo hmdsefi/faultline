@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package oracle holds the run-wide knowledge behind the etcdraft checks. It lives
 // outside every node incarnation and is never visible to the code under test.
 package oracle

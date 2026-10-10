@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 import { mountTimeline, mountError } from "./timeline/view.js";
 import { nextTheme } from "./timeline/format.js";
 

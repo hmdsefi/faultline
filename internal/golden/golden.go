@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package golden holds the run-twice determinism helper for tests that drive a kernel.Sim
 // directly (DET §5.4). The golden scenarios and their pinned trace hashes live in its test files.
 package golden

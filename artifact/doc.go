@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package artifact reads and writes faultline artifact directories: report.json, report.txt,
 // trace.jsonl, schedule.json, history.jsonl, extra files, and the render files timeline.txt,
 // hb.mmd and timeline.html (spec ART).

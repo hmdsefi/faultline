@@ -1,3 +1,6 @@
+// Copyright 2026 Hamed Yousefi
+// SPDX-License-Identifier: MPL-2.0
+
 // Package detlint is faultline's determinism lint (DET §5.1), import-boundary check (DET §5.2) and
 // exported-API snapshot generator (DET §5.3). Non-test files import only the standard library; the
 // tests apply the checks to the root module.

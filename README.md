@@ -77,4 +77,7 @@ cycle detection, and diagrams of failing runs.
 
 ## License
 
-faultline is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+faultline is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in any
+project, including closed-source ones. If you change faultline's own files and distribute them,
+those files stay under the MPL 2.0. You must make their source available and keep the copyright
+and license notices.
