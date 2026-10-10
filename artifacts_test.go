@@ -24,15 +24,16 @@ var _ = scenario("pingpong-full", func(t *testing.T) {
 	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, func(w *faultline.World) { addPingPong(w) })
 })
 
-// AT-API-34; API-073 (one log call, the primary attempt's event count, no pass artifact with
-// FAULTLINE_ARTIFACTS=off, write errors through st.Errorf) and API-087 (artifact, artifact_error).
+// AT-API-34; API-073 (two lines on st.Output, the primary attempt's event count, no pass artifact
+// with FAULTLINE_ARTIFACTS=off, write errors through st.Errorf) and API-087 (artifact,
+// artifact_error).
 func TestRunPassArtifacts(t *testing.T) {
 	root := t.TempDir()
 	results := filepath.Join(t.TempDir(), "r.jsonl")
 	o, code := runScenario(t, "pingpong-full", []string{"FAULTLINE_TRACE=full", "FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results})
 	dir := seedDir(root, seedK(0))
-	// One st.Log call: the artifacts line has no file:line prefix of its own.
-	logged := regexp.MustCompile(`faultline: seed 0x9a33dad17ee0bb7d passed: (\d+) events, ended at t=1\.000000000s \(deadline\)\n\s+artifacts: ` + regexp.QuoteMeta(dir+string(os.PathSeparator)) + "\n").FindStringSubmatch(o)
+	// st.Output: testing indents each line by four spaces and adds no file:line prefix.
+	logged := regexp.MustCompile(`\n    faultline: seed 0x9a33dad17ee0bb7d passed: (\d+) events, ended at t=1\.000000000s \(deadline\)\n    artifacts: ` + regexp.QuoteMeta(dir+string(os.PathSeparator)) + "\n").FindStringSubmatch(o)
 	if code != 0 || logged == nil {
 		t.Fatalf("exit %d\n%s", code, o)
 	}
@@ -124,8 +125,7 @@ func TestRunArtifactCollision(t *testing.T) {
 	// and warns.
 	editReport(t, alt, "v0.0.0-test", "")
 	o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
-	note := "faultline: seed 0x0000000000000001 passed; the previous artifact at " + alt + " recorded invariant:not seed 1"
-	if code != 0 || !regexp.MustCompile(regexp.QuoteMeta(note)+`\n\s+warning: previous artifact was recorded with faultline v0\.0\.0-test; this run uses `).MatchString(o) {
+	if code != 0 || !regexp.MustCompile(`\n    `+regexp.QuoteMeta(keptNote(alt, "invariant:not seed 1"))+`\n    warning: previous artifact was recorded with faultline v0\.0\.0-test; this run uses `).MatchString(o) {
 		t.Fatalf("fixed run: exit %d\n%s", code, o)
 	}
 	kept(dir)
@@ -195,6 +195,83 @@ func TestRunReplayWarnings(t *testing.T) {
 	}
 }
 
+// seedOutput matches the whole output of seed 1 of a verbose run: the lines, each indented by
+// testing alone (st.Output adds no file:line prefix), between its === RUN line and the next marker.
+// Each line is a regular expression.
+func seedOutput(lines ...string) *regexp.Regexp {
+	return regexp.MustCompile(`\n=== RUN   TestScenario/seed=0x0000000000000001\n    ` + strings.Join(lines, `\n    `) + `\n(?:---|===) `)
+}
+
+// keptNote is the pass note of a seed that passed over a failing artifact in dir (API-083).
+func keptNote(dir, signature string) string {
+	return "faultline: seed 0x0000000000000001 passed; kept the failing artifact at " + dir + string(os.PathSeparator) + ", which recorded " + signature
+}
+
+// AT-API-47; API-073, API-083: a passing replay with FAULTLINE_TRACE=full keeps the failing
+// artifact. The seed's whole output is the pass note, one line that names the directory the
+// report was read from, which is not the one recorded in it after the artifact root moved.
+func TestRunReplayKeepsFailingArtifact(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	if o, code := runScenario(t, "fails-for-0x1", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}); code != 1 {
+		t.Fatalf("failing run: exit %d\n%s", code, o)
+	}
+	moved := filepath.Join(t.TempDir(), "moved")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	dir := seedDir(moved, 1)
+	results := filepath.Join(t.TempDir(), "r.jsonl")
+	o, code := runScenario(t, "fails-for-0x1", []string{"FAULTLINE_SEED=0x1", "FIXED=1", "FAULTLINE_TRACE=full", "FAULTLINE_ARTIFACTS=" + moved, "FAULTLINE_RESULTS=" + results})
+	if code != 0 || !seedOutput(regexp.QuoteMeta(keptNote(dir, "invariant:not seed 1"))).MatchString(o) {
+		t.Fatalf("exit %d\n%s", code, o)
+	}
+	if rep := readReport(t, dir); rep.Status != "fail" || rep.Failure == nil || rep.Failure.Signature != "invariant:not seed 1" {
+		t.Fatalf("the failing artifact was replaced: %+v", rep)
+	}
+	if lines := resultLines(t, results); len(lines) != 1 || lines[0]["status"] != "pass" || lines[0]["artifact"] != nil {
+		t.Fatalf("results %v", lines)
+	}
+}
+
+// API-073, API-083: a report that has status fail but no failure object (damaged, or edited by
+// hand) still keeps its artifact under FAULTLINE_TRACE=full. The pass note then has neither the
+// signature nor warnings, and a replay without FAULTLINE_TRACE=full prints no note.
+func TestRunKeptWithoutFailure(t *testing.T) {
+	root := t.TempDir()
+	dir := seedDir(root, 1)
+	env := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
+	if o, code := runScenario(t, "fails-for-0x1", env); code != 1 {
+		t.Fatalf("failing run: exit %d\n%s", code, o)
+	}
+	path := filepath.Join(dir, "report.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m, "failure")
+	if b, err = json.MarshalIndent(m, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env = append(env, "FIXED=1")
+	note := "faultline: seed 0x0000000000000001 passed; kept the failing artifact at " + dir + string(os.PathSeparator)
+	if o, code := runScenario(t, "fails-for-0x1", append(env, "FAULTLINE_TRACE=full")); code != 0 || !seedOutput(regexp.QuoteMeta(note)).MatchString(o) {
+		t.Fatalf("with full traces: exit %d\n%s", code, o)
+	}
+	if o, code := runScenario(t, "fails-for-0x1", env); code != 0 || strings.Contains(o, "faultline: seed ") {
+		t.Fatalf("without full traces: exit %d\n%s", code, o)
+	}
+	if rep := readReport(t, dir); rep.Status != "fail" {
+		t.Fatalf("the failing artifact was replaced: %+v", rep)
+	}
+}
+
 // API-083: which previous report a run compares with, and the pass note.
 func TestRunPreviousReport(t *testing.T) {
 	const pkg = "github.com/hmdsefi/faultline"
@@ -215,17 +292,33 @@ func TestRunPreviousReport(t *testing.T) {
 	editReport(t, dir, "v0.0.0-test", "")
 	noWarning("FAULTLINE_SEED_LIST", []string{"FAULTLINE_SEED_LIST=0x1", "FAULTLINE_ARTIFACTS=" + root})
 
-	// A pass after a failing report logs the note and one warning line per difference; a pass after
-	// a passing report (the pass artifact of FAULTLINE_TRACE=full) logs no note.
+	// A pass after a failing report logs the note and one warning line per difference, and nothing
+	// else: without FAULTLINE_TRACE=full there is no pass log. A pass after a passing report (the
+	// pass artifact of FAULTLINE_TRACE=full) logs no note.
 	editReport(t, dir, "", "0x0000000000000000")
-	o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1", "FAULTLINE_TRACE=full"))
-	note := "faultline: seed 0x0000000000000001 passed; the previous artifact at " + dir + " recorded invariant:not seed 1"
-	if code != 0 || !regexp.MustCompile(regexp.QuoteMeta(note)+`\n\s+warning: options differ from the previous artifact \(options hash 0x0000000000000000, now 0x`).MatchString(o) {
+	o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+	warning := `warning: options differ from the previous artifact \(options hash 0x0000000000000000, now 0x[0-9a-f]{16}\)`
+	if code != 0 || !seedOutput(regexp.QuoteMeta(keptNote(dir, "invariant:not seed 1")), warning).MatchString(o) {
 		t.Fatalf("pass note: exit %d\n%s", code, o)
 	}
-	o, code = runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
-	if code != 0 || strings.Contains(o, "passed; the previous artifact") {
+	passRoot := t.TempDir()
+	passDir := seedDir(passRoot, 1)
+	passed := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + passRoot, "FIXED=1"}
+	if o, code := runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full")); code != 0 || !strings.Contains(o, "\n    artifacts: "+passDir+string(os.PathSeparator)+"\n") {
+		t.Fatalf("pass artifact: exit %d\n%s", code, o)
+	}
+	o, code = runScenario(t, "fails-for-0x1", passed)
+	if code != 0 || strings.Contains(o, "kept the failing artifact") {
 		t.Fatalf("after a pass: exit %d\n%s", code, o)
+	}
+	// A pass artifact is not a failing artifact: another full-trace run replaces it.
+	editReport(t, passDir, "v0.0.0-test", "")
+	o, code = runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full"))
+	if code != 0 || strings.Contains(o, "kept the failing artifact") || !strings.Contains(o, "\n    artifacts: "+passDir+string(os.PathSeparator)+"\n") {
+		t.Fatalf("second pass artifact: exit %d\n%s", code, o)
+	}
+	if rep := readReport(t, passDir); rep.Status != "pass" || rep.Versions.Faultline == "v0.0.0-test" {
+		t.Fatalf("the pass artifact was not replaced: %+v", rep)
 	}
 
 	// A missing Dir report is skipped: the AltDir report counts only after another test's report.
@@ -304,12 +397,17 @@ func TestRunExtraFiles(t *testing.T) {
 	root = t.TempDir()
 	o, code = runScenario(t, "extra-files", []string{"ROW=b", "FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root, "FAULTLINE_RESULTS=" + results})
 	dir = seedDir(root, 1)
-	warning := `extra artifact file "x.json" from final check "f2" dropped: the name is already used`
+	warning := `extra artifact file "x.json" from final check "f2" dropped: final check "f1" already added it`
 	if code != 1 || read(dir, "x.json") != "1" || read(dir, "y.txt") != "Y" || !strings.Contains(o, "warning: "+warning) {
 		t.Fatalf("(b) exit %d\n%s", code, o)
 	}
 	if rep := readReport(t, dir); !slices.Contains(rep.Warnings, warning) {
 		t.Fatalf("(b) warnings %q", rep.Warnings)
+	}
+	// (d) No file is written with artifacts off, so no file is dropped either.
+	o, code = runScenario(t, "extra-files", []string{"ROW=b", "FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=off"})
+	if code != 1 || !strings.Contains(o, "artifacts: off\n") || strings.Contains(o, "warning:") {
+		t.Fatalf("(d) exit %d\n%s", code, o)
 	}
 
 	root = t.TempDir()

@@ -31,41 +31,41 @@ func TestBuildReplay(t *testing.T) {
 		command, pkgArg, dir, run         string
 	}{
 		{"github.com/acme/kv", "github.com/acme", "/src/acme/kv", "TestKV", 0x5e1f9a2c4b7d3e80, "",
-			"FAULTLINE_SEED=0x5e1f9a2c4b7d3e80 go test -run '^TestKV$' github.com/acme/kv", "./kv", "/src/acme", "^TestKV$"},
+			"FAULTLINE_SEED=0x5e1f9a2c4b7d3e80 go test -v -run '^TestKV$' github.com/acme/kv", "./kv", "/src/acme", "^TestKV$"},
 		{"github.com/acme", "github.com/acme", "/src/acme", "TestKV/raft_3_nodes", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestKV$/^raft_3_nodes$' github.com/acme", ".", "/src/acme", "^TestKV$/^raft_3_nodes$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestKV$/^raft_3_nodes$' github.com/acme", ".", "/src/acme", "^TestKV$/^raft_3_nodes$"},
 		{"command-line-arguments", "", "/x", "TestA", 1, "/tmp/my sched.json",
-			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE='/tmp/my sched.json' go test -run '^TestA$' .", ".", "/x", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE='/tmp/my sched.json' go test -v -run '^TestA$' .", ".", "/x", "^TestA$"},
 		{"github.com/acme", "github.com/acme", "/src/acme", "Test/a.b(c)", 1, "",
-			`FAULTLINE_SEED=0x0000000000000001 go test -run '^Test$/^a\.b\(c\)$' github.com/acme`, ".", "/src/acme", `^Test$/^a\.b\(c\)$`},
+			`FAULTLINE_SEED=0x0000000000000001 go test -v -run '^Test$/^a\.b\(c\)$' github.com/acme`, ".", "/src/acme", `^Test$/^a\.b\(c\)$`},
 		{"github.com/acme", "github.com/acme", "/src/acme", "Test/it's", 1, "",
-			`FAULTLINE_SEED=0x0000000000000001 go test -run '^Test$/^it'\''s$' github.com/acme`, ".", "/src/acme", `^Test$/^it's$`},
+			`FAULTLINE_SEED=0x0000000000000001 go test -v -run '^Test$/^it'\''s$' github.com/acme`, ".", "/src/acme", `^Test$/^it's$`},
 		{"github.com/acme/kv", "github.com/acme", "/elsewhere", "TestKV", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestKV$' github.com/acme/kv", "./kv", "", "^TestKV$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestKV$' github.com/acme/kv", "./kv", "", "^TestKV$"},
 		// One pattern element per name element, at every level.
 		{"github.com/acme", "github.com/acme", "/src/acme", "TestKV/raft/3", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestKV$/^raft$/^3$' github.com/acme", ".", "/src/acme", "^TestKV$/^raft$/^3$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestKV$/^raft$/^3$' github.com/acme", ".", "/src/acme", "^TestKV$/^raft$/^3$"},
 		// cwd ends in "kv" but not in "/kv": no dir.
 		{"github.com/acme/kv", "github.com/acme", "/src/acme/xkv", "TestKV", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestKV$' github.com/acme/kv", "./kv", "", "^TestKV$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestKV$' github.com/acme/kv", "./kv", "", "^TestKV$"},
 		// A package argument outside shellQuote's safe set is quoted.
 		{"github.com/acme/a~b", "github.com/acme", "/src/acme/a~b", "TestA", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestA$' 'github.com/acme/a~b'", "./a~b", "/src/acme", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestA$' 'github.com/acme/a~b'", "./a~b", "/src/acme", "^TestA$"},
 		// An import path that only shares the module path's prefix is not in the module.
 		{"github.com/acmekv", "github.com/acme", "/m/acmekv", "TestA", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestA$' .", ".", "/m/acmekv", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestA$' .", ".", "/m/acmekv", "^TestA$"},
 		// A schedule path made of the safe set is not quoted.
 		{"github.com/acme", "github.com/acme", "/src/acme", "TestA", 1, "/tmp/a_b@c%d+e=f:g,h-1.json",
-			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/tmp/a_b@c%d+e=f:g,h-1.json go test -run '^TestA$' github.com/acme", ".", "/src/acme", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/tmp/a_b@c%d+e=f:g,h-1.json go test -v -run '^TestA$' github.com/acme", ".", "/src/acme", "^TestA$"},
 		// A package two directories below the module root.
 		{"github.com/acme/internal/raft", "github.com/acme", "/src/acme/internal/raft", "TestRaft", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "/src/acme", "^TestRaft$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "/src/acme", "^TestRaft$"},
 		// cwd ends in the last element of rel only: no dir.
 		{"github.com/acme/internal/raft", "github.com/acme", "/src/acme/other/raft", "TestRaft", 1, "",
-			"FAULTLINE_SEED=0x0000000000000001 go test -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "", "^TestRaft$"},
+			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "", "^TestRaft$"},
 	}
 	for _, c := range cases {
-		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule)
+		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule, false)
 		if got.Command != c.command || got.PackageArg != c.pkgArg || got.Dir != c.dir || got.Run != c.run || got.PackageDir != c.cwd {
 			t.Errorf("buildReplay(%q, %q, %q, %q, %q) = %+v\nwant command %s, package_arg %q, dir %q", c.importPath, c.modulePath, c.cwd, c.test, c.schedule, got, c.command, c.pkgArg, c.dir)
 		}
@@ -78,22 +78,31 @@ func TestBuildReplay(t *testing.T) {
 			t.Errorf("env = %v, want %v", got.Env, env)
 		}
 	}
-	// The failing binary's -tags and -race go after "go test", so the replay builds the same test
+	// The failing binary's -tags and -race go after "go test -v", so the replay builds the same test
 	// binary; the tags are quoted like a path.
 	for _, c := range []struct {
 		tags    string
 		race    bool
 		command string
 	}{
-		{"sim,x", true, "FAULTLINE_SEED=0x0000000000000001 go test -tags sim,x -race -run '^TestKV$' github.com/acme/kv"},
-		{"sim", false, "FAULTLINE_SEED=0x0000000000000001 go test -tags sim -run '^TestKV$' github.com/acme/kv"},
-		{"", true, "FAULTLINE_SEED=0x0000000000000001 go test -race -run '^TestKV$' github.com/acme/kv"},
-		{"a b", false, "FAULTLINE_SEED=0x0000000000000001 go test -tags 'a b' -run '^TestKV$' github.com/acme/kv"},
+		{"sim,x", true, "FAULTLINE_SEED=0x0000000000000001 go test -v -tags sim,x -race -run '^TestKV$' github.com/acme/kv"},
+		{"sim", false, "FAULTLINE_SEED=0x0000000000000001 go test -v -tags sim -run '^TestKV$' github.com/acme/kv"},
+		{"", true, "FAULTLINE_SEED=0x0000000000000001 go test -v -race -run '^TestKV$' github.com/acme/kv"},
+		{"a b", false, "FAULTLINE_SEED=0x0000000000000001 go test -v -tags 'a b' -run '^TestKV$' github.com/acme/kv"},
 	} {
 		b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", tags: c.tags, race: c.race}
-		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, ""); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
+		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "", false); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
 			t.Errorf("buildReplay(tags %q, race %v) = %+v\nwant command %s", c.tags, c.race, got, c.command)
 		}
+	}
+	// A determinism failure that only FAULTLINE_CHECK_DETERMINISM looked for: the variable follows
+	// FAULTLINE_SCHEDULE in the command and is in env, so the replay runs the check attempt.
+	b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", race: true}
+	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true)
+	want := "FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/s.json FAULTLINE_CHECK_DETERMINISM=1 go test -v -race -run '^TestKV$' github.com/acme/kv"
+	env := map[string]string{"FAULTLINE_SEED": "0x0000000000000001", "FAULTLINE_SCHEDULE": "/s.json", "FAULTLINE_CHECK_DETERMINISM": "1"}
+	if got.Command != want || !maps.Equal(got.Env, env) {
+		t.Errorf("buildReplay(check) = %+v\nwant command %s and env %v", got, want, env)
 	}
 }
 

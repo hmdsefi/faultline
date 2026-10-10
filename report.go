@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/hmdsefi/faultline/artifact"
@@ -251,36 +252,40 @@ func extraFiles(f *failure) ([]extraFile, []string) {
 	}
 	var files []extraFile
 	var warnings []string
-	used := map[string]bool{} // lookups only
+	addedBy := map[string]string{} // file name -> the source that added it; lookups only
 	for _, s := range sources {
 		var af artifactFiler
 		if !errors.As(s.err, &af) {
 			continue
 		}
-		m, panicked := artifactFilesOf(af)
-		if panicked != "" {
-			warnings = append(warnings, fmt.Sprintf("extra artifact files from %s dropped: ArtifactFiles panicked: %s", s.name, panicked))
+		m, panicked, text := artifactFilesOf(af)
+		if panicked {
+			if text == "" || strings.Contains(text, "\n") {
+				text = strconv.Quote(text) // one visible line in the warning block
+			}
+			warnings = append(warnings, fmt.Sprintf("extra artifact files from %s dropped: ArtifactFiles panicked: %s", s.name, text))
 			continue
 		}
 		for _, name := range slices.Sorted(maps.Keys(m)) {
-			if used[name] {
-				warnings = append(warnings, fmt.Sprintf("extra artifact file %q from %s dropped: the name is already used", name, s.name))
+			if first, ok := addedBy[name]; ok {
+				warnings = append(warnings, fmt.Sprintf("extra artifact file %q from %s dropped: %s already added it", name, s.name, first))
 				continue
 			}
-			used[name] = true
+			addedBy[name] = s.name
 			files = append(files, extraFile{name: name, data: m[name]})
 		}
 	}
 	return files, warnings
 }
 
-// artifactFilesOf calls af.ArtifactFiles, which is user code, and returns the text of its panic
-// (API-064) instead of letting the panic leave the attempt (API-077).
-func artifactFilesOf(af artifactFiler) (files map[string][]byte, panicked string) {
+// artifactFilesOf calls af.ArtifactFiles, which is user code, and recovers its panic instead of
+// letting it leave the attempt (API-077). panicked reports the panic, also one with an empty
+// value; text is its panic text (API-064).
+func artifactFilesOf(af artifactFiler) (files map[string][]byte, panicked bool, text string) {
 	defer func() {
 		if v := recover(); v != nil {
-			files, panicked = nil, panicText(v)
+			files, panicked, text = nil, true, panicText(v)
 		}
 	}()
-	return af.ArtifactFiles(), ""
+	return af.ArtifactFiles(), false, ""
 }

@@ -213,10 +213,16 @@ type filesError struct{ files map[string][]byte }
 func (e filesError) Error() string                    { return "files" }
 func (e filesError) ArtifactFiles() map[string][]byte { return e.files }
 
-type panicFiles struct{}
+// panicFiles is an error whose ArtifactFiles panics with value; nil means "boom".
+type panicFiles struct{ value any }
 
-func (panicFiles) Error() string                    { return "panics" }
-func (panicFiles) ArtifactFiles() map[string][]byte { panic("boom") }
+func (panicFiles) Error() string { return "panics" }
+func (p panicFiles) ArtifactFiles() map[string][]byte {
+	if p.value == nil {
+		panic("boom")
+	}
+	panic(p.value)
+}
 
 // API-077
 func TestExtraFiles(t *testing.T) {
@@ -229,7 +235,7 @@ func TestExtraFiles(t *testing.T) {
 	if len(files) != 2 || files[0].name != "x.json" || string(files[0].data) != "1" || files[1].name != "y.txt" {
 		t.Fatalf("files %+v", files)
 	}
-	if !slices.Equal(warnings, []string{`extra artifact file "x.json" from final check "f2" dropped: the name is already used`}) {
+	if !slices.Equal(warnings, []string{`extra artifact file "x.json" from final check "f2" dropped: final check "f1" already added it`}) {
 		t.Fatalf("warnings %q", warnings)
 	}
 	inv := &failure{kind: "invariant", err: &checkFailure{name: "i", err: filesError{map[string][]byte{"a.json": []byte("A")}}}}
@@ -252,6 +258,20 @@ func TestExtraFiles(t *testing.T) {
 		!slices.Equal(warnings, []string{"extra artifact files from the seed's failure error dropped: ArtifactFiles panicked: boom"}) {
 		t.Errorf("panicking failure error: files %+v warnings %q", files, warnings)
 	}
+	// panic("") is a panic too, and an empty or multi-line panic text is quoted, so each warning
+	// stays one visible line; the later source's files still count.
+	files, warnings = extraFiles(&failure{kind: "final", finals: []finalResult{
+		{check: "e", err: panicFiles{""}},
+		{check: "m", err: panicFiles{errors.New("a\nb")}},
+		{check: "b", err: filesError{map[string][]byte{"b.txt": []byte("B")}}},
+	}})
+	want := []string{
+		`extra artifact files from final check "e" dropped: ArtifactFiles panicked: ""`,
+		`extra artifact files from final check "m" dropped: ArtifactFiles panicked: "a\nb"`,
+	}
+	if len(files) != 1 || files[0].name != "b.txt" || !slices.Equal(warnings, want) {
+		t.Errorf("empty and multi-line panics: files %+v warnings %q", files, warnings)
+	}
 	// The attempt collects them. A final failure's own error is not a second source.
 	r := unitRunner(t, Options{Seeds: 1, Duration: time.Second}, func(w *World) {
 		unitTicker(w, nil)
@@ -260,7 +280,7 @@ func TestExtraFiles(t *testing.T) {
 	})
 	res := r.attempt(t, 1, full(), nil, true)
 	if res.fail == nil || res.fail.kind != "final" || len(res.extra) != 1 || string(res.extra[0].data) != "1" ||
-		!slices.Equal(res.warnings, []string{`extra artifact file "x.json" from final check "f2" dropped: the name is already used`}) {
+		!slices.Equal(res.warnings, []string{`extra artifact file "x.json" from final check "f2" dropped: final check "f1" already added it`}) {
 		t.Errorf("final: fail %+v extra %+v warnings %q", res.fail, res.extra, res.warnings)
 	}
 	// When the first failing final check panicked (kind panic), the other failing final checks'

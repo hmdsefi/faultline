@@ -157,9 +157,11 @@ func runPattern(name string) string {
 }
 
 // buildReplay returns report.replay for one seed (API-080). b is the test binary's build info;
-// schedulePath is the absolute FAULTLINE_SCHEDULE path, or "". The command names a package of
-// the module by its import path, so it works from any directory in the module.
-func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string) artifact.Replay {
+// schedulePath is the absolute FAULTLINE_SCHEDULE path, or ""; check adds
+// FAULTLINE_CHECK_DETERMINISM=1, so the replay runs the check attempt again. The command names a
+// package of the module by its import path, so it works from any directory in the module, and
+// passes -v, so go test prints the output of a seed that passes.
+func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check bool) artifact.Replay {
 	importPath, modulePath := b.importPath, b.modulePath
 	pkg := "." // the package argument of command
 	var pkgArg, dir string
@@ -183,7 +185,11 @@ func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath st
 		env["FAULTLINE_SCHEDULE"] = schedulePath
 		command += " FAULTLINE_SCHEDULE=" + shellQuote(schedulePath)
 	}
-	command += " go test"
+	if check {
+		env[envCheckDeterminism] = "1"
+		command += " " + envCheckDeterminism + "=1"
+	}
+	command += " go test -v"
 	if b.tags != "" {
 		command += " -tags " + shellQuote(b.tags)
 	}
