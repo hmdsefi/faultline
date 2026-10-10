@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,4 +130,43 @@ func readResults(t testing.TB, path string) []seedResult {
 		t.Fatalf("results: %v", err)
 	}
 	return out
+}
+
+// hookWriter returns a selfTestHook that appends "<seed hex> <check>" to the file at path. The
+// hook runs inside the simulation, where there is no t, so a failed write panics.
+func hookWriter(path string) func(seed uint64, check string) {
+	return func(seed uint64, check string) {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is the parent test's own temp file
+		if err == nil {
+			_, err = fmt.Fprintf(f, "0x%016x %s\n", seed, check)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+// readHook returns the lines hookWriter wrote to path, or nil if the child wrote none.
+func readHook(t testing.TB, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("hook output: %v", err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
+// tail returns the last 40 lines of s.
+func tail(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > 40 {
+		lines = lines[len(lines)-40:]
+	}
+	return strings.Join(lines, "\n")
 }

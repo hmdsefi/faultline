@@ -70,6 +70,9 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 		attr("nodes", strconv.Itoa(cfg.Nodes)), attr("clients", strconv.Itoa(cfg.Clients)), attr("spares", "0"),
 		attr("snapshot_every", u64(cfg.SnapshotEvery)), attr("membership", boolStr(cfg.Membership.Enabled)),
 		attr("faults", strconv.Itoa(int(cfg.Faults))), attr("bugs", strconv.FormatUint(uint64(cfg.Bugs), 10)))
+	if cfg.Bugs != 0 {
+		c.emit(nil, "etcdraft.bugs_enabled", "bugs enabled: "+cfg.Bugs.names(), attr("bugs", cfg.Bugs.names()))
+	}
 	return c
 }
 
