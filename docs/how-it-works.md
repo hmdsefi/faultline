@@ -314,8 +314,11 @@ second, full-trace run:
 - `hb.mmd`: the records that led to the failure, as a Mermaid flowchart;
 - `timeline.html`: an interactive timeline in one file, which loads nothing from the network.
 
-The folders live under your system's temporary directory, unless `FAULTLINE_ARTIFACTS` names another
-root or is set to `off`. [owner: artifact folder path after #257] To see which file answers which
+By default the artifact directories live in a folder named `faultline-` plus your user ID, under
+your system's temporary directory. With user ID 501 and the temporary directory `/tmp`, the
+artifact of seed `0x287372ab06f1482e` of `TestKV` goes to
+`/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/`. `FAULTLINE_ARTIFACTS` names another
+root, or turns artifacts off when it is set to `off`. To see which file answers which
 question while you debug, read [Use faultline with an AI coding
 agent](ai-agents.md#which-file-answers-which-question).
 

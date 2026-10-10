@@ -55,8 +55,13 @@ the fix itself is a command to run or a file to read. An agent can run the loop 
 
 2. Read `report.txt` in the artifact directory. It names the failed check, the virtual time and
    event number of the failure, the check's error message, and the replay command.
-3. Run the replay command. [owner: replay line after #258] The replay fails with the same check,
-   at the same virtual time and the same event number.
+3. Run the replay command. For the failing seed of `TestKV`, the report prints this one:
+
+   ```sh
+   FAULTLINE_SEED=0x287372ab06f1482e go test -v -run '^TestKV$' example.com/kv
+   ```
+
+   The replay fails with the same check, at the same virtual time and the same event number.
 
 ### Fix
 
