@@ -153,8 +153,9 @@ go install github.com/hmdsefi/faultline/cmd/faultline@latest
 ```
 
 The root module depends only on the standard library and
-[gograph](https://github.com/hmdsefi/gograph). The harness is a module of its own, so etcd/raft and
-protobuf stay out of your module unless you add it.
+[gograph](https://github.com/hmdsefi/gograph), which it uses for the network topology, the partition
+and quorum queries, and the diagram of a failing run. The harness is a module of its own, so
+etcd/raft and protobuf stay out of your module unless you add it.
 
 ## Status
 
