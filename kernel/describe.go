@@ -12,8 +12,11 @@ import (
 // Describer lets payloads describe themselves deterministically in trace records.
 type Describer interface{ Describe() string }
 
-// Describe returns a deterministic description of v (KRN-100). It never uses %v and never prints
-// pointers, floats, maps or struct contents.
+// Describe returns a description of v that is the same in every run, for trace records. It uses
+// v's Describe, String or Error method when v has one. Otherwise strings print quoted and cut at
+// 64 bytes, bools and integers print their value, and a byte slice prints its length and FNV-1a
+// hash. Any other value prints its type. Describe never uses %v and never prints pointers, floats,
+// maps or struct contents.
 func Describe(v any) string {
 	if v == nil {
 		return "nil"

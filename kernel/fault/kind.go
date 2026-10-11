@@ -4,6 +4,18 @@
 // Package fault describes faults as data (events and schedules), applies them to a simulated
 // world (Injector), and decides them during a run (planners).
 //
+// Most tests pass a planner to faultline's World.Plan. Random starts faults at times drawn from
+// the seed, following its rules; Script applies a fixed list of events:
+//
+//	w.Plan(&fault.Random{MaxDown: 1, Rules: []fault.Rule{
+//		{Kind: fault.KindCrash, Every: 2 * time.Second, MaxFor: time.Second},
+//		{Kind: fault.KindPartition, Every: 5 * time.Second, MaxFor: 2 * time.Second},
+//	}})
+//
+// Every fault a run applies is recorded as an Event with its time. Together they form the run's
+// concrete Schedule, which faultline writes to schedule.json. Replaying that file with
+// FAULTLINE_SCHEDULE applies the same faults at the same times, with no planner.
+//
 // All functions and methods must be called from the simulation goroutine. Nothing in this
 // package is safe for concurrent use.
 package fault
@@ -19,8 +31,8 @@ const (
 	KindCut          Kind = "cut"           // remove the link Node -> Peer
 	KindHeal         Kind = "heal"          // restore every link
 	KindHealLink     Kind = "heal-link"     // restore the link Node -> Peer
-	KindLink         Kind = "link"          // override the config of link Node -> Peer
-	KindLinkReset    Kind = "link-reset"    // restore the config in effect before the first override
+	KindLink         Kind = "link"          // override the config of link Node -> Peer with Link
+	KindLinkReset    Kind = "link-reset"    // restore the config of link Node -> Peer from before its first override
 	KindCrash        Kind = "crash"         // crash Node
 	KindRestart      Kind = "restart"       // restart Node if it is down
 	KindPause        Kind = "pause"         // pause Node

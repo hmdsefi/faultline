@@ -16,15 +16,16 @@ import (
 	"github.com/hmdsefi/faultline/kernel/simnet"
 )
 
-// Event is one atomic fault action. Node, Peer and Groups hold node names. The fields a kind
-// uses are its field set (FLT-002); every other field must be zero.
+// Event is one atomic fault action. Node, Peer and Groups hold node names. Each kind uses the
+// fields named in the comment of its Kind constant; every other field must be zero. At and Kind
+// belong to every event, and Role may replace Node.
 type Event struct {
-	At     kernel.Time  // JSON "at": Go duration string since Epoch, e.g. "1.5s"
+	At     kernel.Time  // JSON "at": Go duration string since Epoch, for example "1.5s"
 	Kind   Kind         // JSON "kind"
 	Node   string       // JSON "node"
 	Peer   string       // JSON "peer"
 	Groups [][]string   // JSON "groups"
-	Link   *simnet.Link // JSON "link" (object, FLT-025)
+	Link   *simnet.Link // JSON "link": {"latency": "50ms", "drop_ppm": 100000, ...}, zero fields left out
 	N      int64        // JSON "n": clock-jump ns, drift ppm, sync-fail count, capacity bytes
 	Path   string       // JSON "path"
 	Off    int64        // JSON "off"
@@ -37,13 +38,16 @@ type Event struct {
 	// ID is the event's 1-based position in a concrete schedule; 0 = none. Annotation:
 	// ignored by Inject, Load and Replay. JSON "id".
 	ID int
-	// Undoes lists, ascending, the IDs of the active faults this event ends (FLT-012); nil
-	// when none. Annotation: ignored by Inject, Load and Replay. JSON "undoes".
+	// Undoes lists, ascending, the IDs of the active faults this event ends; nil when none. A
+	// heal ends every partition, isolation and cut. A heal-link ends the cut of its link, and a
+	// link-reset the link overrides of its link. A restart ends the crash of its node, and a
+	// resume or crash its pause. A sync-fail or disk-capacity event replaces the previous one on
+	// its node. Annotation: ignored by Inject, Load and Replay. JSON "undoes".
 	Undoes []int
 }
 
-// Validate checks the structure of e (FLT-003, FLT-004). Role is allowed. It does not check
-// that nodes exist.
+// Validate checks the structure of e: a known kind, valid values in the fields of the kind, and
+// zero in the others. Role is allowed. It does not check that nodes exist.
 func (e Event) Validate() error {
 	if p := e.problem(); p != "" {
 		return errors.New("fault: " + p)
@@ -240,7 +244,9 @@ func (e Event) nProblem() string {
 	return ""
 }
 
-// Durable reports whether e is a durable fault (FLT-011).
+// Durable reports whether e starts a fault that lasts until another event ends it. The durable
+// kinds are partition, isolate, cut, link, crash and pause, and sync-fail and disk-capacity with
+// N > 0.
 func (e Event) Durable() bool {
 	switch e.Kind {
 	case KindPartition, KindIsolate, KindCut, KindLink, KindCrash, KindPause:
@@ -251,8 +257,8 @@ func (e Event) Durable() bool {
 	return false
 }
 
-// String returns the one-line description of e used in trace records (FLT-071), without At,
-// ID and Undoes.
+// String returns the one-line description of e used in trace records, without At, ID and
+// Undoes, for example "crash n3" or "cut n1 -> n3".
 func (e Event) String() string {
 	node := e.Node
 	if e.Role != "" {

@@ -1,10 +1,6 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Package faultline runs deterministic simulation tests: faultline.Run turns one Go test into
-// many simulated worlds, one subtest per seed, checks invariants after every event and final
-// checks after the run, and on failure writes a replayable artifact and prints a one-line replay
-// command.
 package faultline
 
 import (
@@ -16,7 +12,7 @@ import (
 // gamma is the SplitMix64 increment.
 const gamma = 0x9e3779b97f4a7c15
 
-// NameBase returns the default base seed for a test name: FNV-1a 64 of the bytes of name.
+// NameBase returns the default base seed for a test name: FNV-1a 64 of the bytes of testName.
 func NameBase(testName string) uint64 {
 	h := uint64(0xcbf29ce484222325)
 	for i := 0; i < len(testName); i++ {

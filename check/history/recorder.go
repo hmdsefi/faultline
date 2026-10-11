@@ -30,8 +30,11 @@ func NewRecorder(s *kernel.Sim) *Recorder {
 	return &Recorder{s: s, next: 1, pending: map[string]int64{}}
 }
 
-// Invoke records the invocation of f by process with input at s.Now() and returns the new
-// op's ID. It panics on misuse (HIS-003).
+// Invoke records the invocation of f by process with input at s.Now() and returns the new op's
+// ID. It stores input as its json.Marshal encoding at the time of the call. Invalid UTF-8 in that
+// encoding is stored as U+FFFD, one per invalid byte. A process has at most one pending op.
+// Invoke panics if process or f is empty or not valid UTF-8, if process has a pending op, or if
+// json.Marshal rejects input.
 func (r *Recorder) Invoke(process, f string, input any) int64 {
 	switch {
 	case process == "":
@@ -65,7 +68,9 @@ func (r *Recorder) Invoke(process, f string, input any) int64 {
 }
 
 // Complete records the completion of op id with status and output at s.Now(). status must be
-// OK, Fail or Info. It panics on misuse (HIS-005).
+// OK, Fail or Info. It stores output as Invoke stores input: its json.Marshal encoding, with
+// invalid UTF-8 stored as U+FFFD, one per invalid byte. Complete panics on an unknown or already
+// completed op, on another status, and on an output that json.Marshal rejects.
 func (r *Recorder) Complete(id int64, status Status, output any) {
 	n := int64(len(r.ops))
 	if id < 1 || id > n {

@@ -1,9 +1,27 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Package simdisk simulates one volume per node with crash semantics for unsynced data and
-// metadata. All methods must be called from the simulation goroutine. Types are not safe for
-// concurrent use.
+// Package simdisk simulates one disk volume per node, with the crash behavior of real file
+// systems. Each volume has two states: the visible one that reads return, and the durable one
+// that survives a crash. A write becomes durable at File.Sync, and a create, remove or rename at
+// Volume.SyncDir of its directory (at once under MetadataImmediate). When a node crashes,
+// Config.Crash decides which unsynced writes survive, and Config.Metadata which unsynced namespace
+// operations do.
+//
+// A node takes its volume from Disks.Volume in its BootFunc. The same volume comes back in every
+// incarnation, with the durable state the crash left:
+//
+//	f, err := disks.Volume(n).Open("/wal")
+//	if err == nil {
+//		_, err = f.Append([]byte("put k1=v1\n"))
+//	}
+//	if err == nil {
+//		err = f.Sync() // once Sync returns nil, the record survives a crash
+//	}
+//
+// Inside faultline.Run, World.Disk holds the volumes, created from Options.Disk.
+//
+// All methods must be called from the simulation goroutine. Types are not safe for concurrent use.
 package simdisk
 
 import (
@@ -123,8 +141,9 @@ type Latency struct {
 	Jitter time.Duration
 }
 
-// LatencyConfig is the operation latency model. Phase 1 code never sleeps; Phase 2's shims/fsx
-// sleeps for Volume.SampleLatency in goroutine mode. The zero value means no latency.
+// LatencyConfig is the latency model that Volume.SampleLatency draws from. Volume methods take no
+// virtual time themselves; code that models a slow disk waits for a sampled latency, for example
+// with Node.After. The zero value means no latency.
 type LatencyConfig struct {
 	Read  Latency
 	Write Latency
@@ -136,7 +155,9 @@ type LatencyConfig struct {
 	Slow    time.Duration
 }
 
-// DefaultLatency returns a latency model resembling a local NVMe SSD (see DSK-040).
+// DefaultLatency returns a latency model resembling a local NVMe SSD. Reads and writes take 20µs
+// plus up to 80µs, syncs 500µs plus up to 1.5ms, and metadata operations 10µs plus up to 40µs.
+// One operation in a thousand is slow and takes up to 20ms more.
 func DefaultLatency() LatencyConfig {
 	return LatencyConfig{
 		Read:    Latency{Base: 20 * time.Microsecond, Jitter: 80 * time.Microsecond},
@@ -155,7 +176,7 @@ type Config struct {
 	FailedSync FailedSyncModel
 	SectorSize int   // 0 means DefaultSectorSize
 	Capacity   int64 // initial capacity of every volume in bytes; 0 = unlimited
-	// Latency is the Phase 2 latency model. The zero value means no latency.
+	// Latency is the model Volume.SampleLatency draws from. The zero value means no latency.
 	Latency LatencyConfig
 }
 
@@ -163,7 +184,8 @@ type Config struct {
 // FailedSyncDropDirty, unlimited capacity, no latency.
 func DefaultConfig() Config { return Config{SectorSize: DefaultSectorSize} }
 
-// Validate reports the first invalid field, or nil. Messages are listed in DSK §7.
+// Validate reports the first invalid field, or nil. The error names the field, its value and the
+// allowed values, for example "invalid config: SectorSize -1 out of range [0, 1048576]".
 func (c Config) Validate() error {
 	switch {
 	case c.Crash > CrashTorn:
@@ -205,7 +227,9 @@ func checkLatency(field string, d time.Duration) error {
 	return nil
 }
 
-// Errors returned by Volume and File methods, wrapped in *fs.PathError (see DSK-037).
+// Errors returned by Volume and File methods. Every error except io.EOF from File.ReadAt is a
+// *fs.PathError that wraps one of these, so errors.Is works. ErrClosed, ErrNotExist, ErrExist and
+// ErrInvalid are the io/fs errors, so they also match the os errors of the same name.
 var (
 	ErrIO       = errors.New("simdisk: input/output error")
 	ErrNoSpace  = errors.New("simdisk: no space left on device")

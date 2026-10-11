@@ -56,8 +56,8 @@ func (s *Sim) schedule(at Time, label string, fn func(), front bool) *entry {
 }
 
 // Cancel removes a pending event. It reports whether the call prevented the event from running.
-// The initial boot event of a node cannot be cancelled; a stale node-bound entry is removed and
-// false is returned (KRN-024).
+// The initial boot event of a node cannot be cancelled. A node event whose node is down, or has
+// restarted since the event was scheduled, is removed and false is returned: it would never run.
 func (s *Sim) Cancel(id EventID) bool {
 	e, ok := s.pending[id]
 	if !ok || e.kind == entryBoot {
@@ -115,8 +115,10 @@ func (s *Sim) release(e *entry) {
 }
 
 // AtFront schedules fn at time t like At, but with tie-break 0 and no draw from the
-// "kernel/sched" stream, so under TieBreakSeeded it runs before every seeded event at t (KRN-026,
-// KRN-027). It is for the fault injector and planners (FLT). It panics like At.
+// "kernel/sched" stream, so under TieBreakSeeded it runs before every seeded event at t. Events
+// with tie-break 0 at the same time run in the order they were scheduled. AtFront is for the
+// fault injector and planners. Their events take no scheduler draws, so a run and a replay of its
+// fault schedule order the other events the same way. Other code uses At. AtFront panics like At.
 func (s *Sim) AtFront(t Time, label string, fn func()) EventID {
 	if t < s.now {
 		panic(fmt.Sprintf("kernel: AtFront(%s, %q) is before Now() %s", t, label, s.now))

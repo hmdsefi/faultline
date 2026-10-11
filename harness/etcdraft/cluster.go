@@ -42,7 +42,7 @@ type Cluster struct {
 }
 
 // KVInput is the check/history input of "read" ({"key": k}) and "write" ({"key": k, "value": v})
-// operations, LIN's KV shapes (LIN-022). Write values are never empty.
+// operations. Write values are never empty.
 type KVInput struct {
 	Key   string `json:"key"`
 	Value string `json:"value,omitempty"` // writes only
@@ -164,7 +164,7 @@ func (c *Cluster) Applied(id uint64) (uint64, bool) {
 // LeaderChanges returns every observed SoftState change, in observation order.
 func (c *Cluster) LeaderChanges() []LeaderChange { return slices.Clone(c.leaderChanges) }
 
-// Stats returns run counters (ETC-123).
+// Stats returns the counters of the run so far.
 func (c *Cluster) Stats() Stats {
 	st := c.stats
 	for _, op := range c.w.History.Ops() {

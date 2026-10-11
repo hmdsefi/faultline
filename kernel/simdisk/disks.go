@@ -58,8 +58,8 @@ func (d *Disks) Volume(n *kernel.Node) *Volume {
 }
 
 // Lookup returns the volume of n and true if Volume(n) was called before, or nil and false. It
-// never creates a volume, so read-only users (fault planners, FLT-083) cannot change simulation
-// state. It panics if n is nil or belongs to another Sim.
+// never creates a volume, so code that only reads, such as a fault planner, cannot change the
+// simulation by calling it. It panics if n is nil or belongs to another Sim.
 func (d *Disks) Lookup(n *kernel.Node) (*Volume, bool) {
 	if n == nil {
 		panic("simdisk: Lookup: nil *kernel.Node")

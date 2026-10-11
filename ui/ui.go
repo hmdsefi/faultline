@@ -1,8 +1,9 @@
 // Copyright 2026 Hamed Yousefi
 // SPDX-License-Identifier: MPL-2.0
 
-// Package ui embeds faultline's web assets: the Phase 1 run view renderer that timeline.html
-// inlines, and (Phase 4) the faultline view app. It imports only the standard library.
+// Package ui embeds faultline's web assets: the run view that every timeline.html inlines, so the
+// page works offline as a single file. Tests do not import it; package artifact uses it to write
+// timeline.html. It imports only the standard library.
 package ui
 
 import (
@@ -19,16 +20,15 @@ import (
 	"strings"
 )
 
-// FS holds the web assets. Paths start with "static/". Phase 4 (UI) adds files but keeps this
-// declaration (UI-185), and adds Static() fs.FS, which returns fs.Sub(FS, "static").
+// FS holds the web assets. Paths start with "static/".
 //
 //go:embed static
 var FS embed.FS
 
 // Paths in FS.
 const (
-	TimelineTemplate = "static/timeline.html"       // single-file page template (ART-071)
-	TimelineEntry    = "static/js/timeline-main.js" // entry module of timeline.html (ART-077)
+	TimelineTemplate = "static/timeline.html"       // single-file page template that TimelineHTML fills in
+	TimelineEntry    = "static/js/timeline-main.js" // entry module of the run view script
 	ThemeCSS         = "static/css/theme.css"       // stylesheet inlined into timeline.html
 )
 
@@ -80,7 +80,7 @@ type module struct {
 	path     string
 	id       string
 	imports  []moduleImport // in source order
-	imported map[string]int // imported name → its import line (lookups only)
+	imported map[string]int // imported name -> its import line (lookups only)
 	body     []string       // non-import lines, "export " removed
 	exports  []string       // in source order
 }
@@ -91,7 +91,7 @@ type moduleImport struct {
 }
 
 // Bundle returns the import closure of entry (a path in FS), in dependency order, as one
-// classic script (ART-076).
+// classic script that a page can inline.
 func Bundle(entry string) (string, error) { return bundleFS(FS, entry) }
 
 // bundler holds the state of one bundleFS call.
@@ -101,7 +101,7 @@ type bundler struct {
 	loaded  map[string]*module // lookups only
 	stack   []string           // modules being loaded, for cycle detection
 	order   []*module          // post-order
-	idOwner map[string]string  // module id → path (lookups only)
+	idOwner map[string]string  // module id -> path (lookups only)
 }
 
 // bundleFS implements Bundle over any file system (ART-076).
@@ -373,7 +373,7 @@ func exportName(line string) (name, reason string) {
 var placeholders = []string{"{{TITLE}}", "{{CSS}}", "{{JS}}", "{{DATA}}"}
 
 // TimelineHTML writes the self-contained run view page with title and data, the JSON of a
-// timeline data object (ART-071).
+// timeline data object (artifact.Timeline). The page inlines its script and stylesheet.
 func TimelineHTML(w io.Writer, title string, data []byte) error {
 	return timelineHTML(FS, w, title, data)
 }

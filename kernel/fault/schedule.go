@@ -18,7 +18,8 @@ type Schedule struct {
 	Version int // ScheduleVersion; 0 is treated as ScheduleVersion
 
 	// End is the virtual time at which the run stops; 0 = not set. Recovery is the start of the
-	// recovery window; 0 = not set. The injector ignores both; API and MIN use them (MIN §12).
+	// recovery window; 0 = not set. The injector ignores both; faultline.Run uses them when it
+	// replays the schedule.
 	// JSON "end" and "recovery", written only when non-zero.
 	End      kernel.Time
 	Recovery kernel.Time
@@ -26,8 +27,8 @@ type Schedule struct {
 	Events []Event
 }
 
-// Validate checks the version, End, Recovery, and every event's structure (FLT-005). Role is
-// allowed.
+// Validate checks the version, End, Recovery, and every event's structure (Event.Validate). Role
+// is allowed.
 func (s Schedule) Validate() error {
 	if s.Version != 0 && s.Version != ScheduleVersion {
 		return errors.New("fault: schedule: unsupported version " + strconv.Itoa(s.Version) + " (supported: 1)")
@@ -47,7 +48,7 @@ func (s Schedule) Validate() error {
 }
 
 // Normalize returns a concrete copy of s: version 1, no Role, events stably sorted by At,
-// IDs 1..n, Undoes recomputed by the pairing rules, End and Recovery kept (FLT-013). It returns
+// IDs 1..n, Undoes recomputed (see Event.Undoes), End and Recovery kept. It returns
 // Validate's error, or an error naming the first event with a Role.
 func (s Schedule) Normalize() (Schedule, error) {
 	if err := s.Validate(); err != nil {

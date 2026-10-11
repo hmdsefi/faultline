@@ -44,7 +44,8 @@ type Link struct {
 }
 
 // Validate reports the first invalid field of l, checked in the order Latency, Jitter, Tail,
-// TailPPM, DropPPM, DupPPM, or nil if l is valid. Error messages are listed in NET §7.
+// TailPPM, DropPPM, DupPPM, or nil if l is valid. The error names the field, its value and the
+// allowed range, for example "invalid link: Latency -1ns out of range [0s, 24h0m0s]".
 func (l Link) Validate() error {
 	if err := checkDelay("Latency", l.Latency); err != nil {
 		return err

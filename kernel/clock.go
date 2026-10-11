@@ -65,7 +65,8 @@ func localToGlobal(d time.Duration, ppm int32) time.Duration {
 	return time.Duration(q)
 }
 
-// LocalTime returns the node's local clock reading as a virtual Time (KRN-074).
+// LocalTime returns the node's local clock reading as a virtual Time. It differs from Sim.Now
+// after WithClock, SetDrift or JumpClock.
 func (n *Node) LocalTime() Time { return n.clk.at(n.sim.now) }
 
 // Now returns the node's local wall time: n.LocalTime().Std().
@@ -74,8 +75,8 @@ func (n *Node) Now() time.Time { return n.LocalTime().Std() }
 // Drift returns the node's current drift in parts per million.
 func (n *Node) Drift() int32 { return n.clk.ppm }
 
-// JumpClock steps the local clock by d (may be negative). Scheduled timers keep their global
-// times (KRN-071).
+// JumpClock steps the local clock by d (may be negative). Timers scheduled before the jump keep
+// their virtual times.
 func (n *Node) JumpClock(d time.Duration) {
 	now := n.sim.now
 	n.clk = clock{g0: now, l0: n.clk.at(now).Add(d), ppm: n.clk.ppm}
@@ -85,8 +86,8 @@ func (n *Node) JumpClock(d time.Duration) {
 	}})
 }
 
-// SetDrift changes the drift from now on. Scheduled timers keep their global times (KRN-071). It
-// panics if ppm is outside [MinDriftPPM, MaxDriftPPM].
+// SetDrift changes the drift from now on. Timers scheduled before the change keep their virtual
+// times. It panics if ppm is outside [MinDriftPPM, MaxDriftPPM].
 func (n *Node) SetDrift(ppm int32) {
 	checkDrift(ppm)
 	now := n.sim.now

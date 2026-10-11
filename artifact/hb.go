@@ -72,11 +72,11 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
-// MermaidMaxEdges is mermaid.js's default maxEdges: like MermaidMaxBytes, hb.mmd stays within it
-// (ART-055).
+// MermaidMaxEdges is mermaid.js's default maxEdges: like MermaidMaxBytes, hb.mmd stays within it.
 const MermaidMaxEdges = 500
 
-// WriteHB writes hb.mmd (ART-055) for the causal slice of root. It halves cap while the text is
+// WriteHB writes hb.mmd, a Mermaid flowchart of the causal slice of root (see CausalSlice), with
+// one node per record and one edge per happens-before link. It halves cap while the text is
 // longer than MermaidMaxBytes bytes or has more than MermaidMaxEdges edges; at cap 1 it writes the
 // text whatever its size.
 func WriteHB(w io.Writer, tr *Trace, root uint64, cap int) error {

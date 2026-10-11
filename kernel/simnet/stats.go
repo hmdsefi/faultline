@@ -65,7 +65,7 @@ func (nw *Network) Stats() Stats {
 	return nw.stats
 }
 
-// LinkStats returns the counters for the directed link from → to.
+// LinkStats returns the counters for the directed link from -> to.
 func (nw *Network) LinkStats(from, to kernel.NodeID) Stats {
 	nw.register()
 	i := nw.index("LinkStats", from)

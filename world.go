@@ -55,14 +55,15 @@ type plannerReg struct {
 	until   kernel.Time
 }
 
-// World is one simulated world: one attempt of one seed.
-// Its methods must be called from the seed subtest's goroutine only.
+// World is one simulated world, built for one run of one seed. Run builds a new World for every
+// run, and the function passed to Run adds nodes, plans faults and registers checks on it. Its
+// methods must be called from the seed subtest's goroutine only.
 type World struct {
-	Sim     *kernel.Sim
-	Net     *simnet.Network
-	Disk    *simdisk.Disks
-	Faults  *fault.Injector
-	History *history.Recorder
+	Sim     *kernel.Sim       // the event loop, virtual time and the trace
+	Net     *simnet.Network   // the network, created from Options.Net
+	Disk    *simdisk.Disks    // the volumes, created from Options.Disk
+	Faults  *fault.Injector   // applies faults and records them for schedule.json
+	History *history.Recorder // client operations, written to history.jsonl
 
 	r                 *runner
 	st                *testing.T
@@ -93,7 +94,7 @@ func (w *World) Seed() uint64 { return w.seed }
 // Options returns the effective options of this Run call: defaults applied, environment
 // overrides applied, Seeds set to the length of the seed list, BaseSeed set to the resolved
 // base (0 when the list came from FAULTLINE_SEED or FAULTLINE_SEED_LIST), Trace set to the
-// primary attempt's config. It returns the same value in every attempt.
+// config of the seed's first run. It returns the same value in every run.
 func (w *World) Options() Options { return w.r.plan.opts }
 
 func (w *World) checkNotEnded(method string) {
@@ -190,7 +191,8 @@ func (w *World) until(p fault.Planner) kernel.Time {
 }
 
 // Plan registers a fault planner. Planners start when the simulation first advances (the first
-// World.RunFor, or after body returns). Under FAULTLINE_SCHEDULE no planner is started (FLT-043).
+// World.RunFor, or after body returns). Under FAULTLINE_SCHEDULE no planner is started: the
+// replayed schedule is the only source of faults.
 func (w *World) Plan(p fault.Planner) {
 	w.checkNotEnded("Plan")
 	r, isRandom := p.(*fault.Random)
@@ -211,9 +213,11 @@ func (w *World) Plan(p fault.Planner) {
 	}
 }
 
-// RecoveryStart returns the start of the recovery window (API-044): the replayed schedule's
-// Recovery when non-zero, else the earliest Until of the registered *fault.Random planners, else
-// End().
+// RecoveryStart returns the start of the recovery window, where fault.Random planners end the
+// faults they started and start no more. It is the replayed schedule's Recovery when non-zero,
+// else the earliest Until of the registered *fault.Random planners, else End(). A planner's Until
+// is End minus its Quiet, a quarter of the run by default. Final checks use RecoveryStart to ask
+// whether the system recovered.
 func (w *World) RecoveryStart() kernel.Time {
 	t, _ := w.recovery()
 	return t
@@ -290,7 +294,7 @@ func (w *World) RunFor(d time.Duration) {
 	}
 }
 
-// Logf records a global kernel.log record (w.Sim.Logf) and, in the primary attempt only, logs
+// Logf records a global kernel.log record (w.Sim.Logf) and, in the seed's first run only, logs
 // the message with t.Logf prefixed by the virtual time.
 func (w *World) Logf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)

@@ -15,12 +15,12 @@ import (
 	"github.com/hmdsefi/faultline/ui"
 )
 
-// Timeline is the timeline data object (ART §5.9), embedded in timeline.html.
+// Timeline is the timeline data object, embedded in timeline.html as JSON.
 type Timeline struct {
 	Version  int             `json:"faultline_timeline"` // TimelineVersion
 	Title    string          `json:"title"`
 	Report   *Report         `json:"report"`
-	Trace    string          `json:"trace"`    // trace.jsonl text of the included records (§5.9)
+	Trace    string          `json:"trace"`    // trace.jsonl text of the included records
 	Schedule string          `json:"schedule"` // schedule.json text; "" when absent
 	Total    uint64          `json:"total"`    // record lines in trace.jsonl
 	Dropped  uint64          `json:"dropped"`  // from the trace header
@@ -52,7 +52,7 @@ func special(kind string) bool {
 	return strings.HasPrefix(kind, "fault.") || strings.HasPrefix(kind, "check.") || strings.HasPrefix(kind, "run.") || slices.Contains(specialKinds, kind)
 }
 
-// TimelineData builds the timeline data with at most maxRecords records (ART-060). schedule is the
+// TimelineData builds the timeline data with at most maxRecords records. schedule is the
 // content of schedule.json, or nil when there is none. When the trace has more records than
 // maxRecords, it keeps the members of s found in the trace, then the newest special records
 // (fault.*, check.* and run.* kinds, the node lifecycle kinds, kernel.fail and kernel.panic) while
@@ -156,7 +156,7 @@ func TimelineData(rep *Report, tr *Trace, schedule []byte, s Slice, maxRecords i
 	return t, nil
 }
 
-// WriteTimelineHTML writes timeline.html: ui.TimelineHTML with the JSON of TimelineData (ART-070).
+// WriteTimelineHTML writes timeline.html: ui.TimelineHTML with the JSON of TimelineData.
 func WriteTimelineHTML(w io.Writer, rep *Report, tr *Trace, schedule []byte, s Slice, maxRecords int) error {
 	t, err := TimelineData(rep, tr, schedule, s, maxRecords)
 	if err != nil {

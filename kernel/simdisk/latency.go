@@ -11,8 +11,9 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 )
 
-// SampleLatency draws the latency of one operation of class op from the volume's latency
-// stream. Used by shims/fsx in Phase 2; Phase 1 code does not call it.
+// SampleLatency draws the latency of one operation of class op from Config.Latency, using the
+// stream "disk/<node name>/latency". Volume methods never wait for it; code that models a slow
+// disk waits for the result itself.
 func (v *Volume) SampleLatency(op Op) time.Duration {
 	lc := v.d.cfg.Latency
 	var l Latency

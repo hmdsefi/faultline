@@ -13,7 +13,7 @@
 //
 // A scenario with its own faults calls Setup inside faultline.Run. Config.Duration must
 // equal Options.Duration, and Options.NoCryptoSeed must stay false: etcd/raft draws its
-// election timeouts from crypto/rand, which faultline seeds for every attempt.
+// election timeouts from crypto/rand, which faultline seeds for every run.
 //
 //	cfg := etcdraft.DefaultConfig()
 //	cfg.Duration = 20 * time.Second

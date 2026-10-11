@@ -15,9 +15,9 @@ import (
 var active atomic.Pointer[Sim]
 
 // Active returns the Sim that is currently inside Step, Run, RunUntil, RunFor, or a guarded call
-// made outside the loop, and nil otherwise. It exists for package assert (Phase 3). It is not
-// meaningful if two Sims run concurrently on different goroutines, and it is process-wide: it does
-// not identify the calling goroutine (KRN-110).
+// made outside the loop, and nil otherwise. Code called from a callback can use it to find its Sim
+// without being passed one. It is process-wide and does not identify the calling goroutine, so it
+// is not meaningful while two Sims run on different goroutines.
 func Active() *Sim { return active.Load() }
 
 // StopReason tells why Run, RunUntil or RunFor returned.
@@ -86,7 +86,7 @@ func (s *Sim) Run() StopReason {
 }
 
 // RunUntil processes every event with at <= t, then sets Now() to t and returns StopDeadline,
-// unless the Sim fails or a limit applies first (KRN-036). It panics if t < Now().
+// unless the Sim fails or a limit applies first. It panics if t < Now().
 func (s *Sim) RunUntil(t Time) StopReason {
 	prev := s.enter()
 	defer s.leave(prev)
@@ -206,12 +206,13 @@ func (s *Sim) deferHead(e *entry) {
 	s.emitEvent("kernel.defer", e.id, e.label, n.id, e.inc, e.cause)
 }
 
-// AdvanceTo sets Now() to t without executing any event (KRN-039). First it defers, in queue
-// order, the heads that belong to paused nodes and are due at or before t. It stops at the first
-// other head, so a paused entry queued behind an executable entry at t stays queued. It panics if
-// the Sim is running, if t < Now(), or if an executable entry is due before t; the deferrals made
-// before that last panic stay done. It ignores Err, MaxTime and MaxEvents, so Now() can pass
-// Config.MaxTime. It exists for goroutine mode (GOR).
+// AdvanceTo sets Now() to t without executing any event. First it defers, in queue order, the
+// heads that belong to paused nodes and are due at or before t. It stops at the first other head,
+// so a paused entry queued behind an executable entry at t stays queued. It panics if the Sim is
+// running, if t < Now(), or if an executable entry is due before t; the deferrals made before that
+// last panic stay done. It ignores Err, MaxTime and MaxEvents, so Now() can pass Config.MaxTime.
+// It is for a driver that moves virtual time itself; event-style code uses Run, RunUntil and
+// RunFor.
 func (s *Sim) AdvanceTo(t Time) {
 	if s.running {
 		panic("kernel: AdvanceTo called while the simulation is running")

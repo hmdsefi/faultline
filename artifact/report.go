@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Report is report.json (ART §5.3).
+// Report is the content of report.json: what ran, how it ended, and how to replay it.
 type Report struct {
 	Version     int        `json:"faultline_report"` // ReportVersion
 	Status      string     `json:"status"`           // "fail" or "pass"
@@ -34,19 +34,20 @@ type Report struct {
 	Run         RunInfo    `json:"run"`
 	Nodes       []Node     `json:"nodes"`
 
-	// Phase 2 (GOR, EXB). Omitted when empty.
-	DeterminismLevel string `json:"determinism_level,omitempty"` // "exact" or "best-effort"
-	ExactBackend     string `json:"exact_backend,omitempty"`     // "wasip1" or "toolexec"; absent: none
-	Leaks            *Leaks `json:"leaks,omitempty"`             // GOR-069
-	// Phase 3 (EXP-050). Omitted when nil; from Phase 3 API always sets both.
-	Asserts json.RawMessage `json:"asserts,omitempty"` // [{name, kind, calls, true}] by name; [] when none
-	Swarm   json.RawMessage `json:"swarm,omitempty"`   // explore.SwarmConfig JSON, or null when swarm is off
+	// Reserved for goroutine mode, coverage points and swarm testing. faultline.Run does not set
+	// them, and they are omitted when empty.
+	DeterminismLevel string          `json:"determinism_level,omitempty"` // "exact" or "best-effort"
+	ExactBackend     string          `json:"exact_backend,omitempty"`     // "wasip1" or "toolexec"; absent: none
+	Leaks            *Leaks          `json:"leaks,omitempty"`             // goroutines alive after the run
+	Asserts          json.RawMessage `json:"asserts,omitempty"`           // [{name, kind, calls, true}] by name; [] when none
+	Swarm            json.RawMessage `json:"swarm,omitempty"`             // the swarm config as JSON, or null when swarm is off
 
 	Dir   string `json:"dir"`   // set by Write
 	Files []File `json:"files"` // set by Write
 }
 
-// Failure describes why a seed failed (API §5.10).
+// Failure describes why a seed failed. Kind says how: invariant or final for a check that
+// returned an error, panic, fail for a call to Sim.Fail, limit, or determinism.
 type Failure struct {
 	Kind        string         `json:"kind"`  // invariant, final, panic, fail, limit, determinism, leak
 	Check       string         `json:"check"` // may be ""
@@ -67,10 +68,10 @@ type Failure struct {
 
 // Panic describes a panic failure.
 type Panic struct {
-	Value string `json:"value"`          // panic text (API-064)
+	Value string `json:"value"`          // panic text: a string as is, an error's Error(), else kernel.Describe
 	In    string `json:"in"`             // "callback", "invariant", "final", "body"
 	Name  string `json:"name,omitempty"` // invariant or final name
-	Site  string `json:"site"`           // panic site (API-063), equal to Failure.Check
+	Site  string `json:"site"`           // function that panicked, for example "main.(*Store).apply"; equal to Failure.Check
 	Stack string `json:"stack"`
 }
 
@@ -102,17 +103,20 @@ type RecordDiff struct {
 	B     *TraceRecord `json:"b,omitempty"` // nil: list B ended
 }
 
-// Replay is the replay command and its parts (API-080).
+// Replay is the command that replays the seed, and its parts.
 type Replay struct {
-	Command    string            `json:"command"`
-	Env        map[string]string `json:"env"` // encoded with sorted keys
-	Run        string            `json:"run"`
-	PackageArg string            `json:"package_arg"`
-	Dir        string            `json:"dir,omitempty"` // module root to run Command in; "" if unknown
-	PackageDir string            `json:"package_dir"`
+	Command    string            `json:"command"`     // a shell command line
+	Env        map[string]string `json:"env"`         // the variables Command sets; encoded with sorted keys
+	Run        string            `json:"run"`         // the -run pattern that selects the test
+	PackageArg string            `json:"package_arg"` // the package relative to Dir: "." or "./<path>"
+	// Dir is the directory PackageArg is relative to: the module root, or for a package outside a
+	// module, the package directory; "" if unknown. Command names a module's package by import
+	// path, so it works from any directory of the module; outside a module it runs in Dir.
+	Dir        string `json:"dir,omitempty"`
+	PackageDir string `json:"package_dir"` // the package directory, where the test ran
 }
 
-// Versions identify what produced the artifact (API-081).
+// Versions identify what produced the artifact.
 type Versions struct {
 	Faultline        string `json:"faultline"`
 	Go               string `json:"go"`
@@ -139,17 +143,16 @@ type RunOptions struct {
 	Net              json.RawMessage `json:"net"`                     // encoding/json of simnet.Config
 	Disk             json.RawMessage `json:"disk"`                    // encoding/json of simdisk.Config
 
-	// Phase 2, goroutine mode only (omitted in event mode).
+	// Reserved for goroutine mode and swarm testing; omitted in event mode.
 	Procs          int             `json:"procs,omitempty"`
 	DrainNS        int64           `json:"drain_ns,omitempty"`
 	StallTimeoutNS int64           `json:"stall_timeout_ns,omitempty"` // negative: watchdog off
 	FailOnLeak     bool            `json:"fail_on_leak,omitempty"`
-	NetSim         json.RawMessage `json:"netsim,omitempty"` // encoding/json of netsim.Config
-	// Phase 3: effective swarm on/off (EXP-010).
-	Swarm bool `json:"swarm,omitempty"`
+	NetSim         json.RawMessage `json:"netsim,omitempty"` // the goroutine-mode network config as JSON
+	Swarm          bool            `json:"swarm,omitempty"`  // whether swarm testing was on
 }
 
-// Leaks lists the goroutines still alive after a goroutine-mode run (GOR-068, GOR-069).
+// Leaks lists the goroutines still alive after a goroutine-mode run.
 type Leaks struct {
 	Groups       []LeakGroup `json:"groups"`       // ascending (node ID, incarnation)
 	Unattributed int         `json:"unattributed"` // goroutines whose labels code under test replaced
@@ -170,7 +173,9 @@ type LeakRecord struct {
 	Frames []string `json:"frames"` // "function (file:line)", innermost first
 }
 
-// RunInfo describes the artifact attempt.
+// RunInfo describes the run whose trace the artifact holds. A seed can run more than once, an
+// attempt each time. A failing seed runs again with a full trace to write its artifact, and the
+// determinism check runs a seed twice.
 type RunInfo struct {
 	TraceHash  string   `json:"trace_hash"`
 	Events     uint64   `json:"events"`
@@ -182,7 +187,7 @@ type RunInfo struct {
 	RecoveryNS int64    `json:"recovery_ns,omitempty"`
 	Recovery   string   `json:"recovery,omitempty"`
 	Planners   []string `json:"planners"` // never null
-	Attempts   int      `json:"attempts"`
+	Attempts   int      `json:"attempts"` // runs of the seed, this one included
 }
 
 // File is one entry of the file index.
@@ -313,7 +318,7 @@ func hasCycle(v reflect.Value, path map[ptrKey]bool) bool {
 	return false
 }
 
-// WriteReport writes r as report.json (ART-020).
+// WriteReport writes r as report.json: indented JSON, with every string made valid UTF-8.
 func WriteReport(w io.Writer, r *Report) error {
 	if r == nil {
 		return errors.New("artifact: report is nil")
@@ -328,7 +333,8 @@ func WriteReport(w io.Writer, r *Report) error {
 	return enc.Encode(&rr)
 }
 
-// ReadReport reads and version-checks report.json (ART-086). Unknown fields are ignored.
+// ReadReport reads and version-checks report.json. It rejects a file that is not a faultline
+// report or has a newer version than this package writes. Unknown fields are ignored.
 func ReadReport(r io.Reader) (*Report, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {

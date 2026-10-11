@@ -36,13 +36,15 @@ type Planner interface {
 	// Name returns the planner's name, matching ^[a-z0-9][a-z0-9-]*$ and not one of "inject",
 	// "load", "replay". The planner's stream label is "fault/" + Name().
 	Name() string
-	// Start is called once per run. It schedules the planner's work with ctx.Sim.AtFront
-	// (FLT-052) and returns.
+	// Start is called once per run. It schedules the planner's work with ctx.Sim.AtFront and
+	// returns. A planner draws randomness only from ctx.Rand and changes the world only through
+	// ctx.Inject, so that a replay of its schedule runs the same way.
 	Start(ctx *PlanContext)
 }
 
-// NewPlanContext returns the PlanContext for planner p (FLT-050): its stream, an Inject that
-// records p's name as the source, the servers sorted by NodeID, roles, until, and the disks.
+// NewPlanContext returns the PlanContext for planner p: its stream, an Inject that records p's
+// name as the source, the servers sorted by NodeID, roles, until, and the disks. It panics if
+// p.Name() is not a valid planner name.
 func (in *Injector) NewPlanContext(p Planner, servers []*kernel.Node, roles Roles, until kernel.Time) *PlanContext {
 	name := p.Name()
 	if !validPlannerName(name) {

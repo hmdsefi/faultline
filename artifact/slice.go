@@ -10,7 +10,9 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 )
 
-// Slice is a causal slice (ART §5.7).
+// Slice is a causal slice: the records that happened before a root record. CausalSlice finds them
+// breadth first, following each record's Cause and the previous record of the same node
+// incarnation.
 type Slice struct {
 	Root      uint64   // 0: no slice
 	Seqs      []uint64 // members in discovery order; Seqs[0] == Root
@@ -93,7 +95,7 @@ func (x *hbIndex) preds(i int, buf []int) []int {
 }
 
 // CausalSlice computes the causal slice of root in records (ascending Seq) with at most cap
-// members (ART-051).
+// members. Truncated reports whether the cap cut some predecessor off.
 func CausalSlice(records []kernel.Record, root uint64, cap int) Slice {
 	if root == 0 || cap < 1 {
 		return Slice{Cap: cap}

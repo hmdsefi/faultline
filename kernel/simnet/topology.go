@@ -8,7 +8,7 @@ import (
 	"github.com/hmdsefi/gograph"
 )
 
-// Connected reports whether the edge from → to exists. Connected(n, n) is always true.
+// Connected reports whether the edge from -> to exists. Connected(n, n) is always true.
 func (nw *Network) Connected(from, to kernel.NodeID) bool {
 	nw.register()
 	i := nw.index("Connected", from)

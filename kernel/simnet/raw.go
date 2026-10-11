@@ -19,7 +19,7 @@ type RawOptions struct {
 	FIFO bool
 }
 
-// Decide draws the random decisions for one message on from → to from that link's stream,
+// Decide draws the random decisions for one message on from -> to from that link's stream,
 // exactly as Send does, without sending anything and without emitting a record.
 func (nw *Network) Decide(from, to kernel.NodeID) Decision {
 	nw.register()

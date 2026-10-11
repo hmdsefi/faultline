@@ -13,8 +13,9 @@ import (
 // script is the planner returned by Script.
 type script struct{ events []Event }
 
-// Script returns a planner named "script" that applies a copy of events at their At
-// (FLT-090).
+// Script returns a planner named "script" that applies a copy of events at their At. Unlike
+// Inject and Load, it resolves an event's Role to a node when the event fires. Start panics on an
+// invalid event, an unknown role or node, or an event before now.
 func Script(events ...Event) Planner { return &script{events: cloneEvents(events)} }
 
 func (sc *script) Name() string { return "script" }
