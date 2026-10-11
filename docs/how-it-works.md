@@ -1,6 +1,7 @@
 # How faultline works
 
-faultline turns one Go test into many simulated runs, and each run replays exactly from its seed.
+faultline is deterministic simulation testing for Go: it turns one Go test into many simulated
+runs, and each run replays exactly from its seed.
 This page explains what faultline controls in a run and which rules your code follows inside it. It
 ends with the files a failing run leaves behind for you to debug.
 
