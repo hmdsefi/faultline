@@ -16,6 +16,14 @@
   Find the bugs in your distributed system before production does.
 </p>
 
+<p align="center">
+  <img alt="A terminal runs go test on an etcd/raft harness test with a bug switch on, and seed 0x089cc95a16ce9a11 fails the durable state check. The seed's timeline page jumps to the failure and zooms in on the crash of n1, and its replay command is copied. Pasted into the terminal, the command fails the same check at the same time and event." src=".github/assets/etcd-raft-demo.gif" width="860">
+  <br>
+  <sub>The etcd/raft harness with a bug switched on: <code>go test</code> fails a seed, the timeline page
+  shows the crash, and the replay command fails the same way. Without the bug switch, 40,000 seeds
+  passed.</sub>
+</p>
+
 faultline lets an AI coding agent test a distributed Go system inside `go test`. It finds the bugs
 that appear only when messages are delayed or dropped, nodes crash and disk syncs fail. The system
 runs in virtual time on a simulated network and disk, where faultline injects those faults. Every
