@@ -1,7 +1,7 @@
 # faultline documentation
 
-These pages show how to test a distributed system in Go with faultline, by hand or through an AI
-coding agent.
+faultline is deterministic simulation testing (DST) for Go. These pages show how to test a
+distributed system with it, by hand or through an AI coding agent.
 
 ## AI coding agents
 

@@ -4,7 +4,8 @@ This guide shows how an AI coding agent finds a distributed-systems bug with fau
 checks its fix against the seed that failed, and pins that seed as a regression test. The guide
 covers the loop, which artifact file answers which question, and what v0.1.0 cannot do. It ends
 with a block to paste into your agent's instruction file, which also holds the rules for code
-inside the simulation.
+inside the simulation. The agent needs only a shell that runs `go test`, so the guide applies to
+Claude Code, Codex, Cursor and other coding agents.
 
 ## Why faultline suits an agent
 
