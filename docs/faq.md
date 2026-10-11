@@ -52,9 +52,9 @@ the rest of your Go code. Code inside the simulation reads time and randomness f
 starts no goroutines. It sorts map keys when the order matters, and keeps no state between runs.
 [How faultline works](how-it-works.md#the-determinism-rules-your-code-follows) lists the rules.
 
-faultline does not inspect your code for these rules; it detects their effect. A broken rule changes
-the trace, and `FAULTLINE_CHECK_DETERMINISM=1` reports the first record where two runs of a seed
-differ.
+faultline does not inspect your code for these rules; it detects their effect on the trace. When a
+broken rule changes the trace, `FAULTLINE_CHECK_DETERMINISM=1` reports the first record where two
+runs of a seed differ. A broken rule that changes nothing in the trace goes unnoticed.
 
 The error text of a check is part of the trace too, so keep pointer addresses and wall-clock times
 out of it. Report failures with `w.Invariant`, `w.Final` or `w.Sim.Fail`: a seed stopped by

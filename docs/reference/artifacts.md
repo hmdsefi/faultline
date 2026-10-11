@@ -44,7 +44,7 @@ An artifact directory holds these files:
 |---|---|---|---|
 | `report.json` | always | `faultline_report` 1 | the report as data: failure, replay command, versions, options, run summary |
 | `report.txt` | always | none | the failure report as printed, with the full panic stack |
-| `trace.jsonl` | always | `faultline_trace` 1 | every record of the run, one JSON object per line |
+| `trace.jsonl` | always | `faultline_trace` 1 | every record of the run, or the last 1,000,000 after a `limit` failure; one JSON object per line |
 | `schedule.json` | always | `faultline_schedule` 1 | the fault schedule: every fault that ran |
 | `history.jsonl` | when the test recorded client operations | `faultline_history` 1 | the client operations |
 | `timeline.txt` | always | `faultline timeline v1` | the trace as aligned text |

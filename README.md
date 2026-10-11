@@ -132,7 +132,8 @@ sending the acknowledgment for `k169` and crashing 0.3 ms later, before its next
 faultline, with checks for raft's safety properties after every event. One call, `etcdraft.Test`,
 runs a whole test. It tests the raft library with the settings you choose, such as `PreVote` and
 `CheckQuorum`. It does not test your application: the state machine on top of raft is the
-harness's own key-value store. Its code is also a complete port of a real library to the node API.
+harness's own key-value store. The harness's code is also a complete port of a real library to the
+node API.
 
 On an Apple M4 Max, one seed of a three-server cluster, 60 seconds of virtual time under the
 default faults, took 68 ms on average. faultline ran 40,000 seeds of the harness, and no seed

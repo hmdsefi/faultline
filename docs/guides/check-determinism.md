@@ -134,7 +134,7 @@ with this setup error:
 
 Remove `t.Parallel` from tests that call `faultline.Run`. `Options.NoCryptoSeed` turns the seeding
 off instead, and allows a parallel test. Then `crypto/rand` in the code under test is no longer
-deterministic, and the check reports it when that code reads from it.
+deterministic, and the check reports it when a read changes the trace.
 
 ## Verify it works
 

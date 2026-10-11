@@ -28,8 +28,9 @@ Each of these takes the place of a standard library call. `w.Net.Send` replaces 
 the message is a Go value that the simulated network hands to the receiver's handler. The volume's
 `Create` and `Open`, and the file's `Append` and `Sync`, replace `os.File`. `n.After` replaces
 `time.AfterFunc` and measures virtual time on the node's clock. The kernel runs one callback at a
-time on one goroutine, so code on the node API starts no goroutines and never blocks: it returns,
-and a message or a timer calls it again. [Get started](getting-started.md) builds a key-value
+time on one goroutine, so a callback must return without blocking and must not start goroutines. A
+blocking callback stalls the whole simulation, and a goroutine runs outside the seeded event queue.
+The code returns, and a message or a timer calls it again. [Get started](getting-started.md) builds a key-value
 server on this API, and [How faultline works](how-it-works.md#nodes) describes what a crash does to
 a node.
 

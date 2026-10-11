@@ -205,7 +205,8 @@ A failed `Sync` returns an error. By default, the writes it covered never become
 though reads return them until the next crash. Files opened before a crash return an error when used
 after it. Neither the server above nor the fixed one in [Get
 started](getting-started.md#fix-the-bug) survives a failed `Sync`: under a `fault.KindSyncFail`
-rule, each loses an acknowledged put.
+rule, each loses an acknowledged put. The server above keeps the acknowledgments of a failed sync
+and sends them after the next sync succeeds, but the writes of the failed sync never become durable.
 
 ## Faults and fault schedules
 
