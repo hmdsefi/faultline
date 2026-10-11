@@ -20,8 +20,8 @@ faultline lets an AI coding agent test a distributed Go system inside `go test`.
 that appear only when messages are delayed or dropped, nodes crash and disk syncs fail. The system
 runs in virtual time on a simulated network and disk, where faultline injects those faults. Every
 random choice comes from one seed, so a failing seed replays the identical run. In v0.1.0 the code
-under test is written against faultline's node API, as callbacks with no goroutines, or is etcd/raft
-through the included harness.
+under test is written against faultline's [node API](docs/architecture.md#the-node-api), as Go
+callbacks with no goroutines, or is etcd/raft through the included harness.
 
 An agent that changes distributed code gets:
 
@@ -130,12 +130,15 @@ sending the acknowledgment for `k169` and crashing 0.3 ms later, before its next
 
 `harness/etcdraft` runs clusters of [etcd/raft](https://github.com/etcd-io/raft) v3.7.0 inside
 faultline, with checks for raft's safety properties after every event. One call, `etcdraft.Test`,
-runs a whole test.
+runs a whole test. It tests the raft library with the settings you choose, such as `PreVote` and
+`CheckQuorum`. It does not test your application: the state machine on top of raft is the
+harness's own key-value store. Its code is also a complete port of a real library to the node API.
 
-faultline ran 40,000 seeds of the harness under the default faults, and no seed failed. Five bug
-switches break the harness on purpose, and the checks caught each one on the first seed. [Test
-etcd/raft with the harness](docs/guides/etcd-raft.md) shows how to write such a test, and gives the
-configurations and timings of those runs.
+On an Apple M4 Max, one seed of a three-server cluster, 60 seconds of virtual time under the
+default faults, took 68 ms on average. faultline ran 40,000 seeds of the harness, and no seed
+failed. Five bug switches break the harness on purpose, and the checks caught each one on the first
+seed. [Test etcd/raft with the harness](docs/guides/etcd-raft.md) shows how to write such a test,
+and gives the configurations and timings of those runs.
 
 ## Install
 

@@ -29,7 +29,7 @@
 ## Concepts
 
 - [How faultline works](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/how-it-works.md): when you write code that runs inside the simulation, or need to know why a run behaves as it does. Virtual time, the seeded scheduler, named random streams, nodes, the simulated network and disk, faults and fault schedules, checks, seeds and replay, and the determinism rules for code under test.
-- [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): when you need to know which package does what. The packages, how one seed runs through them, and the design choices behind them.
+- [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): when you need to know what the node API is or which package does what. The node API, the packages, how one seed runs through them, and the design choices behind them.
 - [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): before you decide whether faultline fits a system, or when a feature seems to be missing. What v0.1.0 does not do, the known issues, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
 
 ## Optional

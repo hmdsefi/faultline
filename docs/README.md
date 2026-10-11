@@ -50,8 +50,8 @@ These pages explain how faultline works and why:
 
 - [How faultline works](how-it-works.md): virtual time, the seeded scheduler, nodes, the simulated
   network and disk, faults, checks, seeds, replay, and the rules your code follows.
-- [Architecture](architecture.md): the packages, how one seed runs through them, and the design
-  choices behind them.
+- [Architecture](architecture.md): what the node API is, the packages, how one seed runs through
+  them, and the design choices behind them.
 - [Limitations and FAQ](faq.md): what v0.1.0 does not do, the known issues, and how faultline
   relates to other tools.
 

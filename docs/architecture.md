@@ -4,6 +4,40 @@ faultline is a Go library built around one single-threaded simulator, plus a com
 separate module for etcd/raft. This page shows what each package owns, how one seed moves through
 them, and why the design looks the way it does. It covers the packages in v0.1.0.
 
+## The node API
+
+The node API is the set of Go types that code under test calls in place of the operating system.
+It is not a server, a network protocol or a command-line tool. It is an ordinary Go API in the
+packages `kernel`, `kernel/simnet` and `kernel/simdisk`, and your test imports it like any other
+library. Everything runs inside the `go test` process: the simulation opens no port, starts no
+process and uses no real file. The only real files are the artifact directories faultline writes for
+you to debug with.
+
+A *node* is one simulated machine, held as a `*kernel.Node` value. It is not an operating system
+process and not a goroutine. Code on the node API has three parts:
+
+- A *boot function* of type `kernel.BootFunc`, passed to `w.AddServer` or `w.AddClient`, where `w`
+  is the `*faultline.World` your test builds. faultline calls the boot function when the node first
+  starts and again after every restart.
+- The callbacks that the boot function installs: a message handler with `w.Net.Handle`, and timers
+  with `n.After`.
+- The calls those callbacks make: `w.Net.Send` for messages, `w.Disk.Volume(n)` for files, `n.Now`
+  for the node's clock and `n.Rand` for random numbers.
+
+Each of these takes the place of a standard library call. `w.Net.Send` replaces a socket write, and
+the message is a Go value that the simulated network hands to the receiver's handler. The volume's
+`Create` and `Open`, and the file's `Append` and `Sync`, replace `os.File`. `n.After` replaces
+`time.AfterFunc` and measures virtual time on the node's clock. The kernel runs one callback at a
+time on one goroutine, so code on the node API starts no goroutines and never blocks: it returns,
+and a message or a timer calls it again. [Get started](getting-started.md) builds a key-value
+server on this API, and [How faultline works](how-it-works.md#nodes) describes what a crash does to
+a node.
+
+A *harness* is code that ports a real system to the node API. `harness/etcdraft` does that for
+etcd/raft, so you can test raft without writing the port yourself. etcd/raft came first because its
+`RawNode` holds the raft algorithm alone. It starts no goroutines and does no I/O, so the harness
+supplies the messages, the write-ahead log and the timers from the node API.
+
 ## The packages
 
 A test calls `faultline.Run`, which builds a fresh simulated world for every run from the kernel and
@@ -13,10 +47,11 @@ with.
 ```mermaid
 flowchart TB
     accTitle: How faultline's packages fit together
-    accDescr: go test runs your test or the etcd/raft harness, and both call faultline.Run in the root package. For every run, Run builds a world from kernel, simnet, simdisk, fault and history. On a failure, Run passes the run to package artifact, which writes the artifact directory and inlines the timeline renderer from package ui. The faultline command re-renders the files of an artifact directory.
+    accDescr: go test runs your test or the etcd/raft harness, and both call faultline.Run in the root package. Both run their nodes on the node API of the world's packages, and the harness drives etcd/raft's RawNode. For every run, Run builds a world from kernel, simnet, simdisk, fault and history. On a failure, Run passes the run to package artifact, which writes the artifact directory and inlines the timeline renderer from package ui. The faultline command re-renders the files of an artifact directory.
     go_test["The go test command"]
     your_test["Your simulation test"]
     harness["harness/etcdraft (own module)"]
+    rawnode["etcd/raft: RawNode"]
     run["faultline: Run, World, Options"]
     subgraph world["One simulated world per run"]
         kernel["kernel: time, events, nodes, trace"]
@@ -35,6 +70,9 @@ flowchart TB
     go_test -->|runs| harness
     your_test -->|calls| run
     harness -->|calls| run
+    harness -->|drives| rawnode
+    your_test -->|node API| world
+    harness -->|node API| world
     run -->|builds per run| world
     run -->|on failure| artifact
     artifact -->|inlines| ui

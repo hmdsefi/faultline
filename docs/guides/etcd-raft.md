@@ -6,6 +6,21 @@ simulated disk, and clients write and read keys. Faults hit the cluster, and che
 safety properties run after every event. This guide shows how to run the harness, configure it,
 write your own scenario, and prove that its checks catch real mistakes.
 
+## What the harness tests
+
+The harness tests the etcd/raft library: elections, log replication, snapshots and membership
+changes, with the raft settings you choose in `Config`. It does not test your application. The
+state machine on top of raft is the harness's own key-value store, and the write-ahead log and the
+transport are the harness's too. Use it to:
+
+- check raft's safety properties with the cluster size and settings you run in production;
+- test a change to etcd/raft itself, with a `replace` directive in your `go.mod`;
+- read a complete port of a real library to the [node API](../architecture.md#the-node-api) before
+  you port your own system.
+
+etcd/raft fits the node API without a shim. Its `RawNode` holds the raft algorithm alone and leaves
+the network, the disk and the clock to the caller, so the harness supplies them from faultline.
+
 ## Add the harness module
 
 The harness is a Go module of its own, so etcd/raft and protobuf stay out of faultline's core
