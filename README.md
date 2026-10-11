@@ -167,14 +167,6 @@ Start with the index, or go to the page you need:
 - [CONTRIBUTING](.github/CONTRIBUTING.md) and [SECURITY](.github/SECURITY.md): how to send a change,
   and how to report a vulnerability privately.
 
-## Why the name
-
-A fault line is a crack in the earth's crust. Stress builds up there for years without any sign,
-and then it is released all at once in an earthquake. Bugs in distributed systems often behave the
-same way. In software, a "fault" is also the usual word for something going wrong, like a crashed
-server or a lost message. faultline helps you find those weak spots in a test instead of in
-production.
-
 ## License
 
 faultline is licensed under the [Mozilla Public License 2.0](LICENSE). You can use it in any

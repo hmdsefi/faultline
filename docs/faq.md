@@ -171,6 +171,14 @@ average, as [Results of 40,000 seeds](guides/etcd-raft.md#results-of-40000-seeds
 same machine, the 50 seeds of the key-value example's `TestKV`, 10 seconds of virtual time each, run
 in about one second. A failing seed runs twice, once more to write its artifact.
 
+### Why is it called faultline?
+
+A fault line is a crack in the earth's crust. Stress builds up there for years without any sign,
+and then it is released all at once in an earthquake. Bugs in distributed systems often behave the
+same way. In software, a "fault" is also the usual word for something going wrong, like a crashed
+server or a lost message. faultline helps you find those weak spots in a test instead of in
+production.
+
 ## Next steps
 
 - [Use faultline with an AI coding agent](ai-agents.md): the loop from a failing seed to a pinned
