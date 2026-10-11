@@ -274,6 +274,13 @@ FAIL	example.com/raftdemo	0.353s
 FAIL
 ```
 
+The timeline page of that seed shows the crash of `n1`, and the replay command fails the same check
+at the same time and event:
+
+<p align="center">
+  <img alt="A terminal runs go test on an etcd/raft harness test with a bug switch on, and seed 0x089cc95a16ce9a11 fails the durable state check. The seed's timeline page jumps to the failure and zooms in on the crash of n1, and its replay command is copied. Pasted into the terminal, the command fails the same check at the same time and event." src="../../.github/assets/etcd-raft-demo.gif" width="860">
+</p>
+
 ## Results of 40,000 seeds
 
 faultline ran 40,000 seeds of the harness against etcd/raft v3.7.0. It ran 10,000 seeds each for
