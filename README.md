@@ -38,6 +38,8 @@ faultline with an AI coding agent](docs/ai-agents.md). It walks through the loop
 block for the agent's `AGENTS.md` or `CLAUDE.md`. To learn faultline by hand, build the following
 example step by step in [Get started](docs/getting-started.md).
 
+<h3 align="center">⭐ If faultline is useful to you, a star on GitHub helps other Go developers find it.</h3>
+
 ## Who it is for
 
 faultline is for Go teams, and their agents, that build a distributed system: a consensus or
