@@ -28,10 +28,10 @@ faultline is deterministic simulation testing (DST) for Go. It lets an AI coding
 distributed Go system inside `go test`. It finds the bugs that make distributed tests flaky. They
 appear only when messages are delayed or dropped, the network partitions, nodes crash or an fsync
 fails. The system runs in virtual time on a simulated network and disk, where faultline injects
-those faults. Every random choice comes from one seed, so every failure is reproducible: a failing
-seed replays the identical run. In v0.1.0 the code
-under test is written against faultline's [node API](docs/architecture.md#the-node-api), as Go
-callbacks with no goroutines, or is etcd/raft through the included harness.
+those faults. Every random choice comes from one seed, so a failing seed is a reproducible bug
+report: it replays the identical run. In v0.1.0 the code under test is written against faultline's
+[node API](docs/architecture.md#the-node-api), as Go callbacks with no goroutines, or is etcd/raft
+through the included harness.
 
 An agent that changes distributed code gets:
 
