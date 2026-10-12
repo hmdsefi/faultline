@@ -25,7 +25,7 @@ import (
 type runner struct {
 	t       *testing.T
 	body    func(w *World)
-	plan    *plan
+	plan    *runPlan
 	build   buildInfo
 	cwd     string
 	results string

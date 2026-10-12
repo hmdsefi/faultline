@@ -540,6 +540,12 @@ func TestRunPreviousReport(t *testing.T) {
 		if rep := readReport(t, dir); rep.Status != "pass" || rep.Versions.Faultline == "v0.0.0-test" {
 			t.Fatalf("the pass artifact was not replaced: status %s, faultline %s", rep.Status, rep.Versions.Faultline)
 		}
+		// A failing run compares with a passing report too.
+		editReport(t, dir, "v0.0.0-test", "")
+		o, code = runScenario(t, "fails-for-0x1", passed[:2])
+		if code != 1 || !strings.Contains(o, "\n    warning: previous artifact was recorded with faultline v0.0.0-test; this run uses ") {
+			t.Fatalf("failure after a pass artifact: exit %d\n%s", code, o)
+		}
 	})
 
 	// The note quotes a signature that holds a control character.

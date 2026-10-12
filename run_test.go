@@ -4,6 +4,7 @@
 package faultline_test
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -609,13 +610,12 @@ func TestRunPlanners(t *testing.T) {
 	}
 
 	writeSchedule := func(name string, s fault.Schedule) string {
-		path := filepath.Join(dir, name)
-		f, err := os.Create(path)
-		if err != nil {
+		var b bytes.Buffer
+		if err := s.Write(&b); err != nil {
 			t.Fatal(err)
 		}
-		defer f.Close()
-		if err := s.Write(f); err != nil {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		return path
@@ -949,6 +949,38 @@ func TestRunFilteredSeed(t *testing.T) {
 		!strings.Contains(o, "replay:    FAULTLINE_SEED=0x8a216e8699751f87 go test -v"+replayFlags()+" -run '^TestScenario$' github.com/hmdsefi/faultline\n") {
 		t.Fatalf("exit %d\n%s", code, o)
 	}
+	// -run selected one seed, so the stop line does not count the seeds it excluded (API-021).
+	const stop = "faultline: stopping after failing seed 0x8a216e8699751f87; any later seeds that -run and -skip allow were not run (set Options.KeepGoing to run them)\n"
+	if !strings.Contains(o, stop) || strings.Contains(o, "seeds not run") {
+		t.Fatalf("want the stop line %q and no seeds not run line:\n%s", stop, o)
+	}
+}
+
+var _ = scenario("fail-in-subtest", func(t *testing.T) {
+	t.Run("sub", func(t *testing.T) {
+		faultline.Run(t, faultline.Options{Seeds: 3, Duration: time.Second}, func(w *faultline.World) {
+			addTicker(w)
+			w.Invariant("no events", func() error { return errors.New("an event ran") })
+		})
+	})
+})
+
+// API-021: the stop line reads -skip, and compares the patterns with the name of the test that
+// calls Run.
+func TestRunStopLineFlags(t *testing.T) {
+	// -skip reaches the seed level: seed 0 runs and fails, and the line does not count.
+	o, code := runScenario(t, "fail-first-event", nil, fmt.Sprintf("-test.skip=^TestScenario$/^seed=0x%016x$", seedK(1)))
+	filtered := fmt.Sprintf("faultline: stopping after failing seed 0x%016x; any later seeds that -run and -skip allow were not run (set Options.KeepGoing to run them)\n", seedK(0))
+	if code != 1 || !slices.Equal(ranSeeds(o), hexSeeds(seedK(0))) || !strings.Contains(o, filtered) {
+		t.Fatalf("-skip: exit %d, want the stop line %q\n%s", code, filtered, o)
+	}
+	// -run selects the subtest that calls Run, not its seeds: the line counts them.
+	o, code = runScenario(t, "fail-in-subtest", nil, "-test.run=^TestScenario$/^sub$")
+	seed := faultline.DeriveSeed(faultline.NameBase("TestScenario/sub"), 0)
+	counted := fmt.Sprintf("faultline: stopping after failing seed 0x%016x; 2 of 3 seeds not run (set Options.KeepGoing to run all)\n", seed)
+	if code != 1 || strings.Count(o, "=== RUN   TestScenario/sub/seed=") != 1 || !strings.Contains(o, counted) {
+		t.Fatalf("-run of a subtest: exit %d, want the stop line %q\n%s", code, counted, o)
+	}
 }
 
 var _ = scenario("later-phase", func(t *testing.T) {
@@ -1016,6 +1048,8 @@ func TestRunFatalInBody(t *testing.T) {
 	}
 }
 
+// fatalRerunCalls counts the body calls of the fatal-rerun child process; the second call is the
+// artifact attempt, which stops with t.Fatalf.
 var fatalRerunCalls int
 
 var _ = scenario("fatal-rerun", func(t *testing.T) {

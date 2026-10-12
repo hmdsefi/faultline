@@ -133,6 +133,10 @@ func TestDeterminismMessage(t *testing.T) {
 			t.Errorf("%s %x: message\n%s\nwant line 2\n%s", c.context, c.hashes, g.message, c.line)
 		}
 	}
+	// One kept record is "1 record".
+	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, a[:1], a[:1], attemptResult{}); !strings.HasPrefix(g.message, "the two full-trace runs differ before the last 1 record they kept (") {
+		t.Errorf("one kept record:\n%s", g.message)
+	}
 	// In the check the full-trace runs are runs 3 and 4. A run whose list ended names its last record.
 	h := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, a[:1], a, attemptResult{})
 	if want := "first difference at record #2:\n  run 3: (trace ended after record #1)\n  run 4: #2 t=0.000000005s node=1#1 net.send cause=0 \"x\" msg=\"1\"\n" + causes; h.message != want {
@@ -155,8 +159,11 @@ func TestDeterminismMessage(t *testing.T) {
 	wa := []kernel.Record{{Seq: 3, Text: "c"}, {Seq: 4, Text: "d"}, {Seq: 5, Text: "e"}}
 	wb := []kernel.Record{{Seq: 4, Text: "d"}, {Seq: 5, Text: "e"}, {Seq: 6, Text: "f"}}
 	o := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, orig, wa, wb, attemptResult{})
-	if want := "the two full-trace runs diverged before the records they kept: run 2 recorded 5 records and run 3 recorded 6 (trace hashes 0x0000000000000002 and 0x0000000000000003)\n" + causes; !strings.HasSuffix(o.message, "\n"+want) {
+	if want := "the two full-trace runs diverged before the records they kept: run 2 recorded 5 records and run 3 recorded 6 records (trace hashes 0x0000000000000002 and 0x0000000000000003)\n" + causes; !strings.HasSuffix(o.message, "\n"+want) {
 		t.Errorf("windows that do not line up:\n%s\nwant the suffix\n%s", o.message, want)
+	}
+	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, []kernel.Record{{Seq: 1, Text: "a"}}, []kernel.Record{{Seq: 2, Text: "b"}}, attemptResult{}); !strings.HasPrefix(g.message, "the two full-trace runs diverged before the records they kept: run 2 recorded 1 record and run 3 recorded 2 records (") {
+		t.Errorf("windows that do not line up, one record:\n%s", g.message)
 	}
 	if od := o.report().Determinism.Diff; od == nil || od.Index != 0 || od.A == nil || od.A.Seq != 3 || od.B == nil || od.B.Seq != 4 {
 		t.Errorf("windows that do not line up: report diff %+v", od)

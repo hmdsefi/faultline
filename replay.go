@@ -59,7 +59,7 @@ func buildInfoOf(bi *debug.BuildInfo) buildInfo {
 	b := buildInfo{
 		importPath: strings.TrimSuffix(bi.Path, ".test"),
 		modulePath: bi.Main.Path,
-		faultline:  versionOf(bi),
+		faultline:  versionOf(bi, sourceFile),
 	}
 	for _, s := range bi.Settings {
 		switch s.Key {
@@ -72,25 +72,45 @@ func buildInfoOf(bi *debug.BuildInfo) buildInfo {
 	return b
 }
 
-// versionOf implements versions.faultline (API-081).
-func versionOf(bi *debug.BuildInfo) string {
+// sourceFile is the path of this file at compile time, whose folder versionOf reads (API-081).
+var sourceFile = func() string {
+	_, file, _, _ := runtime.Caller(0)
+	return file
+}()
+
+// versionOf implements versions.faultline (API-081). file is the path of one of this package's
+// files at compile time, as runtime.Caller reports it. The version comes from its folder, not
+// from bi.Deps: a Go 1.26 test binary records no dependencies, and the folder gives Go 1.26 and
+// Go 1.27 the same value. The module cache names the folder github.com/hmdsefi/faultline@<version>.
+// So does -trimpath for a module that go.mod requires, even one replaced by a local folder. Code
+// from any other folder, such as a local replace, a go.work module or a fork, has no version:
+// (devel).
+func versionOf(bi *debug.BuildInfo, file string) string {
 	if bi.Main.Path == faultlineModule {
 		return bi.Main.Version
 	}
-	for _, d := range bi.Deps {
-		if d.Path != faultlineModule {
-			continue
-		}
-		v := d.Version
-		if d.Replace != nil {
-			v += " => " + d.Replace.Path
-			if rv := d.Replace.Version; rv != "" && rv != "(devel)" {
-				v += "@" + rv
-			}
-		}
-		return v
+	dir := "/" + strings.ReplaceAll(file, `\`, "/")
+	dir = dir[:strings.LastIndex(dir, "/")]
+	_, rest, _ := strings.Cut(dir[strings.LastIndex(dir, "/")+1:], "@v")
+	if rest == "" || rest[0] < '0' || '9' < rest[0] || !strings.HasSuffix(dir, "/"+faultlineModule+"@v"+rest) {
+		return "(devel)"
 	}
-	return "unknown"
+	return "v" + unescapeVersion(rest)
+}
+
+// unescapeVersion undoes the module cache's escaping of a version, which writes an upper-case
+// letter as '!' and the letter in lower case (v1.0.0-!r!c1 is v1.0.0-RC1).
+func unescapeVersion(v string) string {
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c == '!' && i+1 < len(v) && 'a' <= v[i+1] && v[i+1] <= 'z' {
+			i++
+			c = v[i] - 'a' + 'A'
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // testBinarySHA256 returns the lowercase hex SHA-256 of the running binary, computed once per
