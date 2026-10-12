@@ -96,3 +96,80 @@ func TestLoggerLevels(t *testing.T) {
 		t.Fatalf("LogNone records = %+v", recs)
 	}
 }
+
+// ETC-101: the other described types, and a nil pointer of each of the seven.
+func TestLoggerDescribesEveryType(t *testing.T) {
+	l, sim := newTestLogger(LogInfo)
+	e := &raftpb.Entry{Index: new(uint64(7)), Term: new(uint64(2)), Type: raftpb.EntryNormal.Enum(), Data: []byte("x")}
+	m := &raftpb.Message{Type: raftpb.MsgApp.Enum(), From: new(uint64(1)), To: new(uint64(2)), Term: new(uint64(2)),
+		LogTerm: new(uint64(2)), Index: new(uint64(6)), Commit: new(uint64(5)), Entries: []*raftpb.Entry{e}}
+	snap := &raftpb.Snapshot{Metadata: &raftpb.SnapshotMetadata{Index: new(uint64(9)), Term: new(uint64(2)),
+		ConfState: &raftpb.ConfState{Voters: []uint64{1, 2, 3}}}}
+	cc := &raftpb.ConfChange{Type: raftpb.ConfChangeAddNode.Enum(), NodeId: new(uint64(4))}
+	l.Infof("%v | %v | %v | %v", e, m, snap, cc)
+	l.Infof("%v %v %v %v %v %v %v", (*raftpb.HardState)(nil), (*raftpb.Entry)(nil), (*raftpb.Message)(nil),
+		(*raftpb.Snapshot)(nil), (*raftpb.ConfState)(nil), (*raftpb.ConfChange)(nil), (*raftpb.ConfChangeV2)(nil))
+	recs := logRecords(sim)
+	if len(recs) != 2 {
+		t.Fatalf("got %d raft_log records, want 2", len(recs))
+	}
+	want := raft.DescribeEntry(e, nil) + " | " + raft.DescribeMessage(m, nil) + " | " + raft.DescribeSnapshot(snap) + " | " + raft.DescribeConfChange(cc)
+	if recs[0].Text != want {
+		t.Fatalf("text = %q\nwant  %q", recs[0].Text, want)
+	}
+	if want := strings.TrimSpace(strings.Repeat("<nil> ", 7)); recs[1].Text != want {
+		t.Fatalf("nil pointers: text = %q, want %q", recs[1].Text, want)
+	}
+}
+
+// ETC-100: the debug level, Warning below LogWarning, a server's logger, Panic and Fatalf.
+func TestLoggerLevelsAndNodes(t *testing.T) {
+	l, sim := newTestLogger(LogInfo)
+	l.Debug("hidden")
+	l.Debugf("hidden %d", 1)
+	if recs := logRecords(sim); len(recs) != 0 {
+		t.Fatalf("LogInfo kept debug records: %+v", recs)
+	}
+	l, sim = newTestLogger(LogDebug)
+	l.Debug("d")
+	l.Debugf("d %d", 2)
+	if recs := logRecords(sim); len(recs) != 2 || recs[0].Text != "d" || recs[1].Text != "d 2" ||
+		attrOf(recs[0], "level") != "debug" || attrOf(recs[1], "level") != "debug" {
+		t.Fatalf("LogDebug records = %+v", recs)
+	}
+	l, sim = newTestLogger(LogError)
+	l.Warning("hidden")
+	l.Warningf("hidden %d", 3)
+	l.Error("e")
+	if recs := logRecords(sim); len(recs) != 1 || attrOf(recs[0], "level") != "error" {
+		t.Fatalf("LogError records = %+v; want the error only", recs)
+	}
+	l, sim = newTestLogger(LogInfo)
+	l.node = sim.AddNode("n2", func(*kernel.Node) {})
+	l.Info("from n2")
+	if recs := logRecords(sim); len(recs) != 1 || recs[0].Node != l.node.ID() {
+		t.Fatalf("records = %+v; want one with Node %d", recs, l.node.ID())
+	}
+	l, sim = newTestLogger(LogNone)
+	for _, c := range []struct {
+		call       func()
+		value      string
+		level, txt string
+	}{
+		{func() { l.Panic("p ", 1) }, "p 1", "panic", "p 1"},
+		{func() { l.Fatalf("f %d", 2) }, "raft fatal: f 2", "fatal", "f 2"},
+	} {
+		func() {
+			defer func() {
+				if v := recover(); v != c.value {
+					t.Errorf("panic value %v, want %q", v, c.value)
+				}
+			}()
+			c.call()
+		}()
+		recs := logRecords(sim)
+		if r := recs[len(recs)-1]; attrOf(r, "level") != c.level || r.Text != c.txt {
+			t.Errorf("record %+v, want level %s and text %q", r, c.level, c.txt)
+		}
+	}
+}
