@@ -16,6 +16,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -77,6 +78,26 @@ func eachUnion[M interface{ mapLike | nestedMap }](m M) {
 	}
 }
 
+// lener allows any type with a Len method; eachSecond's constraint embeds it before mapLike.
+type lener interface{ Len() int }
+
+func eachSecond[M interface {
+	lener
+	mapLike
+}](m M) {
+	for range m { // want `range over a map`
+	}
+}
+
+// The wrappers pass on a value whose type does not show whether it holds a proto message.
+func describeAny(v any) string { return kernel.Describe(v) } // want `proto message may reach Describe through type any`
+
+func describeParam[T any](v T) string { return kernel.Describe(v) } // want `proto message may reach Describe through type T`
+
+func sendError(nw *simnet.Network, n *kernel.Node, err error) {
+	nw.Send(n, 1, err) // want `proto message may reach Send through type error`
+}
+
 func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.Entry, ch chan int, f string, sb *strings.Builder, nw *simnet.Network, n *kernel.Node) {
 	// Statements.
 	go func() {}() // want `go statement`
@@ -93,6 +114,13 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = (*sync.WaitGroup).Go              // want `use of (*sync.WaitGroup).Go`
 	_ = context.AfterFunc(ctx, func() {}) // want `use of context.AfterFunc`
 	_ = spawn
+
+	// Finalizers and cleanups run on a runtime goroutine when the garbage collector decides.
+	runtime.SetFinalizer(&wg, nil)               // want `use of runtime.SetFinalizer`
+	_ = runtime.AddCleanup(&wg, func(int) {}, 0) // want `use of runtime.AddCleanup`
+	_ = runtime.AddCleanup[sync.WaitGroup, int]  // want `use of runtime.AddCleanup`
+	setFinalizer := runtime.SetFinalizer         // want `use of runtime.SetFinalizer`
+	_ = setFinalizer
 
 	// Maps are accessed by key only.
 	for range m { // want `range over a map`
@@ -121,6 +149,15 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = reflect.Value.MapKeys               // want `unordered iteration: (reflect.Value).MapKeys`
 	mapRange := reflect.ValueOf(m).MapRange // want `unordered iteration: (reflect.Value).MapRange`
 	_ = mapRange
+	_ = reflect.ValueOf(m).Seq()  // want `unordered iteration: (reflect.Value).Seq`
+	_ = reflect.ValueOf(m).Seq2() // want `unordered iteration: (reflect.Value).Seq2`
+	_ = reflect.Value.Seq2        // want `unordered iteration: (reflect.Value).Seq2`
+	seq := reflect.ValueOf(m).Seq // want `unordered iteration: (reflect.Value).Seq`
+	_ = seq
+	maps.DeleteFunc(m, func(string, int) bool { return true }) // want `unordered iteration: maps.DeleteFunc`
+	deleteFunc := maps.DeleteFunc[map[string]int]              // want `unordered iteration: maps.DeleteFunc`
+	_ = deleteFunc
+	_ = maps.EqualFunc(m, m, func(int, int) bool { return true }) // want `unordered iteration: maps.EqualFunc`
 
 	// Floating point.
 	_ = 1.5             // want `floating-point value`
@@ -150,6 +187,12 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = syscall.Environ()      // want `use of syscall.Environ`
 	environ := os.Environ      // want `use of os.Environ`
 	_ = environ
+	_ = os.TempDir()          // want `use of os.TempDir`
+	_, _ = os.UserHomeDir()   // want `use of os.UserHomeDir`
+	homeDir := os.UserHomeDir // want `use of os.UserHomeDir`
+	_ = homeDir
+	_, _ = os.UserCacheDir()  // want `use of os.UserCacheDir`
+	_, _ = os.UserConfigDir() // want `use of os.UserConfigDir`
 	_, _ = crand.Read(nil)
 
 	// Wall-clock time, as calls and as function values.
@@ -235,4 +278,21 @@ func bad(m map[string]int, sm stringMap, hs *raftpb.HardState, ents []*raftpb.En
 	_ = nw.SendRaw(n, 1, hs, simnet.RawOptions{})                    // want `proto message passed to SendRaw`
 	(*simnet.Network).Send(nw, n, 1, hs)                             // want `proto message passed to Send`
 	_ = (*simnet.Network).SendRaw(nw, n, 1, hs, simnet.RawOptions{}) // want `proto message passed to SendRaw`
+
+	// A message behind an interface: converted to one, or held in one.
+	_ = kernel.Describe(any(hs))           // want `proto message may reach Describe through type any`
+	_ = kernel.Describe((interface{})(hs)) // want `proto message may reach Describe through type interface{}`
+	var payload any = hs
+	nw.Send(n, 1, payload)                                                // want `proto message may reach Send through type any`
+	_ = nw.SendRaw(n, 1, fmt.Stringer(hs), simnet.RawOptions{})           // want `proto message may reach SendRaw through type fmt.Stringer`
+	(*simnet.Network).Send(nw, n, 1, payload)                             // want `proto message may reach Send through type any`
+	_ = (*simnet.Network).SendRaw(nw, n, 1, payload, simnet.RawOptions{}) // want `proto message may reach SendRaw through type any`
+	_ = kernel.Describe(rand.Source(nil))                                 // want `proto message may reach Describe through type rand.Source`
+
+	// Function and method values hide the arguments of the later call.
+	describe := kernel.Describe   // want `Describe used as a value`
+	send := nw.Send               // want `Send used as a value`
+	sendRaw := nw.SendRaw         // want `SendRaw used as a value`
+	_ = (*simnet.Network).SendRaw // want `SendRaw used as a value`
+	_, _, _ = describe, send, sendRaw
 }
