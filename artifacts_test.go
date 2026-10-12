@@ -4,6 +4,7 @@
 package faultline_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,10 +21,17 @@ import (
 
 	"github.com/hmdsefi/faultline"
 	"github.com/hmdsefi/faultline/artifact"
+	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/kernel/fault"
 )
 
 var _ = scenario("pingpong-full", func(t *testing.T) {
 	faultline.Run(t, faultline.Options{Seeds: 1, Duration: time.Second}, func(w *faultline.World) { addPingPong(w) })
+})
+
+var _ = scenario("pingpong-options-full", func(t *testing.T) {
+	opts := faultline.Options{Seeds: 1, Duration: time.Second, Trace: kernel.TraceConfig{Level: kernel.TraceFull}}
+	faultline.Run(t, opts, func(w *faultline.World) { addPingPong(w) })
 })
 
 // AT-API-34; API-073 (two lines on st.Output, the primary attempt's event count, no pass artifact
@@ -51,9 +59,21 @@ func TestRunPassArtifacts(t *testing.T) {
 		t.Fatalf("results %v", lines)
 	}
 
+	removeOff(t)
 	o, code = runScenario(t, "pingpong-full", []string{"FAULTLINE_TRACE=full", "FAULTLINE_ARTIFACTS=off"})
 	if code != 0 || strings.Contains(o, "artifacts:") || strings.Contains(o, "writing artifacts") {
 		t.Fatalf("off: exit %d\n%s", code, o)
+	}
+
+	// Only FAULTLINE_TRACE=full writes pass artifacts, not Options.Trace.Level = kernel.TraceFull
+	// (API-012, API-073).
+	optRoot := t.TempDir()
+	o, code = runScenario(t, "pingpong-options-full", []string{"FAULTLINE_ARTIFACTS=" + optRoot})
+	if code != 0 || strings.Contains(o, " passed: ") || strings.Contains(o, "artifacts:") {
+		t.Fatalf("Options.Trace.Level full: exit %d\n%s", code, o)
+	}
+	if entries, err := os.ReadDir(optRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("Options.Trace.Level full: the artifact root holds %v (%v)", entries, err)
 	}
 
 	// A root that is a regular file: the write fails, and so does the seed.
@@ -81,6 +101,16 @@ var _ = scenario("fails-for-0x1", func(t *testing.T) {
 		})
 	})
 })
+
+// removeOff removes, when the test ends, the folder off that a child would create in the package
+// directory, its working directory, if it took FAULTLINE_ARTIFACTS=off as a path (AT-API-31).
+func removeOff(t *testing.T) {
+	t.Helper()
+	if _, err := os.Lstat("off"); !os.IsNotExist(err) {
+		t.Fatalf("off exists in the package directory before the run: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll("off") })
+}
 
 // writeOther writes, in dir, a pass artifact of test in package pkg for seed: the artifact of
 // another test whose name maps to the same folder (ART-001).
@@ -222,6 +252,31 @@ func TestRunReplayWarnings(t *testing.T) {
 	if code != 1 || !strings.Contains(o, "\n    warning: previous artifact was recorded with faultline \"v1\\x1b[2J\"; this run uses ") ||
 		!strings.Contains(o, "\n    warning: options differ from the previous artifact: Options.MaxEvents was 5, now 10000000 (options hash 0x0000000000000000, now 0x") || strings.Contains(o, "\x1b") {
 		t.Fatalf("third run: exit %d\n%s", code, o)
+	}
+}
+
+// API-080, API-083: a replay with FAULTLINE_SCHEDULE compares with a report that recorded the same
+// schedule, so neither the failing replay nor the passing one after a fix warns that the options
+// differ.
+func TestRunScheduleReplay(t *testing.T) {
+	var sched bytes.Buffer
+	if err := (fault.Schedule{Version: 1}).Write(&sched); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "schedule.json")
+	if err := os.WriteFile(path, sched.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	env := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_SCHEDULE=" + path, "FAULTLINE_ARTIFACTS=" + root}
+	for _, run := range []string{"first run", "failing replay"} {
+		if o, code := runScenario(t, "fails-for-0x1", env); code != 1 || strings.Contains(o, "warning:") {
+			t.Fatalf("%s: exit %d\n%s", run, code, o)
+		}
+	}
+	o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+	if code != 0 || !strings.Contains(o, keptNote(seedDir(root, 1), "invariant:not seed 1")) || strings.Contains(o, "warning:") {
+		t.Fatalf("passing replay: exit %d\n%s", code, o)
 	}
 }
 
@@ -424,93 +479,116 @@ func dirFiles(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// API-083: which previous report a run compares with, and the pass note.
+// API-083: which previous report a run compares with, and the pass note. Each case starts from a
+// root of its own.
 func TestRunPreviousReport(t *testing.T) {
 	const pkg = "github.com/hmdsefi/faultline"
 	// noWarning runs the failing seed 1 and expects no warning: nothing was compared.
-	noWarning := func(name string, env []string) {
+	noWarning := func(t *testing.T, name string, env []string) {
 		t.Helper()
 		o, code := runScenario(t, "fails-for-0x1", env)
 		if code != 1 || !strings.Contains(o, "--- FAIL: TestScenario/seed=0x0000000000000001") || strings.Contains(o, "warning:") {
 			t.Fatalf("%s: exit %d\n%s", name, code, o)
 		}
 	}
+	// failed returns a new artifact root that holds seed 1's failing artifact, and the environment
+	// that replays seed 1 into it.
+	failed := func(t *testing.T) (root string, env []string) {
+		t.Helper()
+		root = t.TempDir()
+		env = []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
+		noWarning(t, "first run", env)
+		return root, env
+	}
 
-	// Only FAULTLINE_SEED compares; FAULTLINE_SEED_LIST does not.
-	root := t.TempDir()
-	dir := seedDir(root, 1)
-	env := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
-	noWarning("first run", env)
-	editReport(t, dir, "v0.0.0-test", "")
-	noWarning("FAULTLINE_SEED_LIST", []string{"FAULTLINE_SEED_LIST=0x1", "FAULTLINE_ARTIFACTS=" + root})
+	t.Run("FAULTLINE_SEED_LIST does not compare", func(t *testing.T) {
+		root, _ := failed(t)
+		editReport(t, seedDir(root, 1), "v0.0.0-test", "")
+		noWarning(t, "FAULTLINE_SEED_LIST", []string{"FAULTLINE_SEED_LIST=0x1", "FAULTLINE_ARTIFACTS=" + root})
+	})
 
 	// A pass after a failing report logs the note and one warning line per difference, and nothing
-	// else: without FAULTLINE_TRACE=full there is no pass log. A pass after a passing report (the
-	// pass artifact of FAULTLINE_TRACE=full) logs no note.
-	editReport(t, dir, "", "0x0000000000000000")
-	o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
-	warning := `warning: options differ from the previous artifact \(options hash 0x0000000000000000, now 0x[0-9a-f]{16}\)`
-	if code != 0 || !seedOutput(regexp.QuoteMeta(keptNote(dir, "invariant:not seed 1")), warning).MatchString(o) {
-		t.Fatalf("pass note: exit %d\n%s", code, o)
-	}
-	passRoot := t.TempDir()
-	passDir := seedDir(passRoot, 1)
-	passed := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + passRoot, "FIXED=1"}
-	if o, code := runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full")); code != 0 || !strings.Contains(o, "\n    artifacts: "+passDir+string(os.PathSeparator)+"\n") {
-		t.Fatalf("pass artifact: exit %d\n%s", code, o)
-	}
-	o, code = runScenario(t, "fails-for-0x1", passed)
-	if code != 0 || strings.Contains(o, "kept the failing artifact") {
-		t.Fatalf("after a pass: exit %d\n%s", code, o)
-	}
-	// A pass artifact is not a failing artifact: another full-trace run replaces it.
-	editReport(t, passDir, "v0.0.0-test", "")
-	o, code = runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full"))
-	if code != 0 || strings.Contains(o, "kept the failing artifact") || !strings.Contains(o, "\n    artifacts: "+passDir+string(os.PathSeparator)+"\n") {
-		t.Fatalf("second pass artifact: exit %d\n%s", code, o)
-	}
-	if rep := readReport(t, passDir); rep.Status != "pass" || rep.Versions.Faultline == "v0.0.0-test" {
-		t.Fatalf("the pass artifact was not replaced: %+v", rep)
-	}
+	// else: without FAULTLINE_TRACE=full there is no pass log.
+	t.Run("pass note", func(t *testing.T) {
+		root, env := failed(t)
+		dir := seedDir(root, 1)
+		editReport(t, dir, "", "0x0000000000000000")
+		o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+		warning := `warning: options differ from the previous artifact \(options hash 0x0000000000000000, now 0x[0-9a-f]{16}\)`
+		if code != 0 || !seedOutput(regexp.QuoteMeta(keptNote(dir, "invariant:not seed 1")), warning).MatchString(o) {
+			t.Fatalf("exit %d\n%s", code, o)
+		}
+	})
 
-	// The note quotes a signature that holds a control character. Without the failing report's
-	// failure object, a plain replay prints no note (API-083).
-	root = t.TempDir()
-	dir = seedDir(root, 1)
-	env = []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
-	noWarning("first run", env)
-	editReportJSON(t, dir, func(m map[string]any) { object(t, m, "failure")["signature"] = "invariant:x\x1b[2J" })
-	o, code = runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
-	if note := "\n    " + keptNote(dir, `"invariant:x\x1b[2J"`) + "\n"; code != 0 || !strings.Contains(o, note) {
-		t.Fatalf("quoted signature: exit %d\n%s", code, o)
-	}
-	editReportJSON(t, dir, func(m map[string]any) { delete(m, "failure") })
-	o, code = runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
-	if code != 0 || strings.Contains(o, "passed; kept the failing artifact") {
-		t.Fatalf("no failure object: exit %d\n%s", code, o)
-	}
+	// A pass after a passing report (the pass artifact of FAULTLINE_TRACE=full) logs no note, and
+	// another full-trace run replaces that artifact: it is not a failing one.
+	t.Run("pass after a pass artifact", func(t *testing.T) {
+		root := t.TempDir()
+		dir := seedDir(root, 1)
+		passed := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root, "FIXED=1"}
+		if o, code := runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full")); code != 0 || !strings.Contains(o, "\n    artifacts: "+dir+string(os.PathSeparator)+"\n") {
+			t.Fatalf("pass artifact: exit %d\n%s", code, o)
+		}
+		if o, code := runScenario(t, "fails-for-0x1", passed); code != 0 || strings.Contains(o, "kept the failing artifact") {
+			t.Fatalf("after a pass: exit %d\n%s", code, o)
+		}
+		editReport(t, dir, "v0.0.0-test", "")
+		o, code := runScenario(t, "fails-for-0x1", append(passed, "FAULTLINE_TRACE=full"))
+		if code != 0 || strings.Contains(o, "kept the failing artifact") || !strings.Contains(o, "\n    artifacts: "+dir+string(os.PathSeparator)+"\n") {
+			t.Fatalf("second pass artifact: exit %d\n%s", code, o)
+		}
+		if rep := readReport(t, dir); rep.Status != "pass" || rep.Versions.Faultline == "v0.0.0-test" {
+			t.Fatalf("the pass artifact was not replaced: status %s, faultline %s", rep.Status, rep.Versions.Faultline)
+		}
+	})
+
+	// The note quotes a signature that holds a control character.
+	t.Run("quoted signature", func(t *testing.T) {
+		root, env := failed(t)
+		dir := seedDir(root, 1)
+		editReportJSON(t, dir, func(m map[string]any) { object(t, m, "failure")["signature"] = "invariant:x\x1b[2J" })
+		o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+		if note := "\n    " + keptNote(dir, `"invariant:x\x1b[2J"`) + "\n"; code != 0 || !strings.Contains(o, note) {
+			t.Fatalf("exit %d\n%s", code, o)
+		}
+	})
+
+	// Without the failing report's failure object, a plain replay prints no note.
+	t.Run("no failure object", func(t *testing.T) {
+		root, env := failed(t)
+		editReportJSON(t, seedDir(root, 1), func(m map[string]any) { delete(m, "failure") })
+		o, code := runScenario(t, "fails-for-0x1", append(env, "FIXED=1"))
+		if code != 0 || strings.Contains(o, "passed; kept the failing artifact") {
+			t.Fatalf("exit %d\n%s", code, o)
+		}
+	})
 
 	// A missing Dir report is skipped: the AltDir report counts only after another test's report.
-	root = t.TempDir()
-	dir, alt := seedDir(root, 1), artifact.AltDir(root, pkg, "TestScenario", 1)
-	writeOther(t, dir, pkg, "Testscenario", 1)
-	env = []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
-	noWarning("into the AltDir", env)
-	editReport(t, alt, "v0.0.0-test", "")
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	noWarning("no Dir report", env)
+	t.Run("AltDir after another test", func(t *testing.T) {
+		root := t.TempDir()
+		dir, alt := seedDir(root, 1), artifact.AltDir(root, pkg, "TestScenario", 1)
+		writeOther(t, dir, pkg, "Testscenario", 1)
+		env := []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root}
+		noWarning(t, "into the AltDir", env)
+		editReport(t, alt, "v0.0.0-test", "")
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
+		noWarning(t, "no Dir report", env)
+	})
 
 	// The Dir report of another package or seed is not compared. github.com_hmdsefi/faultline maps
 	// to this package's folder, as github.com/a_b and github.com/a/b do.
 	for _, other := range []struct {
+		name string
 		pkg  string
 		seed uint64
-	}{{"github.com_hmdsefi/faultline", 1}, {pkg, 2}} {
-		root = t.TempDir()
-		writeOther(t, seedDir(root, 1), other.pkg, "TestScenario", other.seed)
-		noWarning(fmt.Sprintf("%s seed %d", other.pkg, other.seed), []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root})
+	}{{"another package", "github.com_hmdsefi/faultline", 1}, {"another seed", pkg, 2}} {
+		t.Run(other.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeOther(t, seedDir(root, 1), other.pkg, "TestScenario", other.seed)
+			noWarning(t, "first run", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + root})
+		})
 	}
 }
 
@@ -574,6 +652,7 @@ func TestRunExtraFiles(t *testing.T) {
 		t.Fatalf("(b) warnings %q", rep.Warnings)
 	}
 	// (d) No file is written with artifacts off, so no file is dropped either.
+	removeOff(t)
 	o, code = runScenario(t, "extra-files", []string{"ROW=b", "FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=off"})
 	if code != 1 || !strings.Contains(o, "artifacts: off\n") || strings.Contains(o, "warning:") {
 		t.Fatalf("(d) exit %d\n%s", code, o)

@@ -874,8 +874,11 @@ func TestWriteUnreadableReport(t *testing.T) {
 				}
 			case "fifo":
 				if err = os.Remove(p); err == nil {
-					if ok, ferr := mkfifo(p); !ok || ferr != nil {
-						t.Skipf("no FIFO here: %v", ferr)
+					switch ok, ferr := mkfifo(p); {
+					case !ok:
+						t.Skip("this platform has no FIFOs")
+					case ferr != nil:
+						t.Skipf("cannot create a FIFO here: %v", ferr)
 					}
 				}
 			}

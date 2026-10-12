@@ -801,12 +801,14 @@ func TestRunWorkerProtocol(t *testing.T) {
 }
 
 // AT-API-31: off in any letter case. A value taken as a path would be a folder in the package
-// directory, the child's working directory; the test removes one it created.
+// directory, the child's working directory; the test removes one it created, also when
+// runScenario stops the test.
 func TestRunArtifactsOff(t *testing.T) {
 	for _, v := range []string{"off", "OFF", "Off"} {
 		if _, err := os.Lstat(v); !os.IsNotExist(err) {
 			t.Fatalf("%s exists in the package directory before the run: %v", v, err)
 		}
+		t.Cleanup(func() { _ = os.RemoveAll(v) })
 		tmp := t.TempDir()
 		o, code := runScenario(t, "invariant-counter", []string{"FAULTLINE_SEED=0x1", "FAULTLINE_ARTIFACTS=" + v, "TMPDIR=" + tmp})
 		if _, err := os.Lstat(v); !os.IsNotExist(err) {

@@ -103,14 +103,35 @@ func TestExploreBaseAt(t *testing.T) {
 }
 
 // API-016: exploreBase passes the live clock and process ID to exploreBaseAt. Inverting the mix
-// gives the clock reading it used, which must be within a second of now; a process ID it dropped
-// would move that reading by 2^32 ns (4.3 s) or more.
+// gives the clock reading it used, which must lie between the readings taken just before and just
+// after the call. A clock rounded to the millisecond or the second falls outside that bracket, and
+// a dropped process ID moves the reading by 2^32 ns (4.3 s) or more. The second call starts after
+// the clock moved past the first bracket, so an exploreBase that keeps its first value fails too.
+// A wall clock that steps back by more than a call takes shows as a reading earlier than the one
+// before it, and the test then tries again, up to 5 times.
 func TestExploreBase(t *testing.T) {
-	pid := uint64(os.Getpid()) << 32        //nolint:gosec // a process ID is not negative
-	ns := int64(unmix(exploreBase()) ^ pid) //nolint:gosec // a wall clock reading in ns
-	if d := time.Duration(time.Now().UnixNano() - ns); d < -time.Second || d > time.Second {
-		t.Fatalf("exploreBase used the clock reading %d, %v before now", ns, d)
+	pid := uint64(os.Getpid()) << 32 //nolint:gosec // a process ID is not negative
+tries:
+	for range 5 {
+		var last int64 // the end of the previous call's bracket
+		for call := 1; call <= 2; call++ {
+			before := time.Now().UnixNano()
+			for before == last {
+				before = time.Now().UnixNano() // wait for the clock's next tick
+			}
+			ns := int64(unmix(exploreBase()) ^ pid) //nolint:gosec // a wall clock reading in ns
+			after := time.Now().UnixNano()
+			if before < last || after < before {
+				continue tries // the wall clock stepped back
+			}
+			if ns < before || ns > after {
+				t.Fatalf("call %d: exploreBase used the clock reading %d, outside [%d, %d]", call, ns, before, after)
+			}
+			last = after
+		}
+		return
 	}
+	t.Fatal("the wall clock stepped back in each of 5 tries")
 }
 
 // unmix inverts DeriveSeed(x, 0): it returns the x with DeriveSeed(x, 0) == v.

@@ -162,8 +162,14 @@ func TestVersionOf(t *testing.T) {
 	if got := versionOf(&debug.BuildInfo{Main: debug.Module{Path: "x"}}); got != "unknown" {
 		t.Errorf("missing: %q", got)
 	}
-	if goMinor("go1.26.2") != "go1.26" || goMinor("devel +abc") != "devel +abc" || goMinor("devel go1.27-4fbc9a0 Mon Oct 5 2026 go1.26") != "go1.27" {
-		t.Error("goMinor")
+	for _, c := range []struct{ in, want string }{
+		{"go1.26.2", "go1.26"},
+		{"devel +abc", "devel +abc"},
+		{"devel go1.27-4fbc9a0 Mon Oct 5 2026 go1.26", "go1.27"},
+	} {
+		if got := goMinor(c.in); got != c.want {
+			t.Errorf("goMinor(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

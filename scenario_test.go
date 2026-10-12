@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,7 +57,8 @@ const scenarioTimeout = 10 * time.Minute
 // runScenario runs scenario name in a child process (API §10): the parent environment minus
 // every FAULTLINE_* variable and scenarioVars, plus FAULTLINE_TEST_SCENARIO,
 // FAULTLINE_ARTIFACTS=<t.TempDir()>, plus env (later entries win). It returns the combined output
-// and the exit code. A child built with -race exits without the race runtime's 1 s exit delay.
+// and the exit code. A child built with -race exits without the race runtime's 1 s exit delay,
+// and under go test -cover it adds its coverage to this binary's.
 //
 // A hung child fails the calling test and does not outlive it: the child stops itself with its
 // own stack dump (-test.timeout) after a fifth of the time left before the parent's deadline, and
@@ -70,7 +72,8 @@ func runScenario(t *testing.T, name string, env []string, args ...string) (strin
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), kill)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestScenario$", "-test.v", "-test.timeout=" + limit.String()}, args...)...) //nolint:gosec // runs this test binary again
+	flags := append([]string{"-test.run=^TestScenario$", "-test.v", "-test.timeout=" + limit.String()}, coverArgs()...)
+	cmd := exec.CommandContext(ctx, os.Args[0], append(flags, args...)...) //nolint:gosec // runs this test binary again
 	cmd.WaitDelay = 5 * time.Second
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
@@ -92,6 +95,16 @@ func runScenario(t *testing.T, name string, env []string, args ...string) (strin
 		t.Fatal(err)
 	}
 	return string(out), code
+}
+
+// coverArgs returns the flag that makes a child process of this test binary write its coverage
+// data where go test collects this binary's, when go test measures coverage, so code that only a
+// child runs counts too.
+func coverArgs() []string {
+	if f := flag.Lookup("test.gocoverdir"); f != nil && f.Value.String() != "" {
+		return []string{"-test.gocoverdir=" + f.Value.String()}
+	}
+	return nil
 }
 
 // seedK returns seed k of TestScenario's derived list (API-015 golden table).

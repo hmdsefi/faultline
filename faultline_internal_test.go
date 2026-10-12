@@ -118,3 +118,19 @@ func TestReadReportFile(t *testing.T) {
 		t.Fatalf("report.json without permissions: %+v, %v", rep, err)
 	}
 }
+
+// API-073, API-083: readReportFile does not open a FIFO report.json, so a FIFO cannot block the
+// run. The test sets no time limit: if readReportFile opened the FIFO, go test's -timeout would
+// stop the test binary and print the stack of every goroutine, this one blocked in the open.
+func TestReadReportFileFIFO(t *testing.T) {
+	dir := t.TempDir()
+	switch ok, err := mkfifo(filepath.Join(dir, artifact.FileReport)); {
+	case !ok:
+		t.Skip("this platform has no FIFOs")
+	case err != nil:
+		t.Skipf("cannot create a FIFO here: %v", err)
+	}
+	if rep, err := readReportFile(dir); rep != nil || err == nil || err.Error() != "not a regular file" {
+		t.Fatalf("FIFO report.json: %+v, %v", rep, err)
+	}
+}

@@ -423,6 +423,22 @@ func TestInvalidUTF8(t *testing.T) {
 	}
 }
 
+// HIS-002: an escaped backslash right before an invalid byte (in a string) and right before the
+// escape (in a json.Marshaler's bytes). The escape after \\ is still replaced, so a Windows path
+// with a Latin-1 byte stores the same bytes on Go 1.26 and Go 1.27.
+func TestInvalidUTF8AfterBackslash(t *testing.T) {
+	h := newH()
+	h.r.Invoke("c1", "write", "C:\\\xff")
+	h.r.Invoke("c2", "write", json.RawMessage(`"\\\ufffd"`))
+	ops := h.r.Ops()
+	if got, want := rawString(t, ops[0].Input), "\"C:\\\\\xef\xbf\xbd\""; got != want {
+		t.Errorf("string: %q, want %q", got, want)
+	}
+	if got, want := rawString(t, ops[1].Input), "\"\\\\\xef\xbf\xbd\""; got != want {
+		t.Errorf("json.Marshaler: %q, want %q", got, want)
+	}
+}
+
 // HIS-002, HIS §8: a json.Marshaler's bytes with two raw invalid bytes and no escape. Each byte
 // becomes U+FFFD (EF BF BD) in the stored bytes and in both records' text and attrs.
 func TestInvalidUTF8Raw(t *testing.T) {

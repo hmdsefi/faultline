@@ -411,6 +411,12 @@ func TestExtraFiles(t *testing.T) {
 	if len(files) != 1 || files[0].name != "b.txt" || !slices.Equal(warnings, want) {
 		t.Errorf("empty, multi-line and control-character panics: files %+v warnings %q", files, warnings)
 	}
+	// A panic value that is neither a string nor an error gets its panic text from kernel.Describe
+	// (API-064), which prints a pointer's type, never its address.
+	_, warnings = extraFiles(&failure{kind: "final", finals: []finalResult{{check: "v", err: panicFiles{new(int)}}}})
+	if want := `extra artifact files from final check "v" dropped: ArtifactFiles panicked: *int`; !slices.Equal(warnings, []string{want}) {
+		t.Errorf("pointer panic value: warnings %q, want %q", warnings, want)
+	}
 	// The attempt collects them. A final failure's own error is not a second source.
 	r := unitRunner(t, Options{Seeds: 1, Duration: time.Second}, func(w *World) {
 		unitTicker(w, nil)

@@ -233,7 +233,10 @@ func TestResolveEffectiveOptions(t *testing.T) {
 	if o.Trace.Level != kernel.TraceFull || !p.passArtifacts || !o.CheckDeterminism || !p.envCheck || !o.KeepGoing || o.BaseSeed != 0 || o.Seeds != 1 {
 		t.Errorf("effective options: %+v, check from the environment %v", o, p.envCheck)
 	}
-	p2, _ := resolveWith(t, Options{Trace: kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 9}}, map[string]string{"FAULTLINE_TRACE": "hash", "FAULTLINE_CHECK_DETERMINISM": "0"}, false)
+	p2, err := resolveWith(t, Options{Trace: kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 9}}, map[string]string{"FAULTLINE_TRACE": "hash", "FAULTLINE_CHECK_DETERMINISM": "0"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p2.opts.Trace.Level != kernel.TraceFull || p2.opts.Trace.Buffer != 9 || p2.passArtifacts || p2.opts.CheckDeterminism || p2.opts.BaseSeed != NameBase("TestScenario") {
 		t.Errorf("hash must not downgrade: %+v", p2.opts)
 	}

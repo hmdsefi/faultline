@@ -512,9 +512,10 @@ var goexitCalls = map[uint64]int{}
 // CheckDeterminism mismatch, or "<how>-rediag" in the diagnostic attempt after an artifact re-run
 // mismatch ("-checkdiff", "-diag" and "-rediag" log each call's number, so every attempt's trace
 // differs). how is skip (w.T().Skip in body), setup (a misuse panic in body, a setup error), body
-// (w.T().Fatalf in body, before the first event), tick (w.T().Fatalf in the 3rd tick), tickskip
-// (w.T().Skip in the 3rd tick), errorskip (w.T().Errorf, then w.T().Skip, in the 3rd tick) or
-// error (w.T().Errorf in the 3rd tick, which does not stop the attempt).
+// (w.T().Fatalf in body, before the first event), bodyerrorskip (w.T().Errorf, then w.T().Skip, in
+// body before the first event), tick (w.T().Fatalf in the 3rd tick), tickskip (w.T().Skip in the
+// 3rd tick), errorskip (w.T().Errorf, then w.T().Skip, in the 3rd tick) or error (w.T().Errorf in
+// the 3rd tick, which does not stop the attempt).
 var _ = scenario("goexit", func(t *testing.T) {
 	how, where, _ := strings.Cut(os.Getenv("GOEXIT"), "-")
 	stop := map[string]int{"": 1, "rerun": 2, "deeprerun": 2, "check": 2, "checkdiff": 2, "diag": 3, "rediag": 3}[where] // the body call that stops
@@ -549,6 +550,9 @@ var _ = scenario("goexit", func(t *testing.T) {
 			w.RunFor(-time.Second)
 		case "body":
 			w.T().Fatalf("stop")
+		case "bodyerrorskip":
+			w.T().Errorf("soft")
+			w.T().Skip("skip")
 		case "tick":
 			tk.onTick = func(n *kernel.Node, c int) {
 				if c == 3 {
@@ -646,6 +650,7 @@ func TestGoexitOutcomes(t *testing.T) {
 		{"skip", 0, 2, "skip", nil, nil, nil, nil, false},
 		{"setup", 1, 1, "fail", "setup:", misuse, nil, nil, false},
 		{"body", 1, 1, "fail", "setup:", stopped, nil, nil, false},
+		{"bodyerrorskip", 1, 1, "fail", "setup:", stopped, nil, nil, false},
 		{"tick", 1, 1, "fail", "fail:", stopped, 3e7, primary(fatal), false},
 		{"errorskip", 1, 1, "fail", "fail:", stopped, 3e7, primary(skip), false},
 		{"skip-rerun", 1, 1, "fail", "invariant:tick 5", "five", 5e7, later("artifact re-run", skip+early, tick5...), true},
