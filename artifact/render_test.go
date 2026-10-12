@@ -485,3 +485,37 @@ func TestRenderStaleTempsGlobChars(t *testing.T) {
 		t.Errorf("%s was not removed: %v", stale, err)
 	}
 }
+
+// ART-031, ART-085, ART-086 and §7: a record line or a report field that encoding/json rejects
+// gives an error that names the file once and wraps encoding/json's, through Read and Render alike.
+func TestDecodeErrorsWrap(t *testing.T) {
+	for _, c := range []struct {
+		file, old, new, reason string
+	}{
+		{FileTrace, `{"seq":2,`, `{"seq":"2",`, "trace.jsonl line 3: invalid record: json: "},
+		{FileReport, `"seed": "0x0000000000000001"`, `"seed": 1`, "report.json: json: "},
+	} {
+		dir := renderWritten(t, fixtureArtifact())
+		p := filepath.Join(dir, c.file)
+		b, err := os.ReadFile(p)
+		if err != nil || !bytes.Contains(b, []byte(c.old)) {
+			t.Fatalf("%s holds no %s: %v", c.file, c.old, err)
+		}
+		if err := os.WriteFile(p, bytes.Replace(b, []byte(c.old), []byte(c.new), 1), 0o600); err != nil { //nolint:gosec // a file of the test's own artifact
+			t.Fatal(err)
+		}
+		_, readErr := Read(dir)
+		_, renderErr := Render(dir, RenderOptions{})
+		for _, e := range []struct {
+			name, prefix string
+			err          error
+		}{
+			{"Read", "artifact: " + dir + ": ", readErr},
+			{"Render", "artifact: render " + dir + ": ", renderErr},
+		} {
+			if e.err == nil || !strings.HasPrefix(e.err.Error(), e.prefix+c.reason) || !errors.As(e.err, new(*json.UnmarshalTypeError)) {
+				t.Errorf("%s of a bad %s = %v, want the prefix %s%s and a wrapped *json.UnmarshalTypeError", e.name, c.file, e.err, e.prefix, c.reason)
+			}
+		}
+	}
+}

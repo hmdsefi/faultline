@@ -751,6 +751,8 @@ func TestReadReportErrors(t *testing.T) {
 	jerr := json.Unmarshal([]byte(wrong), &probe)
 	if _, err := ReadReport(strings.NewReader(wrong)); jerr == nil || err == nil || err.Error() != "artifact: report.json: "+jerr.Error() {
 		t.Errorf("wrong field type: %v, want encoding/json's %v", err, jerr)
+	} else if !errors.As(err, new(*json.UnmarshalTypeError)) {
+		t.Errorf("wrong field type: %v does not wrap encoding/json's error", err)
 	}
 
 	// The report keeps the version it checked, whatever a key that differs only in case says.
@@ -771,9 +773,9 @@ func TestReadReportErrors(t *testing.T) {
 	}
 }
 
-// TestReportKinds walks the report's type graph and fails on a kind that validCopy and hasCycle do
-// not handle: a later field of such a kind would skip the UTF-8 replacement (an interface) or
-// panic (an unexported field) instead of failing here.
+// TestReportKinds walks the type graphs of the report and the trace header and fails on a kind that
+// validCopy does not handle: a later field of such a kind would skip the UTF-8 replacement (an
+// interface) or panic (an unexported field) instead of failing here.
 func TestReportKinds(t *testing.T) {
 	seen := map[reflect.Type]bool{}
 	var walk func(typ reflect.Type, path string)
@@ -808,4 +810,5 @@ func TestReportKinds(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeFor[Report](), "Report")
+	walk(reflect.TypeFor[TraceHeader](), "TraceHeader")
 }

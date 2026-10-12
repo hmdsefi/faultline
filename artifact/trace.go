@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -101,8 +102,7 @@ func (t TraceRecord) Record() kernel.Record {
 
 // validUTF8 returns s with each run of invalid UTF-8 bytes replaced by U+FFFD (ART-030).
 // encoding/json replaces them too, but Go 1.26 writes the escape and Go 1.27 the character
-// itself; a valid string is written the same way by both. report.json and the timeline data use
-// it too.
+// itself; a valid string is written the same way by both.
 func validUTF8(s string) string {
 	if utf8.ValidString(s) {
 		return s
@@ -134,21 +134,22 @@ func droppedOf(records []kernel.Record) uint64 {
 }
 
 // headerFor returns the header line that WriteTrace writes for t (ART-030): the version, the
-// counts and the node table recomputed, and the strings made valid UTF-8.
+// counts and the node table recomputed, and every string made valid UTF-8. validCopy finds the
+// strings, so a field added to TraceHeader is covered without a change here.
 func headerFor(t *Trace) TraceHeader {
-	h := t.Header
+	var h TraceHeader
+	c, _ := validCopy(reflect.ValueOf(t.Header), nil) // TraceHeader holds no pointer, so no cycle
+	reflect.ValueOf(&h).Elem().Set(c)
 	h.Version = TraceVersion
-	for _, p := range []*string{&h.FaultlineVersion, &h.GoVersion, &h.Package, &h.Test, &h.Subtest, &h.Seed, &h.TraceHash} {
-		*p = validUTF8(*p)
-	}
 	h.Records = uint64(len(t.Records))
 	h.Dropped = droppedOf(t.Records)
 	h.Nodes = normNodes(h.Nodes)
 	return h
 }
 
-// WriteTrace writes t as trace.jsonl: the header line, then one JSON line per record. It does
-// not change t.
+// WriteTrace writes t as trace.jsonl: the header line, then one JSON line per record. It writes
+// the records as given and does not check that their Seq values ascend, so ReadTrace rejects
+// what it wrote from records out of order; Write checks the order first. It does not change t.
 func WriteTrace(w io.Writer, t *Trace) error {
 	if t == nil {
 		return errors.New("artifact: trace is nil")
@@ -167,8 +168,9 @@ func WriteTrace(w io.Writer, t *Trace) error {
 	return bw.Flush()
 }
 
-// recordLine is the decoding form of one record line.
-type recordLine struct {
+// record is the decoding form of one record line. encoding/json names it in a type error, as in
+// "Go struct field record.seq of type uint64".
+type record struct {
 	Seq   uint64     `json:"seq"`
 	At    int64      `json:"at"`
 	Node  int32      `json:"node"`
@@ -179,24 +181,25 @@ type recordLine struct {
 	Attrs [][]string `json:"attrs"`
 }
 
-// rawRecordLine is recordLine with the attrs left raw: it decodes a line that recordLine rejects
-// only because of an attrs element, so that element can be named.
-type rawRecordLine struct {
-	recordLine
+// rawRecord is record with the attrs left raw: it decodes a line that record rejects only because
+// of an attrs element, so that element can be named.
+type rawRecord struct {
+	record
 	Attrs []json.RawMessage `json:"attrs"`
 }
 
 // ReadTrace reads and validates trace.jsonl. It rejects a trace with a newer version than this
-// package writes.
+// package writes. The error for a line that encoding/json cannot decode wraps encoding/json's.
 func ReadTrace(r io.Reader) (*Trace, error) {
 	br := bufio.NewReader(r)
-	lineErr := func(n int, format string, args ...any) error {
-		return fmt.Errorf("artifact: trace.jsonl line %d: %s", n, fmt.Sprintf(format, args...))
+	// lineErr wraps err, so errors.As finds encoding/json's error in a decode failure.
+	lineErr := func(n int, err error) error {
+		return fmt.Errorf("artifact: trace.jsonl line %d: %w", n, err)
 	}
 	var tr Trace
 	n := 0
 	var prev uint64
-	var l recordLine // reused from line to line, so its attrs arrays keep their capacity
+	var l record // reused from line to line, so its attrs arrays keep their capacity
 	for {
 		line, err := br.ReadBytes('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -209,15 +212,15 @@ func ReadTrace(r io.Reader) (*Trace, error) {
 		line = bytes.TrimSuffix(line, []byte("\n"))
 		if n == 1 {
 			if err := readHeader(line, &tr.Header); err != nil {
-				return nil, lineErr(1, "%s", err)
+				return nil, lineErr(1, err)
 			}
 		} else {
 			rec, err := readRecord(line, &l)
 			if err != nil {
-				return nil, lineErr(n, "%s", err)
+				return nil, lineErr(n, err)
 			}
 			if rec.Seq <= prev {
-				return nil, lineErr(n, "seq %d is not greater than the previous seq %d", rec.Seq, prev)
+				return nil, lineErr(n, fmt.Errorf("seq %d is not greater than the previous seq %d", rec.Seq, prev))
 			}
 			prev = rec.Seq
 			if len(tr.Records) == cap(tr.Records) {
@@ -230,10 +233,10 @@ func ReadTrace(r io.Reader) (*Trace, error) {
 		}
 	}
 	if n == 0 {
-		return nil, lineErr(1, "not a faultline trace")
+		return nil, lineErr(1, errors.New("not a faultline trace"))
 	}
 	if uint64(len(tr.Records)) != tr.Header.Records {
-		return nil, lineErr(1, "header says %d records, found %d", tr.Header.Records, len(tr.Records))
+		return nil, lineErr(1, fmt.Errorf("header says %d records, found %d", tr.Header.Records, len(tr.Records)))
 	}
 	return &tr, nil
 }
@@ -261,6 +264,8 @@ func skipJSONSpace(b []byte) []byte {
 	return b
 }
 
+// readHeader decodes the header line into h and returns the reason the line is rejected, without
+// the line prefix (ART-031): the version checks first, then the decode, whose error it wraps.
 func readHeader(line []byte, h *TraceHeader) error {
 	var obj map[string]json.RawMessage
 	if len(skipJSONSpace(line)) == 0 || skipJSONSpace(line)[0] != '{' || json.Unmarshal(line, &obj) != nil {
@@ -275,7 +280,7 @@ func readHeader(line []byte, h *TraceHeader) error {
 		return fmt.Errorf("version %d is newer than this faultline supports (%d); upgrade faultline", v, TraceVersion)
 	}
 	if err := json.Unmarshal(line, h); err != nil {
-		return err
+		return fmt.Errorf("invalid header: %w", err)
 	}
 	// encoding/json matches keys case-insensitively, so a "FAULTLINE_TRACE" key could overwrite
 	// the version just checked; the header keeps the checked one.
@@ -285,7 +290,7 @@ func readHeader(line []byte, h *TraceHeader) error {
 
 // readRecord decodes one record line into l, which it reuses, and returns the record or the
 // reason the line is rejected, without the line prefix (ART-031).
-func readRecord(line []byte, l *recordLine) (kernel.Record, error) {
+func readRecord(line []byte, l *record) (kernel.Record, error) {
 	trimmed := skipJSONSpace(line)
 	if len(trimmed) == 0 {
 		return kernel.Record{}, errors.New("empty line")
@@ -308,7 +313,7 @@ func readRecord(line []byte, l *recordLine) (kernel.Record, error) {
 		}
 		clear(kv[:cap(kv)])
 	}
-	*l = recordLine{Attrs: attrs[:0]}
+	*l = record{Attrs: attrs[:0]}
 	if err := json.Unmarshal(line, l); err != nil {
 		return kernel.Record{}, recordError(line, err)
 	}
@@ -334,9 +339,9 @@ func readRecord(line []byte, l *recordLine) (kernel.Record, error) {
 }
 
 // recordError says why a record line that starts with { did not decode: the first attrs element
-// that is not a pair of strings, as the fast path would have named it, or else err.
+// that is not a pair of strings, as the fast path would have named it, or else err, wrapped.
 func recordError(line []byte, err error) error {
-	var raw rawRecordLine
+	var raw rawRecord
 	if json.Unmarshal(line, &raw) == nil {
 		for i, a := range raw.Attrs {
 			var kv []string
@@ -345,5 +350,5 @@ func recordError(line []byte, err error) error {
 			}
 		}
 	}
-	return fmt.Errorf("not a JSON object: %v", err)
+	return fmt.Errorf("invalid record: %w", err)
 }

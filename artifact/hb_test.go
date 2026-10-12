@@ -68,7 +68,8 @@ func chainTrace() *Trace {
 // AT-ART-08
 func TestWriteHBHalvesCap(t *testing.T) {
 	tr := chainTrace()
-	s200, _, err := renderHB(tr, CausalSlice(tr.Records, 400, 200))
+	x := newHBIndex(tr.Records)
+	s200, _, err := renderHB(tr, x, x.slice(400, 200))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +275,20 @@ func TestWriteHBEdges(t *testing.T) {
 		t.Errorf("cap 1: %v, %d bytes", err, buf.Len())
 	}
 
+	// A starting cap of 1 still finds the slice: the root alone.
+	one := `flowchart TD
+    %% faultline causal slice v1: root=12 records=1 cap=1 truncated=true
+    n0["12 0.003000000s global<br>check.violation: invariant #quot;no pong#quot; violated"]
+    classDef violation fill:#fdd,stroke:#c00,stroke-width:2px
+    classDef fault fill:#ffe9b3,stroke:#b07800
+    classDef net fill:#e3efff,stroke:#3367d6
+    class n0 violation
+`
+	buf.Reset()
+	if err := WriteHB(&buf, fixtureTrace(), 12, 1); err != nil || buf.String() != one {
+		t.Errorf("starting cap 1: %v\n%s", err, buf.String())
+	}
+
 	// A text of exactly MermaidMaxBytes bytes is written; one byte more halves the cap.
 	for _, c := range []struct {
 		extra int
@@ -335,10 +350,10 @@ func TestWriteHBEdges(t *testing.T) {
 			t.Errorf("50,000-record chain at cap 1<<30: %v\n%.200s", err, buf.String())
 		}
 	})
-	// About 0.8 million allocations come from CausalSlice's passes; rendering each oversized slice
-	// would add about 2 million per pass (32 million in all).
-	if allocs > 4_000_000 {
-		t.Errorf("50,000-record chain at cap 1<<30: %.0f allocations, want at most 4,000,000 (no render of an oversized slice)", allocs)
+	// The call takes about 12,000 allocations, nearly all to render the 256-member slice; rendering
+	// one oversized slice would add about 2 million.
+	if allocs > 1_000_000 {
+		t.Errorf("50,000-record chain at cap 1<<30: %.0f allocations, want at most 1,000,000 (no render of an oversized slice)", allocs)
 	}
 
 	// Each skip halves the cap, no more: a 2,000-record chain at cap 1,000 is skipped once, and cap
@@ -388,28 +403,30 @@ func TestWriteHBEdges(t *testing.T) {
 	}
 }
 
-// ART-055: the backslash and every rune that strconv.IsPrint rejects (NUL, ESC, DEL, U+009B,
-// U+2028, the bidi override U+202E) are written the way strconv.QuoteRune writes them, in a node
-// name, a kind and a text; a kind whose only such rune is the backslash too. The text is cut at 40
-// runes before it is escaped, so an escape is never split, and the trace read back from
-// trace.jsonl renders the same bytes.
+// ART-055: the backslash and every rune that strconv.IsPrint rejects (NUL, ESC, DEL, U+009B, the
+// no-break space U+00A0, which strconv.IsGraphic would keep, U+2028, the bidi override U+202E) are
+// written the way strconv.QuoteRune writes them, in a node name, a kind and a text; a kind whose
+// only such rune is the backslash too. An invalid run after them becomes one U+FFFD before the
+// escaping, which would write one per byte. The text is cut at 40 runes before it is escaped, so
+// an escape is never split, and the trace read back from trace.jsonl renders the same bytes.
 func TestWriteHBControlRunes(t *testing.T) {
-	bad := "\x00\x1b\x7f" + string(rune(0x9b)) + string(rune(0x2028)) + string(rune(0x202e)) + `\`
+	bad := "\x00\x1b\x7f" + string(rune(0x9b)) + string(rune(0xa0)) + string(rune(0x2028)) + string(rune(0x202e)) + `\`
 	quoted := `\x00\x1b\x7f`
-	for _, r := range []rune{0x9b, 0x2028, 0x202e, '\\'} {
+	for _, r := range []rune{0x9b, 0xa0, 0x2028, 0x202e, '\\'} {
 		q := strconv.QuoteRune(r)
 		quoted += q[1 : len(q)-1]
 	}
+	const invalid, fffd = "\xff\xfe", string(utf8.RuneError)
 	tr := &Trace{
-		Header: TraceHeader{Nodes: []Node{{ID: 1, Name: "n" + bad}}},
+		Header: TraceHeader{Nodes: []Node{{ID: 1, Name: "n" + bad + invalid}}},
 		Records: []kernel.Record{
-			{Seq: 1, Node: 1, Inc: 1, Kind: "k" + bad, Text: "t" + bad},
+			{Seq: 1, Node: 1, Inc: 1, Kind: "k" + bad + invalid, Text: "t" + bad + invalid},
 			{Seq: 2, Node: 1, Inc: 1, Kind: `k\`, Text: strings.Repeat("a", 39) + "\x00bc", Cause: 1},
 		},
 	}
 	want := "flowchart TD\n    %% faultline causal slice v1: root=2 records=2 cap=200 truncated=false\n" +
-		`    n0["1 0.000000000s n` + quoted + `#35;1<br>k` + quoted + `: t` + quoted + `"]` + "\n" +
-		`    n1["2 0.000000000s n` + quoted + `#35;1<br>k\\: ` + strings.Repeat("a", 39) + `\x00..."]` + "\n" +
+		`    n0["1 0.000000000s n` + quoted + fffd + `#35;1<br>k` + quoted + fffd + `: t` + quoted + fffd + `"]` + "\n" +
+		`    n1["2 0.000000000s n` + quoted + fffd + `#35;1<br>k\\: ` + strings.Repeat("a", 39) + `\x00..."]` + "\n" +
 		"    n0 --> n1\n" + hbDefs + "    class n1 violation\n"
 	var buf bytes.Buffer
 	if err := WriteHB(&buf, tr, 2, 200); err != nil || buf.String() != want {

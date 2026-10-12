@@ -48,13 +48,13 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 		return nil, fail("%w", err)
 	}
 	// readErr is fail for an error of reading the file name: a *fs.PathError gives its operation
-	// and inner error, so the path is not repeated, and is wrapped; a reader's error gives its text
-	// without the "artifact: " prefix.
+	// and inner error, so the path is not repeated; a reader's error gives its text without the
+	// "artifact: " prefix. Both are wrapped.
 	readErr := func(name string, err error) error {
 		if pe, ok := err.(*fs.PathError); ok {
 			return fail("%s %s: %w", pe.Op, name, pe.Err)
 		}
-		return fail("%s", strings.TrimPrefix(err.Error(), "artifact: "))
+		return &readError{prefix: "artifact: render " + dir + ": ", err: err}
 	}
 	b, err := os.ReadFile(filepath.Join(abs, FileReport))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -97,13 +97,13 @@ func Render(dir string, opts RenderOptions) ([]string, error) {
 	if rep.Failure != nil {
 		root = rep.Failure.RecordSeq
 	}
-	s := CausalSlice(tr.Records, root, sliceCap)
+	s, x := causalSlice(tr.Records, root, sliceCap) // x serves hb.mmd too
 	outputs := []struct {
 		name  string
 		write func(w io.Writer) error
 	}{
 		{FileTimelineText, func(w io.Writer) error { return WriteTimelineText(w, rep, tr, s) }},
-		{FileHB, func(w io.Writer) error { return WriteHB(w, tr, root, sliceCap) }},
+		{FileHB, func(w io.Writer) error { return writeHB(w, tr, x, root, sliceCap) }},
 		{FileTimelineHTML, func(w io.Writer) error { return WriteTimelineHTML(w, rep, tr, sched, s, maxRecords) }},
 	}
 	// The inputs are read, so dir is an artifact: remove the temporary files an interrupted Render
