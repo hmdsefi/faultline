@@ -53,22 +53,26 @@ func TestFindingString(t *testing.T) {
 	}
 }
 
-// DET-002: the exact messages of DL001–DL011.
+// DET-002: the exact messages of DL001 to DL011.
 func TestMessages(t *testing.T) {
 	cases := []struct {
 		fixture string
 		line    int
 		msg     string
 	}{
-		{"dl001", 6, "wall-clock time: time.Now is forbidden; use Sim.Now, Node.Now or Node.After"},
+		{"dl001", 9, "wall-clock time: time.Now is forbidden; use Sim.Now, Node.Now or Node.After"},
+		{"dl001", 22, "wall-clock time: context.WithTimeout is forbidden; use Sim.Now, Node.Now or Node.After"},
 		{"dl002", 9, "global randomness: math/rand/v2.IntN is forbidden; use Sim.Rand or Node.Rand"},
 		{"dl002", 10, "global randomness: math/rand.Intn is forbidden; use Sim.Rand or Node.Rand"},
 		{"dl003", 3, "crypto/rand is forbidden in simulation code"},
-		{"dl004", 6, "go statement is forbidden in simulation code"},
+		{"dl004", 11, "go statement is forbidden in simulation code"},
+		{"dl004", 15, "(*sync.WaitGroup).Go starts a goroutine, which is forbidden in simulation code"},
+		{"dl004", 18, "context.AfterFunc starts a goroutine, which is forbidden in simulation code"},
 		{"dl005", 4, "select statement is forbidden in simulation code"},
 		{"dl006", 8, "range over map map[string]int has random order; range over sorted keys or annotate //faultline:maporder <reason>"},
 		{"dl006", 11, "range over map Named has random order; range over sorted keys or annotate //faultline:maporder <reason>"},
 		{"dl006", 20, "range over map M has random order; range over sorted keys or annotate //faultline:maporder <reason>"},
+		{"dl006", 37, "range over map M has random order; range over sorted keys or annotate //faultline:maporder <reason>"},
 		{"dl007", 6, "floating-point type float64 in decision code; use integers (ppm, nanoseconds)"},
 		{"dl008", 9, "environment access: os.Getenv is only allowed in package faultline"},
 		{"dl008", 13, "environment access: syscall.Getenv is only allowed in package faultline"},
@@ -77,10 +81,17 @@ func TestMessages(t *testing.T) {
 		{"dl010", 10, "maps.Keys yields in random order; wrap it in slices.Sorted or annotate //faultline:maporder <reason>"},
 		{"dl011", 1, "platform-specific file x_linux.go in a simulation package"},
 	}
+	// Lint each fixture once: LintDir type-checks the fixture's imports from source on every call.
+	linted := map[string][]Finding{}
 	for _, c := range cases {
-		fs, err := LintDir("testdata/src/"+c.fixture, "fixture/"+c.fixture, ClassCore)
-		if err != nil {
-			t.Fatal(err)
+		fs, ok := linted[c.fixture]
+		if !ok {
+			var err error
+			fs, err = LintDir("testdata/src/"+c.fixture, "fixture/"+c.fixture, ClassCore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			linted[c.fixture] = fs
 		}
 		found := false
 		for _, f := range fs {

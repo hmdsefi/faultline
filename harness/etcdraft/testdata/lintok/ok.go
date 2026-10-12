@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
+	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -49,6 +51,9 @@ func sumEmbedded[S interface{ sliceLike }](s S) int {
 	return n
 }
 
+// describeSelf passes on a kernel.Describer, which kernel.Describe describes with its Describe method.
+func describeSelf[T kernel.Describer](v T) string { return kernel.Describe(v) }
+
 func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Entry, f string, err error, d time.Duration, lg logger, sb *strings.Builder, nw *simnet.Network, n *kernel.Node) string {
 	// Methods on a stream from the kernel are allowed, and so are the types of math/rand/v2.
 	var stream *rand.Rand = r
@@ -76,6 +81,9 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 	_ = sum([]int{1, 2})
 	_ = sumEmbedded([]int{1, 2})
 	_ = reflect.ValueOf(m).MapIndex(reflect.ValueOf("a"))
+	_ = reflect.ValueOf(ents).Len()
+	_ = slices.DeleteFunc(keys, func(string) bool { return false })
+	delete(m, "a")
 
 	_ = Stdout + Stderr
 
@@ -87,6 +95,11 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_ = ctx.Err()
+
+	// Neither reads the environment, and KeepAlive registers no function.
+	_ = os.IsPathSeparator('/')
+	_ = os.Getpagesize()
+	runtime.KeepAlive(hs)
 
 	// Durations are integers; no clock is read.
 	_ = d + 2*time.Second + time.Duration(3)*time.Millisecond
@@ -124,5 +137,14 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 	s += kernel.Describe(ents) + kernel.Describe(raftpb.MsgApp)
 	nw.Send(n, 1, []byte("x"))
 	_ = nw.SendRaw(n, 1, ents, simnet.RawOptions{})
+	(*simnet.Network).Send(nw, n, 1, []byte("x"))
+
+	// A kernel.Describer is described by its Describe method, whatever it holds, and nil as "nil".
+	var self kernel.Describer
+	s += kernel.Describe(self) + describeSelf(self)
+	nw.Send(n, 1, self)
+	nw.Send(n, 1, nil)
+	describeSelfFn := self.Describe
+	_ = describeSelfFn
 	return s
 }

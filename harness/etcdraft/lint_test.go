@@ -32,12 +32,15 @@ var forbiddenImports = []string{
 // forbiddenFuncs are the package-level functions ETC-002 forbids, by import path. Every
 // package-level function of math/rand and math/rand/v2 is forbidden too (methods on
 // kernel streams are not). The context functions read the wall clock and arm a runtime
-// timer, or start a goroutine (AfterFunc).
+// timer, or start a goroutine (AfterFunc); os.TempDir and the os.User*Dir functions read
+// environment variables; the runtime functions run a function on a runtime goroutine when
+// the garbage collector decides.
 var forbiddenFuncs = map[string][]string{
 	"time":    {"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"},
 	"context": {"AfterFunc", "WithDeadline", "WithDeadlineCause", "WithTimeout", "WithTimeoutCause"},
-	"os":      {"Getenv", "LookupEnv", "Environ", "ExpandEnv"},
+	"os":      {"Getenv", "LookupEnv", "Environ", "ExpandEnv", "TempDir", "UserHomeDir", "UserCacheDir", "UserConfigDir"},
 	"syscall": {"Getenv", "Environ"},
+	"runtime": {"AddCleanup", "SetFinalizer"},
 	"fmt":     {"Print", "Printf", "Println"},
 }
 
@@ -58,8 +61,13 @@ var (
 	// mapIterFuncs list a map in random order; slices.Sorted around them is fine.
 	mapIterFuncs = []string{"All", "Keys", "Values"}
 	sortedFuncs  = []string{"Sorted", "SortedFunc", "SortedStableFunc"}
-	// unorderedMethods list a map in random order, by types.Func.FullName.
-	unorderedMethods = []string{"(reflect.Value).MapRange", "(reflect.Value).MapKeys", "(*sync.Map).Range"}
+	// unorderedFuncs list a map in random order, or call a function in map order, by
+	// types.Func.FullName. Seq and Seq2 do so only for a map value, but the lint cannot tell
+	// the value's kind.
+	unorderedFuncs = []string{
+		"(reflect.Value).MapRange", "(reflect.Value).MapKeys", "(reflect.Value).Seq", "(reflect.Value).Seq2",
+		"(*sync.Map).Range", "maps.DeleteFunc", "maps.EqualFunc",
+	}
 	// formatVerbs call the String method of the argument (fmt's handleMethods).
 	formatVerbs = "vsqxX"
 )
@@ -113,7 +121,7 @@ func TestDeterminismRulesCatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants := wantComments(t, dir)
-	if len(wants) < 129 {
+	if len(wants) < 162 {
 		t.Fatalf("only %d `// want` lines in %s: the fixture was trimmed", len(wants), dir)
 	}
 	got := map[string][]string{} // "file.go:line" -> messages
@@ -307,17 +315,14 @@ func isFloat(t types.Type) bool {
 // isMap reports whether ranging over a value of type t ranges over a map: a map type, or
 // a type parameter whose constraint allows a map type.
 func isMap(t types.Type) bool {
-	if _, ok := t.Underlying().(*types.Map); ok {
-		return true
-	}
-	tp, ok := t.(*types.TypeParam)
-	return ok && allowsMap(tp.Constraint())
+	return allowsMap(t)
 }
 
 // allowsMap reports whether the constraint t allows a map type: t is one, or t is an
 // interface that embeds one, directly, as a union term or through another interface
 // (`interface{ MapLike }` with `type MapLike interface{ ~map[K]V }`), at any depth. The
 // embedding cannot form a cycle: go/types rejects a recursive constraint.
+// The same walk is in internal/detlint/lint.go of the root module; change both.
 func allowsMap(t types.Type) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Map:
@@ -339,9 +344,10 @@ func allowsMap(t types.Type) bool {
 	return false
 }
 
-// calledFunc returns the function or method a call expression's Fun names, however it
-// is written (pkg.F, a dot-imported F, F[T], (F)); nil for a function value or a conversion.
-func calledFunc(info *types.Info, fun ast.Expr) *types.Func {
+// callee returns the identifier a call expression's Fun names, however it is written
+// (pkg.F, a dot-imported F, F[T], (F), x.M, (*T).M); nil for any other Fun, such as a
+// function literal.
+func callee(fun ast.Expr) *ast.Ident {
 	for {
 		switch x := fun.(type) {
 		case *ast.ParenExpr:
@@ -351,15 +357,24 @@ func calledFunc(info *types.Info, fun ast.Expr) *types.Func {
 		case *ast.IndexListExpr:
 			fun = x.X
 		case *ast.SelectorExpr:
-			fn, _ := info.Uses[x.Sel].(*types.Func)
-			return fn
+			return x.Sel
 		case *ast.Ident:
-			fn, _ := info.Uses[x].(*types.Func)
-			return fn
+			return x
 		default:
 			return nil
 		}
 	}
+}
+
+// calledFunc returns the function or method a call expression's Fun names (see callee);
+// nil for a function value or a conversion.
+func calledFunc(info *types.Info, fun ast.Expr) *types.Func {
+	id := callee(fun)
+	if id == nil {
+		return nil
+	}
+	fn, _ := info.Uses[id].(*types.Func)
+	return fn
 }
 
 // sortedArgument reports whether the identifier id (maps.All, maps.Keys or maps.Values) is
@@ -399,6 +414,9 @@ func lintFile(fset *token.FileSet, f *ast.File, info *types.Info) []finding {
 		}
 	}
 	var floatEnd token.Pos // end of the last floating-point expression reported
+	// called holds the identifiers that name the function of a call. A call is visited
+	// before its Fun, so lintIdent sees every entry it looks up.
+	called := map[*ast.Ident]bool{}
 	ast.PreorderStack(f, nil, func(n ast.Node, stack []ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.GoStmt:
@@ -410,13 +428,16 @@ func lintFile(fset *token.FileSet, f *ast.File, info *types.Info) []finding {
 				report(x, "range over a map")
 			}
 		case *ast.Ident:
-			lintIdent(x, stack, info, report)
+			lintIdent(x, stack, info, called, report)
 		case *ast.SelectorExpr:
 			// String of a proto message: called, taken as a method value or as a method expression.
 			if sel := info.Selections[x]; sel != nil && sel.Kind() != types.FieldVal && x.Sel.Name == "String" && isProto(sel.Recv()) {
 				report(x, "String() of a proto message")
 			}
 		case *ast.CallExpr:
+			if id := callee(x.Fun); id != nil {
+				called[id] = true
+			}
 			lintFormat(info, x, report)
 			lintDescribe(info, x, report)
 		}
@@ -434,8 +455,8 @@ func lintFile(fset *token.FileSet, f *ast.File, info *types.Info) []finding {
 // lintIdent applies the rules that name an identifier. It looks at every identifier and
 // resolves it through types.Info.Uses, so a forbidden function is found however it is
 // reached: called, taken as a function value, through a dot import or with an explicit
-// type argument.
-func lintIdent(id *ast.Ident, stack []ast.Node, info *types.Info, report func(ast.Node, string, ...any)) {
+// type argument. called holds the identifiers that name the function of a call.
+func lintIdent(id *ast.Ident, stack []ast.Node, info *types.Info, called map[*ast.Ident]bool, report func(ast.Node, string, ...any)) {
 	switch obj := info.Uses[id].(type) {
 	case *types.Builtin:
 		if obj.Name() == "print" || obj.Name() == "println" {
@@ -449,19 +470,21 @@ func lintIdent(id *ast.Ident, stack []ast.Node, info *types.Info, report func(as
 		if obj.Pkg() == nil {
 			return
 		}
-		pkg, name := obj.Pkg().Path(), obj.Name()
+		pkg, name, full := obj.Pkg().Path(), obj.Name(), obj.FullName()
 		switch {
+		case slices.Contains(unorderedFuncs, full):
+			report(id, "unordered iteration: %s", full)
+		case slices.Contains(forbiddenMethods, full):
+			report(id, "use of %s", full)
 		case obj.Signature().Recv() != nil:
-			if slices.Contains(unorderedMethods, obj.FullName()) {
-				report(id, "unordered iteration: %s", obj.FullName())
-			}
-			if slices.Contains(forbiddenMethods, obj.FullName()) {
-				report(id, "use of %s", obj.FullName())
-			}
+			// Other methods are allowed, also on math/rand types.
 		case slices.Contains(forbiddenFuncs[pkg], name), pkg == "math/rand", pkg == "math/rand/v2":
 			report(id, "use of %s.%s", pkg, name)
 		case pkg == "maps" && slices.Contains(mapIterFuncs, name) && !sortedArgument(id, stack, info):
 			report(id, "unordered iteration: maps.%s", name)
+		}
+		if _, ok := describedArgs[full]; ok && !called[id] {
+			report(id, "%s used as a value; call it directly so the lint can check its argument", name)
 		}
 	}
 }
@@ -535,7 +558,8 @@ func lintFormat(info *types.Info, call *ast.CallExpr, report func(ast.Node, stri
 
 // lintDescribe reports a proto message passed to kernel.Describe, or as the payload of
 // simnet's Send or SendRaw (ETC-005). Only the message itself counts: kernel.Describe prints
-// the type name of a slice, map or struct that holds one.
+// the type name of a slice, map or struct that holds one. It also reports an argument whose
+// type may hold a message the lint cannot see (see opaque).
 func lintDescribe(info *types.Info, call *ast.CallExpr, report func(ast.Node, string, ...any)) {
 	fn := calledFunc(info, call.Fun)
 	if fn == nil {
@@ -550,9 +574,36 @@ func lintDescribe(info *types.Info, call *ast.CallExpr, report func(ast.Node, st
 			i++ // a method expression takes the receiver as its first argument
 		}
 	}
-	if i < len(call.Args) && isProto(info.Types[call.Args[i]].Type) {
-		report(call.Args[i], "proto message passed to %s: kernel.Describe calls its String method", fn.Name())
+	if i >= len(call.Args) {
+		return
 	}
+	arg := call.Args[i]
+	switch t := info.Types[arg].Type; {
+	case isProto(t):
+		report(arg, "proto message passed to %s: kernel.Describe calls its String method", fn.Name())
+	case opaque(t):
+		report(arg, "proto message may reach %s through type %s; pass a concrete type or a kernel.Describer",
+			fn.Name(), types.TypeString(t, (*types.Package).Name))
+	}
+}
+
+// describer is the method set of kernel.Describer: kernel.Describe calls Describe before
+// String (KRN-100), so a value that has it never reaches String.
+var describer = types.NewInterfaceType([]*types.Func{
+	types.NewFunc(token.NoPos, nil, "Describe", types.NewSignatureType(nil, nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])), false)),
+}, nil).Complete()
+
+// opaque reports whether a value of type t may hold a proto message that its type does not
+// show: t is an interface or a type parameter (whose underlying type is its constraint) and
+// does not guarantee a Describe method. A message converted to any and the parameter of a
+// wrapper function have such a type.
+func opaque(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	_, ok := t.Underlying().(*types.Interface)
+	return ok && !types.Implements(t, describer)
 }
 
 // verbArg is one verb of a format string and the index of the argument it formats.

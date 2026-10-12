@@ -22,7 +22,7 @@ const (
 	RuleWallClock  Rule = "DL001" // wall-clock time and real timers
 	RuleGlobalRand Rule = "DL002" // package-level math/rand and math/rand/v2 functions
 	RuleCryptoRand Rule = "DL003" // import of crypto/rand
-	RuleGo         Rule = "DL004" // go statement
+	RuleGo         Rule = "DL004" // goroutines: go statement, context.AfterFunc, WaitGroup.Go
 	RuleSelect     Rule = "DL005" // select statement
 	RuleMapRange   Rule = "DL006" // range over a map
 	RuleFloat      Rule = "DL007" // floating-point and complex types

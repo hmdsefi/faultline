@@ -120,7 +120,13 @@ func (l *linter) lintPackage(base, dir, importPath string, c Class) ([]Finding, 
 }
 
 var (
-	wallClockFuncs = []string{"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"}
+	// wallClockFuncs read the wall clock or arm a runtime timer, by import path (DL001).
+	wallClockFuncs = map[string][]string{
+		"time":    {"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"},
+		"context": {"WithDeadline", "WithDeadlineCause", "WithTimeout", "WithTimeoutCause"},
+	}
+	// goroutineFuncs start a goroutine without a go statement, by types.Func.FullName (DL004).
+	goroutineFuncs = []string{"context.AfterFunc", "(*sync.WaitGroup).Go"}
 	randCtors      = []string{"New", "NewSource", "NewZipf", "NewPCG", "NewChaCha8"}
 	envFuncs       = []string{"os.Getenv", "os.LookupEnv", "os.Environ", "os.ExpandEnv", "syscall.Getenv", "syscall.Environ"}
 	unorderedFuncs = []string{"(reflect.Value).MapRange", "(reflect.Value).MapKeys", "(*sync.Map).Range"}
@@ -128,7 +134,7 @@ var (
 	sortedFuncs    = []string{"Sorted", "SortedFunc", "SortedStableFunc"}
 )
 
-// lintFile applies the syntax and identifier rules (DL001–DL006, DL008–DL010) to f.
+// lintFile applies the syntax and identifier rules (DL001 to DL006, DL008 to DL010) to f.
 func (l *linter) lintFile(f *ast.File, info *types.Info, has func(Rule) bool, qual types.Qualifier) []Finding {
 	var out []Finding
 	add := func(pos token.Pos, r Rule, msg string) {
@@ -162,14 +168,17 @@ func (l *linter) lintFile(f *ast.File, info *types.Info, has func(Rule) bool, qu
 			pkg, name := fn.Pkg().Path(), fn.Name()
 			method := fn.Signature().Recv() != nil
 			switch {
+			case slices.Contains(goroutineFuncs, fn.FullName()):
+				add(n.Pos(), RuleGo, fmt.Sprintf(
+					"%s starts a goroutine, which is forbidden in simulation code", fn.FullName()))
 			case method:
 				if slices.Contains(unorderedFuncs, fn.FullName()) {
 					add(n.Pos(), RuleUnordered, fmt.Sprintf(
 						"unordered iteration: %s; sort the keys or annotate //faultline:maporder <reason>", fn.FullName()))
 				}
-			case pkg == "time" && slices.Contains(wallClockFuncs, name):
+			case slices.Contains(wallClockFuncs[pkg], name):
 				add(n.Pos(), RuleWallClock, fmt.Sprintf(
-					"wall-clock time: time.%s is forbidden; use Sim.Now, Node.Now or Node.After", name))
+					"wall-clock time: %s.%s is forbidden; use Sim.Now, Node.Now or Node.After", pkg, name))
 			case (pkg == "math/rand" || pkg == "math/rand/v2") && !slices.Contains(randCtors, name):
 				add(n.Pos(), RuleGlobalRand, fmt.Sprintf(
 					"global randomness: %s.%s is forbidden; use Sim.Rand or Node.Rand", pkg, name))
@@ -186,29 +195,30 @@ func (l *linter) lintFile(f *ast.File, info *types.Info, has func(Rule) bool, qu
 	return out
 }
 
-// isMap reports whether ranging over a value of type t ranges over a map (DET-001, DL006).
+// isMap reports whether ranging over a value of type t ranges over a map (DET-001, DL006): a map
+// type, or a type parameter whose constraint allows a map type.
 func isMap(t types.Type) bool {
-	if _, ok := t.Underlying().(*types.Map); ok {
+	return allowsMap(t)
+}
+
+// allowsMap reports whether the constraint t allows a map type: t is one, or t is an interface that
+// embeds one, directly, as a union term or through another interface (`interface{ MapLike }` with
+// `type MapLike interface{ ~map[K]V }`), at any depth. The embedding cannot form a cycle: go/types
+// rejects a recursive constraint. The same walk is in harness/etcdraft/lint_test.go; change both.
+func allowsMap(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Map:
 		return true
-	}
-	tp, ok := t.(*types.TypeParam)
-	if !ok {
-		return false
-	}
-	iface, ok := tp.Constraint().Underlying().(*types.Interface)
-	if !ok {
-		return false
-	}
-	for i := 0; i < iface.NumEmbeddeds(); i++ {
-		switch e := iface.EmbeddedType(i).(type) {
-		case *types.Union:
-			for j := 0; j < e.Len(); j++ {
-				if _, ok := e.Term(j).Type().Underlying().(*types.Map); ok {
-					return true
+	case *types.Interface:
+		for i := 0; i < u.NumEmbeddeds(); i++ {
+			e := u.EmbeddedType(i)
+			if union, ok := e.(*types.Union); ok {
+				for j := 0; j < union.Len(); j++ {
+					if allowsMap(union.Term(j).Type()) {
+						return true
+					}
 				}
-			}
-		default:
-			if _, ok := e.Underlying().(*types.Map); ok {
+			} else if allowsMap(e) {
 				return true
 			}
 		}
