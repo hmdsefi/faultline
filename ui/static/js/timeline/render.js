@@ -412,12 +412,13 @@ export function sliceEdges(model) {
 
 // shownEdges returns the slice edges to draw under filters (ART-079 items 4 and 10), each from and
 // to a shown record. An edge between shown records stays. A shown member b also gets an edge from
-// each shown member that reaches it through hidden members only, but of b's sources in one run
-// only the latest: a run is a node incarnation's members linked by program-order edges, so an
-// earlier one reaches b through the later one. Each global record is a run of its own. With more
-// than BRIDGE_MAX members the work is not bounded enough for ART-072, so edges with a hidden end
-// are only dropped. The view calls it when the filters change, not on every draw. edges come in
-// record order, so a hidden member's sources are complete before an edge leaves it.
+// each shown member s that reaches it through hidden members only, when s is the latest of b's
+// sources in its run, direct or bridged: a run is a node incarnation's members linked by
+// program-order edges, so an earlier one reaches b through the later one. Each global record is a
+// run of its own. With more than BRIDGE_MAX members the work is not bounded enough for ART-072, so
+// edges with a hidden end are only dropped. The view calls it when the filters change, not on
+// every draw. edges come in record order, so a hidden member's sources are complete before an edge
+// leaves it.
 export function shownEdges(model, edges, filters) {
   const shown = (seq) => isVisible(model.records[model.bySeq.get(seq)], filters);
   if (model.slice.size > BRIDGE_MAX) {

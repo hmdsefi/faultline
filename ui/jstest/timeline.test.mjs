@@ -407,6 +407,29 @@ test("hit test: the axis and the gutter select nothing, hidden kinds are skipped
   assert.equal(hitTest(m, view, { showEvents: false, hiddenNamespaces: new Set(["net"]) }, x + 3, laneY(view, 1)), -1);
 });
 
+test("a record in the view's first pixels is drawn and selectable (ART-079 items 2 and 8)", () => {
+  // One record per ms on n1 (lane 1). Each view puts record 2 at its left edge and the next record
+  // hundreds of px away, so a search that starts past record 2 finds nothing near it.
+  const m = slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 1], [3, 1, 1, "app.step", 2], [4, 1, 1, "app.step", 3]]);
+  const filters = { showEvents: false, hiddenNamespaces: new Set() };
+  const colors = Object.fromEntries(PALETTE.map((n) => [n, n]));
+  // 2,000 ns per px: record 2 (2 ms) is 2 px right of the gutter. In sequence mode, 500 px per
+  // record and record 2 (index 1) exactly at view.from. The last view puts record 2 4 px left of
+  // the gutter: its glyph straddles the gutter, so it is drawn (draw clips it) but not selectable.
+  for (const [mode, from, to, want, hit] of [["time", 1996000, 3996000, GUTTER + 2, 1], ["seq", 1, 3, GUTTER, 1], ["time", 2008000, 4008000, GUTTER - 4, -1]]) {
+    const view = { ...viewOf(m, mode, 1136, 400), from, to };
+    const x = toX(view, mode === "seq" ? 1 : 2000000);
+    const y = laneY(view, 1);
+    near([x], [want]);
+    const at = mode + " at gutter " + (want - GUTTER);
+    assert.equal(hitTest(m, view, filters, x, y), hit, at + (hit === 1 ? ": record 2 is selected" : ": the gutter selects nothing"));
+    const ctx = new RecordingContext();
+    draw(ctx, m, view, { filters, selected: -1, sliceOn: false, edges: [], colors, fonts: { sans: "sans", mono: "mono" }, failureNode: 0, window: null });
+    const marks = ctx.ops.filter((o) => o.op === "stroke" && o.stroke === "other").flatMap((o) => o.path.filter((p) => p[0] === "M").map((p) => [p[1], p[2]]));
+    assert.ok(marks.some(([px, py]) => px === x && py < y && y - py < 10), at + ": record 2's glyph is drawn, " + JSON.stringify(marks));
+  }
+});
+
 test("the failure node's lane gets a second star; a cut trace marks and shades its window (ART-079 items 6 and 7)", () => {
   const m = buildModel(fixtureData());
   const edged = (ctx) => ctx.ops.filter((o) => o.op === "stroke" && o.stroke === "bg").length;
@@ -507,6 +530,11 @@ test("slice edges join shown records only and bridge hidden members (ART-079 ite
   assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 2, 1, E, 1], [4, 2, 2, E, 2], [5, 2, 2, "app.step", 3]]), filters(false, [])), [[1, 2], [2, 5]]);
   // Record 2 is not a member, so 1 and 3 are in different runs and both reach 5 through event 4.
   assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 1, 1, "app.step", 0], [4, 1, 1, E, 1], [5, 2, 1, "app.step", 4]], [5, 4, 3, 1]), filters(false, [])), [[1, 5], [3, 5]]);
+  // Records 1 and 3 are not members, so 2 (n1) and 4 (n2) each start a run of their own.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, "app.step", 0], [3, 2, 1, "app.step", 0], [4, 2, 1, "app.step", 0], [5, 1, 1, E, 4], [6, 1, 1, "app.step", 5]], [6, 5, 4, 2]), filters(false, [])), [[4, 6], [2, 6]], "two runs that start after non-members stay apart");
+  // A direct source later in the same run drops a bridged one: 1 reaches 4 through event 2, but 3,
+  // also on n1#1, has its own edge to 4.
+  assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, E, 1], [3, 1, 1, "app.step", 0], [4, 1, 1, "app.step", 2]]), filters(false, [])), [[1, 3], [3, 4]]);
   assert.deepEqual(sliceLines(slicedRun([[1, 1, 1, E, 0], [2, 1, 1, "app.step", 1]]), filters(false, [])), [], "a hidden member without predecessors draws nothing");
   assert.deepEqual(sliceLines(slicedRun([[1, 1, 2, "app.step", 0], [2, 2, 1, "app.step", 0], [3, 2, 1, E, 1], [4, 2, 1, "app.step", 3]]), filters(false, [])), [[1, 4], [2, 4]], "n1#2 and n2#1 stay apart");
   // Edges between shown records stay as they are, two from one run included.
@@ -542,16 +570,25 @@ test("bridging stops above BRIDGE_MAX members, and its work at the cap stays bou
   // n1: a shown record, a hidden event and its shown effect, then global records up to n members.
   const chain = (n) => slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, E, 1], [3, 1, 1, "app.step", 2], ...Array.from({ length: n - 3 }, (_, i) => [i + 4, 0, 0, "app.plan", 0])]);
   const shown = (m) => shownEdges(m, sliceEdges(m), none).map((e) => [e.from, e.to]);
-  assert.deepEqual([shown(chain(BRIDGE_MAX)), shown(chain(BRIDGE_MAX + 1))], [[[1, 3]], []]);
-  // The worst shapes: k global records each cause a hidden event of one chain on n1, which ends in
-  // a shown root (fan), or each event causes a shown record on n2 (spray, k(k+1)/2 bridged edges).
-  // At 1,000 members each takes about 8 ms in node, and draws its edges in about 10 ms.
+  assert.equal(BRIDGE_MAX, 1000);
+  assert.deepEqual([shown(chain(1000)), shown(chain(1001))], [[[1, 3]], []], "the cap is 1,000 members");
+  // The cap counts slice members, not records: a short slice in a trace of 1,003 records is bridged.
+  const padded = slicedRun([[1, 1, 1, "app.step", 0], [2, 1, 1, E, 1], [3, 1, 1, "app.step", 2], ...Array.from({ length: 1000 }, (_, i) => [i + 4, 2, 1, "app.step", 0])], [3, 2, 1]);
+  assert.deepEqual(shown(padded), [[1, 3]], "a small slice in a long trace is bridged");
+  // The worst shapes start with k global records that each cause a hidden event of one chain on
+  // n1. The chain ends in a shown root (fan, the most work per drawn edge), or its last event
+  // causes t shown records on n2 (broom, k bridged edges each, about N²/8 in all). At 1,000
+  // members the broom (k 250, t 500) draws the most edges, 125,499, after about 924,000 Map and
+  // Set operations: about 11 ms in node, 20 ms per draw, and about 110 ms for a chip click in
+  // Chrome. Pan and zoom reuse the edges, so ART-072 holds.
   const fan = (k) => [...Array.from({ length: k }, (_, i) => [[2 * i + 1, 0, 0, "app.plan", 0], [2 * i + 2, 1, 1, E, 2 * i + 1]]).flat(), [2 * k + 1, 1, 1, "app.step", 2 * k]];
-  const spray = (k) => Array.from({ length: k }, (_, i) => [[3 * i + 1, 0, 0, "app.plan", 0], [3 * i + 2, 1, 1, E, 3 * i + 1], [3 * i + 3, 2, 1, "app.step", 3 * i + 2]]).flat();
-  for (const rows of [fan(Math.floor((BRIDGE_MAX - 1) / 2)), spray(Math.floor(BRIDGE_MAX / 3))]) {
+  const broom = (k, t) => [...fan(k).slice(0, 2 * k), ...Array.from({ length: t }, (_, j) => [2 * k + 1 + j, 2, 1, "app.step", 2 * k])];
+  const k = Math.floor(BRIDGE_MAX / 4);
+  for (const rows of [fan(Math.floor((BRIDGE_MAX - 1) / 2)), broom(k, BRIDGE_MAX - 2 * k)]) {
     const m = slicedRun(rows);
+    assert.ok(m.slice.size <= BRIDGE_MAX && m.slice.size > BRIDGE_MAX - 2, m.slice.size + " members, at the cap");
     const edges = sliceEdges(m);
     const ops = mapOps(() => shownEdges(m, edges, none));
-    assert.ok(ops <= 700000, ops + " Map and Set operations");
+    assert.ok(ops <= 1000000, ops + " Map and Set operations");
   }
 });
