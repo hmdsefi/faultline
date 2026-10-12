@@ -4,6 +4,7 @@
 package etcdraft
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -46,21 +47,12 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-// configEqual compares the exported fields of two configs.
+// configEqual reports whether a and b are equal in every field but selfTestHook. It clears
+// that func field in both copies first, because reflect.DeepEqual treats two funcs as equal
+// only when both are nil.
 func configEqual(a, b Config) bool {
 	a.selfTestHook, b.selfTestHook = nil, nil
-	return a.Nodes == b.Nodes && a.Clients == b.Clients && a.TickInterval == b.TickInterval &&
-		a.ElectionTick == b.ElectionTick && a.HeartbeatTick == b.HeartbeatTick && a.PreVote == b.PreVote &&
-		a.CheckQuorum == b.CheckQuorum && a.StepDownOnRemoval == b.StepDownOnRemoval &&
-		a.DisableProposalForwarding == b.DisableProposalForwarding && a.MaxSizePerMsg == b.MaxSizePerMsg &&
-		a.MaxInflightMsgs == b.MaxInflightMsgs && a.MaxUncommittedEntriesSize == b.MaxUncommittedEntriesSize &&
-		a.SyncLatencyMin == b.SyncLatencyMin && a.SyncLatencyMax == b.SyncLatencyMax &&
-		a.SyncOnlyMustSync == b.SyncOnlyMustSync && a.ReportUnreachable == b.ReportUnreachable &&
-		a.SnapshotTimeout == b.SnapshotTimeout && a.CrashRestartDelay == b.CrashRestartDelay &&
-		a.SnapshotEvery == b.SnapshotEvery && a.CompactKeep == b.CompactKeep && a.Membership == b.Membership &&
-		a.Workload == b.Workload && a.Duration == b.Duration && a.Quiet == b.Quiet &&
-		a.ProgressWithin == b.ProgressWithin && a.Drain == b.Drain && a.Faults == b.Faults &&
-		a.LogLevel == b.LogLevel && a.Bugs == b.Bugs && a.noConfSnapshot == b.noConfSnapshot && a.earlySend == b.earlySend
+	return reflect.DeepEqual(a, b)
 }
 
 // AT-ETC-02: each row of ETC-012, alone and together with an error from a later row.

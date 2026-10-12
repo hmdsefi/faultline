@@ -43,13 +43,13 @@ type Cluster struct {
 
 // KVInput is the check/history input of "read" ({"key": k}) and "write" ({"key": k, "value": v})
 // operations. Write values are never empty.
+//
+// The output of an OK "read" is the value read as a Go string (a JSON string), or nil (JSON null)
+// when the key is absent; the output of an OK "write" is nil.
 type KVInput struct {
 	Key   string `json:"key"`
 	Value string `json:"value,omitempty"` // writes only
 }
-
-// The output of an OK "read" is the value read as a Go string (a JSON string), or nil (JSON null)
-// when the key is absent; the output of an OK "write" is nil (ETC-095).
 
 // LeaderChange is one observed change of a server's SoftState (lead or raft state).
 type LeaderChange struct {

@@ -4,6 +4,7 @@
 package oracle
 
 import (
+	"bytes"
 	"hash/fnv"
 	"strings"
 	"testing"
@@ -172,6 +173,33 @@ func TestConfigurationAgreement(t *testing.T) {
 	}
 	o.ConfApplied(at(3), "n3", 5, &raftpb.ConfState{Voters: []uint64{1, 2, 3, 4}, AutoLeave: new(false)})
 	wantErr(t, o, ConfigAgreement, "index 5: n1 applied configuration Voters:[1 2 3] VotersOutgoing:[] Learners:[4] LearnersNext:[] AutoLeave:false but n3 got Voters:[1 2 3 4]")
+}
+
+// Conf and ConfAt return copies, and ConfKey leaves its argument alone, so a caller that
+// changes what it gets back cannot change the canonical configuration.
+func TestConfCopies(t *testing.T) {
+	o := New(bootSnap())
+	want := raft.DescribeConfState(bootSnap().Metadata.ConfState)
+	for _, cs := range []*raftpb.ConfState{o.Conf(), o.ConfAt(1)} {
+		cs.Voters[0] = 9
+		cs.Learners = append(cs.Learners, 4)
+	}
+	if got := raft.DescribeConfState(o.Conf()); got != want {
+		t.Fatalf("Conf() = %s after the caller changed earlier results, want %s", got, want)
+	}
+	if got := raft.DescribeConfState(o.ConfAt(1)); got != want {
+		t.Fatalf("ConfAt(1) = %s after the caller changed earlier results, want %s", got, want)
+	}
+	if cs := o.ConfAt(0); cs != nil {
+		t.Fatalf("ConfAt(0) = %s, want nil (below the bootstrap index)", raft.DescribeConfState(cs))
+	}
+	unset := &raftpb.ConfState{Voters: []uint64{1}}
+	if !bytes.Equal(ConfKey(unset), ConfKey(&raftpb.ConfState{Voters: []uint64{1}, AutoLeave: new(false)})) {
+		t.Fatal("ConfKey tells an unset AutoLeave from AutoLeave false")
+	}
+	if unset.AutoLeave != nil {
+		t.Fatal("ConfKey set AutoLeave on its argument")
+	}
 }
 
 // ETC-112

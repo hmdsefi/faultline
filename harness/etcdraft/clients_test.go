@@ -174,10 +174,24 @@ func TestUndecodableConfChangeText(t *testing.T) {
 	}
 }
 
+// withoutCoverLine drops the "coverage: ..." line that a child built with -cover prints last;
+// the line comes from the testing package, not from the harness.
+func withoutCoverLine(out string) string {
+	if testing.CoverMode() == "" {
+		return out
+	}
+	trimmed := strings.TrimSuffix(out, "\n")
+	last := strings.LastIndexByte(trimmed, '\n') + 1
+	if strings.HasPrefix(trimmed[last:], "coverage: ") {
+		return out[:last]
+	}
+	return out
+}
+
 // AT-ETC-24
 func TestNoStdoutOrStderr(t *testing.T) {
 	out, code := runScenario(t, "quiet-output", nil)
-	if code != 0 || out != "PASS\n" {
+	if out = withoutCoverLine(out); code != 0 || out != "PASS\n" {
 		t.Fatalf("exit %d, output %q; want exit 0 and exactly \"PASS\\n\"", code, out)
 	}
 	count := func(level LogLevel) (all, nonPanic int) {

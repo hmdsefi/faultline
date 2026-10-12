@@ -172,7 +172,7 @@ const (
 	BugSendBeforePersist Bug = 1 << iota // send a Ready's messages before writing its WAL records
 	BugSkipSync                          // never call File.Sync on the Ready and snapshot paths
 	BugApplyBeforeCommit                 // apply normal entries from rd.Entries before they commit
-	BugForgetHardState                   // never write HardState records
+	BugForgetHardState                   // skip each Ready's HardState record; the boot HardState is still written
 	BugSnapshotOffByOne                  // label local snapshots with applied-1 instead of applied
 )
 
@@ -399,6 +399,12 @@ func (c Config) validate() error {
 	return nil
 }
 
+// durationMismatch is the error of ETC-022 and ETC-020 step 1 for a Config.Duration that
+// differs from Options.Duration.
+func durationMismatch(cfg, opts time.Duration) error {
+	return fmt.Errorf("etcdraft: Config.Duration (%v) differs from Options.Duration (%v)", cfg, opts)
+}
+
 // validateOptions applies ETC-022.
 func validateOptions(cfg Config, opts faultline.Options) (Config, faultline.Options, error) {
 	if opts.NoCryptoSeed {
@@ -414,7 +420,7 @@ func validateOptions(cfg Config, opts faultline.Options) (Config, faultline.Opti
 		cfg.Duration = opts.Duration
 	}
 	if cfg.Duration != opts.Duration {
-		return cfg, opts, fmt.Errorf("etcdraft: Config.Duration (%v) differs from Options.Duration (%v)", cfg.Duration, opts.Duration)
+		return cfg, opts, durationMismatch(cfg.Duration, opts.Duration)
 	}
 	if opts.Net == (simnet.Config{}) {
 		opts.Net = NetConfig()

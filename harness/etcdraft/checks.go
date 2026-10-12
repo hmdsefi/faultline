@@ -11,6 +11,7 @@ import (
 
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/hmdsefi/faultline/check/history"
 	"github.com/hmdsefi/faultline/kernel"
@@ -120,17 +121,12 @@ func (c *Cluster) checkReplicasAgree() error {
 			return fmt.Errorf("%s at index %d has state hash %016x, reference has %016x", s.node.Name(), a, got, want)
 		}
 		ref := c.o.ConfAt(a)
-		if !bytes.Equal(confKey(s.inc.confState), confKey(ref)) {
+		if !bytes.Equal(oracle.ConfKey(s.inc.confState), oracle.ConfKey(ref)) {
 			return fmt.Errorf("%s at index %d has configuration %s, canonical configuration is %s", s.node.Name(), a,
 				raft.DescribeConfState(s.inc.confState), raft.DescribeConfState(ref))
 		}
 	}
 	return nil
-}
-
-// confKey is wal.Marshal of cs with AutoLeave set explicitly (see oracle.confBytes).
-func confKey(cs *raftpb.ConfState) []byte {
-	return wal.Marshal(raftpb.EnsureConfState(clone(cs)))
 }
 
 // checkWAL implements ETC-133.
@@ -203,7 +199,7 @@ func (inc *incarnation) walAgrees() error {
 	}
 	walHS := st.HardState
 	if walHS != nil && walHS.GetCommit() < st.SnapIndex() {
-		walHS = clone(walHS)
+		walHS = proto.CloneOf(walHS)
 		walHS.Commit = new(st.SnapIndex())
 	}
 	if raft.DescribeHardState(walHS) != raft.DescribeHardState(hs) {

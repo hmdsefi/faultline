@@ -4,6 +4,7 @@
 package etcdraft
 
 import (
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -55,6 +56,26 @@ func TestMembershipChanges(t *testing.T) {
 	}
 	if want := []uint32{1, 2, 3, 4, 5}; !slices.Equal(cids, want) { // ETC-090: c<k> = k, probe = K+1, admin = K+2
 		t.Fatalf("client IDs %v, want %v", cids, want)
+	}
+}
+
+// ETC-171 step 1: the admin's wait saturates instead of overflowing, so a Membership.Every too
+// long for Every + Every/2 to fit in a time.Duration runs without a panic.
+func TestAdminWaitSaturates(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Faults = FaultsNone
+	cfg.Membership = Membership{Enabled: true, Spares: 1, Every: math.MaxInt64}
+	opts := testOptions(t, &cfg, 20*time.Second, false)
+	var st Stats
+	runSeed(t, 1, opts, func(w *faultline.World) {
+		c := Setup(w, cfg)
+		w.Final("test: stats", func() error {
+			st = c.Stats()
+			return nil
+		})
+	})
+	if st.ConfChangesApplied != 0 || st.LastIndex == 0 {
+		t.Fatalf("ConfChangesApplied = %d, LastIndex = %d; want a run with no conf change", st.ConfChangesApplied, st.LastIndex)
 	}
 }
 

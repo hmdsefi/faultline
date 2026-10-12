@@ -4,6 +4,7 @@
 package etcdraft
 
 import (
+	"math"
 	"slices"
 
 	"go.etcd.io/raft/v3/raftpb"
@@ -67,15 +68,18 @@ func kindName(k member.Kind) string {
 	return "unknown"
 }
 
-// decodeConf decodes a reply's ConfState; an undecodable one is a harness error with a fixed
-// text (Task 8a's decodeError: ETC-121, protobuf's message is only the wrapped cause).
-func (cl *client) decodeConf(rep wire.Reply) (*raftpb.ConfState, bool) {
+// confReply decodes the ConfState of a conf-read or conf-change reply, adds its raft IDs to the
+// seen set, and returns it with its history output. An undecodable ConfState is a harness error
+// with a fixed text (decodeError, ETC-121: protobuf's message is only the wrapped cause), and
+// both results are then nil.
+func (cl *client) confReply(rep wire.Reply) (*raftpb.ConfState, any) {
 	cs := new(raftpb.ConfState)
 	if err := proto.Unmarshal(rep.Data, cs); err != nil {
 		cl.c.harnessError(cl.node, &decodeError{text: "conf state decode: undecodable reply", cause: err})
-		return nil, false
+		return nil, nil
 	}
-	return cs, true
+	cl.c.see(cs)
+	return cs, confOutput(cs)
 }
 
 // see records every raft ID of cs in the admin's seen set (ETC-173).
@@ -87,10 +91,12 @@ func (c *Cluster) see(cs *raftpb.ConfState) {
 	}
 }
 
-// adminWait is ETC-171 step 1.
+// adminWait is ETC-171 step 1. The upper bound saturates instead of overflowing, so a very long
+// Membership.Every only delays the next round.
 func (cl *client) adminWait() {
 	every := cl.c.cfg.Membership.Every
-	cl.node.After(kernel.Uniform(cl.node.Rand(), every/2, every+every/2), "etcdraft/admin", cl.adminRound)
+	hi := every + min(every/2, math.MaxInt64-every)
+	cl.node.After(kernel.Uniform(cl.node.Rand(), every/2, hi), "etcdraft/admin", cl.adminRound)
 }
 
 // adminRound is ETC-171 steps 2 to 4.
@@ -103,13 +109,9 @@ func (cl *client) adminRound() {
 	hid := c.w.History.Invoke(cl.name, "conf-read", nil)
 	var cs *raftpb.ConfState
 	cl.begin(&clientOp{hid: hid, req: wire.Request{Client: cl.cid, ID: cl.nextID, Op: kv.OpConfRead}, timeout: c.cfg.Workload.OpTimeout,
-		output: func(rep wire.Reply) any {
-			var ok bool
-			if cs, ok = cl.decodeConf(rep); !ok {
-				return nil
-			}
-			c.see(cs)
-			return confOutput(cs)
+		output: func(rep wire.Reply) (out any) {
+			cs, out = cl.confReply(rep)
+			return out
 		},
 		done: func(wire.Reply) {
 			if cs == nil {
@@ -119,6 +121,9 @@ func (cl *client) adminRound() {
 		}})
 }
 
+// adminChange is ETC-171 steps 3 and 4: it chooses a change for the configuration cs that the
+// conf read returned and proposes it, or waits for the next round when no change is valid.
+// It does nothing once the drain has started.
 func (cl *client) adminChange(cs *raftpb.ConfState) {
 	c := cl.c
 	if cl.now() >= c.drainStart {
@@ -134,12 +139,8 @@ func (cl *client) adminChange(cs *raftpb.ConfState) {
 	hid := c.w.History.Invoke(cl.name, "conf-change", confChangeInput{Kind: kindName(ch.Kind), Target: ch.Target, Remove: ch.Remove})
 	cl.begin(&clientOp{hid: hid, req: wire.Request{Client: cl.cid, ID: cl.nextID, Op: kv.OpConfChange, Data: wal.Marshal(ch.CC)}, timeout: c.cfg.Workload.OpTimeout,
 		output: func(rep wire.Reply) any {
-			cs, ok := cl.decodeConf(rep)
-			if !ok {
-				return nil
-			}
-			c.see(cs)
-			return confOutput(cs)
+			_, out := cl.confReply(rep)
+			return out
 		},
 		done: func(wire.Reply) { cl.adminWait() }})
 }

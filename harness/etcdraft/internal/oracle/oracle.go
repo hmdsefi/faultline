@@ -8,7 +8,6 @@ package oracle
 import (
 	"bytes"
 	"fmt"
-	"hash/fnv"
 	"slices"
 
 	"go.etcd.io/raft/v3"
@@ -105,32 +104,18 @@ func New(boot *raftpb.Snapshot) *Oracle {
 		prevHS:       map[uint64]*raftpb.HardState{},
 	}
 	md := boot.GetMetadata()
-	o.canon = []canonEntry{{term: md.GetTerm(), typ: raftpb.EntryNormal, dataHash: fnv64(boot.GetData()), node: "bootstrap"}}
+	o.canon = []canonEntry{{term: md.GetTerm(), typ: raftpb.EntryNormal, dataHash: kv.HashBytes(boot.GetData()), node: "bootstrap"}}
 	o.refHash = []uint64{o.ref.Hash()}
 	o.confIdx = []uint64{md.GetIndex()}
-	o.confAt[md.GetIndex()] = confRecord{cs: clone(md.GetConfState()), node: "bootstrap"}
+	o.confAt[md.GetIndex()] = confRecord{cs: proto.CloneOf(md.GetConfState()), node: "bootstrap"}
 	return o
 }
 
-func fnv64(b []byte) uint64 {
-	h := fnv.New64a()
-	h.Write(b)
-	return h.Sum64()
-}
-
-// clone returns a deep copy of m. proto.Clone returns a message of m's own type, so the
-// assertion cannot fail.
-func clone[M proto.Message](m M) M {
-	c, _ := proto.Clone(m).(M)
-	return c
-}
-
-// confBytes is the comparison key of a configuration: wal.Marshal of a copy whose
-// AutoLeave is explicitly set, because raft sets it on every ConfState it builds
-// while a bootstrap ConfState may leave it unset.
-func confBytes(cs *raftpb.ConfState) []byte {
-	c := raftpb.EnsureConfState(clone(cs))
-	return wal.Marshal(c)
+// ConfKey returns the key configurations are compared by (ETC-115): wal.Marshal of a copy of
+// cs whose AutoLeave is explicitly set, because raft sets it on every ConfState it builds
+// while a bootstrap ConfState may leave it unset. The harness's checks compare with it too.
+func ConfKey(cs *raftpb.ConfState) []byte {
+	return wal.Marshal(raftpb.EnsureConfState(proto.CloneOf(cs)))
 }
 
 func describeConf(cs *raftpb.ConfState) string {
@@ -191,7 +176,7 @@ func (o *Oracle) LeaderIsVoter(at kernel.Time, node string, id, term uint64, isV
 // Apply records that server id applied e (ETC-111).
 func (o *Oracle) Apply(at kernel.Time, node string, id uint64, e *raftpb.Entry) {
 	i, end := e.GetIndex(), uint64(len(o.canon))
-	ce := canonEntry{term: e.GetTerm(), typ: e.GetType(), dataHash: fnv64(e.GetData()), node: node}
+	ce := canonEntry{term: e.GetTerm(), typ: e.GetType(), dataHash: kv.HashBytes(e.GetData()), node: node}
 	switch {
 	case i == end+1:
 		o.canon = append(o.canon, ce)
@@ -245,13 +230,13 @@ func (o *Oracle) applyRef(i uint64, e *raftpb.Entry) {
 // ConfApplied records the ConfState that ApplyConfChange returned at index (ETC-115).
 func (o *Oracle) ConfApplied(at kernel.Time, node string, index uint64, cs *raftpb.ConfState) {
 	if prev, ok := o.confAt[index]; ok {
-		if !bytes.Equal(confBytes(prev.cs), confBytes(cs)) {
+		if !bytes.Equal(ConfKey(prev.cs), ConfKey(cs)) {
 			o.violate(ConfigAgreement, fmt.Errorf("index %d: %s applied configuration %s but %s got %s",
 				index, prev.node, describeConf(prev.cs), node, describeConf(cs)))
 		}
 		return
 	}
-	o.confAt[index] = confRecord{cs: clone(cs), node: node}
+	o.confAt[index] = confRecord{cs: proto.CloneOf(cs), node: node}
 	k, _ := slices.BinarySearch(o.confIdx, index)
 	o.confIdx = slices.Insert(o.confIdx, k, index)
 }
@@ -268,7 +253,7 @@ func (o *Oracle) SnapshotState(at kernel.Time, node, how string, index, dataHash
 		o.violate(StateMachineSafety, fmt.Errorf("%s snapshot at index %d on %s has state hash %016x, reference has %016x", how, index, node, dataHash, h))
 		return
 	}
-	if want := o.ConfAt(index); !bytes.Equal(confBytes(want), confBytes(cs)) {
+	if want := o.confAfter(index); !bytes.Equal(ConfKey(want), ConfKey(cs)) {
 		o.violate(StateMachineSafety, fmt.Errorf("%s snapshot at index %d on %s has configuration %s, canonical configuration is %s", how, index, node, describeConf(cs), describeConf(want)))
 	}
 }
@@ -286,7 +271,7 @@ func (o *Oracle) view(id uint64) *durable {
 func (o *Oracle) Persisted(id uint64, hs *raftpb.HardState, walEnd int64, snapIndex uint64) {
 	d := o.view(id)
 	if !raft.IsEmptyHardState(hs) {
-		d.hs = clone(hs)
+		d.hs = proto.CloneOf(hs)
 	}
 	d.walEnd = walEnd
 	d.snapIndex = max(d.snapIndex, snapIndex)
@@ -335,7 +320,7 @@ func olderHS(got, want *raftpb.HardState) bool {
 func (o *Oracle) HardState(at kernel.Time, node string, id uint64, hs *raftpb.HardState, baseline bool) {
 	cur := &raftpb.HardState{}
 	if hs != nil {
-		cur = clone(hs)
+		cur = proto.CloneOf(hs)
 	}
 	prev, ok := o.prevHS[id]
 	o.prevHS[id] = cur
@@ -378,11 +363,17 @@ func (o *Oracle) FirstApplied(client uint32, id uint64) (index uint64, ok bool) 
 	return index, ok
 }
 
-// Conf returns the latest canonical configuration.
-func (o *Oracle) Conf() *raftpb.ConfState { return o.confAt[o.confIdx[len(o.confIdx)-1]].cs }
+// Conf returns a copy of the latest canonical configuration.
+func (o *Oracle) Conf() *raftpb.ConfState {
+	return proto.CloneOf(o.confAt[o.confIdx[len(o.confIdx)-1]].cs)
+}
 
-// ConfAt returns the configuration in effect after index.
-func (o *Oracle) ConfAt(index uint64) *raftpb.ConfState {
+// ConfAt returns a copy of the configuration in effect after index, or nil if index is below
+// the bootstrap index.
+func (o *Oracle) ConfAt(index uint64) *raftpb.ConfState { return proto.CloneOf(o.confAfter(index)) }
+
+// confAfter returns the stored configuration in effect after index, or nil.
+func (o *Oracle) confAfter(index uint64) *raftpb.ConfState {
 	k, found := slices.BinarySearch(o.confIdx, index)
 	if !found {
 		k--

@@ -6,7 +6,6 @@ package etcdraft
 import (
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"strconv"
 
@@ -73,19 +72,6 @@ type incarnation struct {
 
 	instant          kernel.Time
 	readiesAtInstant int
-}
-
-// clone returns a deep copy of m. proto.Clone returns a message of m's own type, so the
-// assertion cannot fail.
-func clone[M proto.Message](m M) M {
-	c, _ := proto.Clone(m).(M)
-	return c
-}
-
-func fnv64(b []byte) uint64 {
-	h := fnv.New64a()
-	h.Write(b)
-	return h.Sum64()
 }
 
 func u64(v uint64) string { return strconv.FormatUint(v, 10) }
@@ -287,7 +273,7 @@ func (inc *incarnation) recover(st *wal.State) bool {
 	}
 	hs := st.HardState
 	if hs != nil {
-		hs = clone(hs)
+		hs = proto.CloneOf(hs)
 		if hs.GetCommit() < st.SnapIndex() {
 			hs.Commit = new(st.SnapIndex())
 		}
@@ -307,8 +293,8 @@ func (inc *incarnation) recover(st *wal.State) bool {
 			return inc.stopBoot(fmt.Errorf("snapshot decode: %w", err))
 		}
 		inc.kv = state
-		inc.confState = clone(st.Snapshot.GetMetadata().GetConfState())
-		c.o.SnapshotState(inc.now(), inc.n.Name(), "recover", st.SnapIndex(), fnv64(st.Snapshot.GetData()), inc.confState)
+		inc.confState = proto.CloneOf(st.Snapshot.GetMetadata().GetConfState())
+		c.o.SnapshotState(inc.now(), inc.n.Name(), "recover", st.SnapIndex(), kv.HashBytes(st.Snapshot.GetData()), inc.confState)
 	}
 	inc.applied, inc.raftApplied, inc.snapIndex = st.SnapIndex(), st.SnapIndex(), st.SnapIndex()
 	inc.walLast, inc.syncedLast = st.LastIndex(), st.LastIndex()

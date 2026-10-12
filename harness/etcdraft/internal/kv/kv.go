@@ -269,9 +269,13 @@ func Decode(b []byte) (*State, error) {
 }
 
 // Hash returns FNV-1a 64 of Encode().
-func (s *State) Hash() uint64 {
+func (s *State) Hash() uint64 { return HashBytes(s.Encode()) }
+
+// HashBytes returns FNV-1a 64 of b. The harness hashes snapshot data with it, so a snapshot's
+// hash equals the Hash of the state it encodes.
+func HashBytes(b []byte) uint64 {
 	h := fnv.New64a()
-	h.Write(s.Encode())
+	h.Write(b)
 	return h.Sum64()
 }
 
