@@ -27,18 +27,21 @@ type selfTestCase struct {
 	// of raft panic messages that also count (ETC-190).
 	checks []string
 	panics []string
+	// message, if set, is a substring the first failure's message must contain.
+	message string
 }
 
 var selfTestCases = []selfTestCase{
 	{"SendBeforePersist", BugSendBeforePersist, 500,
 		[]string{oracle.ElectionSafety, oracle.StateMachineSafety, oracle.AckedWritesSurvive},
-		[]string{"is out of range [lastIndex("}},
-	{"SkipSync", BugSkipSync, 50, []string{oracle.DurableState}, nil},
+		[]string{"is out of range [lastIndex("}, ""},
+	{"SkipSync", BugSkipSync, 50, []string{oracle.DurableState}, nil, ""},
 	{"ApplyBeforeCommit", BugApplyBeforeCommit, 200,
 		[]string{oracle.StateMachineSafety, oracle.AckedWritesSurvive, oracle.ReplicasAgree},
-		[]string{"unexpected error when getting unapplied entries"}},
-	{"ForgetHardState", BugForgetHardState, 50, []string{oracle.DurableState, oracle.WALAgreesWithMemory}, nil},
-	{"SnapshotOffByOne", BugSnapshotOffByOne, 50, []string{oracle.StateMachineSafety}, nil},
+		[]string{"unexpected error when getting unapplied entries"}, ""},
+	{"ForgetHardState", BugForgetHardState, 50, []string{oracle.DurableState, oracle.WALAgreesWithMemory}, nil, ""},
+	// The create-time check (ETC-151 step 5) catches the mislabeled snapshot first.
+	{"SnapshotOffByOne", BugSnapshotOffByOne, 50, []string{oracle.StateMachineSafety}, nil, "create snapshot at index "},
 }
 
 // selfTestOptions are the ETC-192 options.
@@ -105,6 +108,9 @@ func TestSelfTestSwitches(t *testing.T) {
 			}
 			if !okCheck {
 				t.Fatalf("first failing check %q (%s) is not in the expected set %v / panics %v", first.Signature, first.Message, tc.checks, tc.panics)
+			}
+			if !strings.Contains(first.Message, tc.message) {
+				t.Fatalf("first failure %q does not contain %q", first.Message, tc.message)
 			}
 			if first.Kind == "invariant" {
 				want := first.Seed + " " + first.Check
