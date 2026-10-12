@@ -201,13 +201,12 @@ type File struct {
 // string made valid UTF-8, and nil Nodes, Tags, Planners and Files replaced by empty slices. It
 // fails on a pointer cycle (ART-010, ART-020).
 func normReport(r *Report) (Report, error) {
-	// The report types are recursive (Failure.Determinism.Original) and validCopy follows every
-	// pointer, so a cycle would never end; encoding/json's own error differs between Go versions.
-	if hasCycle(reflect.ValueOf(r), map[ptrKey]bool{}) {
-		return Report{}, errors.New("artifact: report has a pointer cycle")
+	c, err := validCopy(reflect.ValueOf(*r), nil)
+	if err != nil {
+		return Report{}, err
 	}
 	var rr Report
-	reflect.ValueOf(&rr).Elem().Set(validCopy(reflect.ValueOf(*r)))
+	reflect.ValueOf(&rr).Elem().Set(c)
 	rr.Version = ReportVersion
 	rr.Nodes = normNodes(rr.Nodes)
 	if rr.Run.Planners == nil {
@@ -219,103 +218,99 @@ func normReport(r *Report) (Report, error) {
 	return rr, nil
 }
 
-// validCopy returns a deep copy of v in which every string is valid UTF-8 (validUTF8). Byte
-// slices (json.RawMessage) are shared as they are; nil pointers, slices and maps stay nil. It
-// handles only what the report types hold, which TestReportKinds checks: strings, bools, integers,
-// pointers, arrays, slices, maps with string keys and structs with exported fields only; no
-// interfaces, and no pointer cycles (normReport rules them out first).
-func validCopy(v reflect.Value) reflect.Value {
-	switch v.Kind() {
-	case reflect.String:
-		return reflect.ValueOf(validUTF8(v.String())).Convert(v.Type())
-	case reflect.Pointer:
-		if v.IsNil() {
-			return v
-		}
-		p := reflect.New(v.Type().Elem())
-		p.Elem().Set(validCopy(v.Elem()))
-		return p
-	case reflect.Struct:
-		c := reflect.New(v.Type()).Elem()
-		for i := range v.NumField() {
-			c.Field(i).Set(validCopy(v.Field(i)))
-		}
-		return c
-	case reflect.Slice:
-		if v.IsNil() || v.Type().Elem().Kind() == reflect.Uint8 {
-			return v
-		}
-		c := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
-		for i := range v.Len() {
-			c.Index(i).Set(validCopy(v.Index(i)))
-		}
-		return c
-	case reflect.Array:
-		c := reflect.New(v.Type()).Elem()
-		for i := range v.Len() {
-			c.Index(i).Set(validCopy(v.Index(i)))
-		}
-		return c
-	case reflect.Map:
-		if v.IsNil() {
-			return v
-		}
-		keys := v.MapKeys() //faultline:maporder sorted next, so keys that become equal resolve the same way every run
-		slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
-		c := reflect.MakeMapWithSize(v.Type(), len(keys))
-		for _, k := range keys {
-			c.SetMapIndex(validCopy(k), validCopy(v.MapIndex(k)))
-		}
-		return c
-	}
-	return v // numbers and bools
-}
+// errCycle is validCopy's error for a pointer cycle.
+var errCycle = errors.New("artifact: report has a pointer cycle")
 
-// ptrKey is a pointer on hasCycle's path: its address and its type, since a pointer to a struct
+// ptrKey is a pointer on validCopy's path: its address and its type, since a pointer to a struct
 // and one to its first field share the address.
 type ptrKey struct {
 	addr uintptr
 	typ  reflect.Type
 }
 
-// hasCycle reports whether a pointer reachable from v leads back to a pointer on the path to it
-// (ART-020). A pointer reached by two paths is shared, not a cycle.
-func hasCycle(v reflect.Value, path map[ptrKey]bool) bool {
+// validCopy returns a deep copy of v in which every string is valid UTF-8 (validUTF8). Byte
+// slices (json.RawMessage) are shared as they are; nil pointers, slices and maps stay nil. path
+// holds the pointers on the way to v (nil: none). A pointer that leads back to one of them is a
+// cycle, which validCopy reports as errCycle instead of following it until the stack runs out
+// (ART-020); a pointer reached by two paths is shared, not a cycle, and is copied twice. It
+// handles only what the report and trace header types hold, which TestReportKinds checks:
+// strings, bools, integers, pointers, arrays, slices, maps with string keys and structs with
+// exported fields only, and no interfaces.
+func validCopy(v reflect.Value, path map[ptrKey]bool) (reflect.Value, error) {
 	switch v.Kind() {
+	case reflect.String:
+		return reflect.ValueOf(validUTF8(v.String())).Convert(v.Type()), nil
 	case reflect.Pointer:
 		if v.IsNil() {
-			return false
+			return v, nil
 		}
 		k := ptrKey{v.Pointer(), v.Type()}
 		if path[k] {
-			return true
+			return reflect.Value{}, errCycle
+		}
+		if path == nil {
+			path = map[ptrKey]bool{}
 		}
 		path[k] = true
 		defer delete(path, k)
-		return hasCycle(v.Elem(), path)
+		e, err := validCopy(v.Elem(), path)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		p := reflect.New(v.Type().Elem())
+		p.Elem().Set(e)
+		return p, nil
 	case reflect.Struct:
+		c := reflect.New(v.Type()).Elem()
 		for i := range v.NumField() {
-			if hasCycle(v.Field(i), path) {
-				return true
+			f, err := validCopy(v.Field(i), path)
+			if err != nil {
+				return reflect.Value{}, err
 			}
+			c.Field(i).Set(f)
 		}
-	case reflect.Slice, reflect.Array:
-		if v.Type().Elem().Kind() == reflect.Uint8 {
-			return false // json.RawMessage
+		return c, nil
+	case reflect.Slice:
+		if v.IsNil() || v.Type().Elem().Kind() == reflect.Uint8 {
+			return v, nil
 		}
+		c := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 		for i := range v.Len() {
-			if hasCycle(v.Index(i), path) {
-				return true
+			e, err := validCopy(v.Index(i), path)
+			if err != nil {
+				return reflect.Value{}, err
 			}
+			c.Index(i).Set(e)
 		}
+		return c, nil
+	case reflect.Array:
+		c := reflect.New(v.Type()).Elem()
+		for i := range v.Len() {
+			e, err := validCopy(v.Index(i), path)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			c.Index(i).Set(e)
+		}
+		return c, nil
 	case reflect.Map:
-		for _, k := range v.MapKeys() { //faultline:maporder any order gives the same answer
-			if hasCycle(v.MapIndex(k), path) {
-				return true
-			}
+		if v.IsNil() {
+			return v, nil
 		}
+		keys := v.MapKeys() //faultline:maporder sorted next, so keys that become equal resolve the same way every run
+		slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
+		c := reflect.MakeMapWithSize(v.Type(), len(keys))
+		for _, k := range keys {
+			e, err := validCopy(v.MapIndex(k), path)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			ck, _ := validCopy(k, path) // a string key holds no pointer
+			c.SetMapIndex(ck, e)
+		}
+		return c, nil
 	}
-	return false
+	return v, nil // numbers and bools
 }
 
 // WriteReport writes r as report.json: indented JSON, with every string made valid UTF-8.
@@ -334,7 +329,8 @@ func WriteReport(w io.Writer, r *Report) error {
 }
 
 // ReadReport reads and version-checks report.json. It rejects a file that is not a faultline
-// report or has a newer version than this package writes. Unknown fields are ignored.
+// report or has a newer version than this package writes. Unknown fields are ignored, and the
+// error for a field that encoding/json cannot decode wraps encoding/json's.
 func ReadReport(r io.Reader) (*Report, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -350,7 +346,7 @@ func ReadReport(r io.Reader) (*Report, error) {
 	}
 	var rep Report
 	if err := json.Unmarshal(data, &rep); err != nil {
-		return nil, fmt.Errorf("artifact: report.json: %v", err)
+		return nil, fmt.Errorf("artifact: report.json: %w", err)
 	}
 	// encoding/json matches keys case-insensitively, so a "FAULTLINE_REPORT" key could overwrite
 	// the version just checked; the report keeps the checked one (ART-086).

@@ -197,7 +197,7 @@ func Write(dir string, a *Artifact) error {
 	if a.Report.Failure != nil {
 		root = a.Report.Failure.RecordSeq
 	}
-	s := CausalSlice(a.Trace.Records, root, DefaultSliceCap)
+	s, x := causalSlice(a.Trace.Records, root, DefaultSliceCap) // x serves hb.mmd too
 
 	parent, base := filepath.Dir(abs), filepath.Base(abs)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -268,7 +268,7 @@ func Write(dir string, a *Artifact) error {
 	if err := write(FileTimelineText, func(f *os.File) error { return WriteTimelineText(f, &a.Report, a.Trace, s) }); err != nil {
 		return err
 	}
-	if err := write(FileHB, func(f *os.File) error { return WriteHB(f, a.Trace, root, DefaultSliceCap) }); err != nil {
+	if err := write(FileHB, func(f *os.File) error { return writeHB(f, a.Trace, x, root, DefaultSliceCap) }); err != nil {
 		return err
 	}
 	if err := write(FileTimelineHTML, func(f *os.File) error {
@@ -419,7 +419,7 @@ func Read(dir string) (*Artifact, error) {
 		if pe, ok := err.(*fs.PathError); ok {
 			return fmt.Errorf("artifact: %s: %s %s: %w", dir, pe.Op, name, pe.Err)
 		}
-		return &readError{dir: dir, err: err}
+		return &readError{prefix: "artifact: " + dir + ": ", err: err}
 	}
 	// file returns the content of name, or nil when it does not exist and is not report.json.
 	file := func(name string) ([]byte, error) {
@@ -469,15 +469,15 @@ func Read(dir string) (*Artifact, error) {
 	return a, nil
 }
 
-// readError is an error of Read: "artifact: <dir>: " and err's text without its own "artifact: "
-// prefix. It wraps err.
+// readError is an error of Read or Render for a file its reader rejects: prefix, then err's text
+// without its own "artifact: " prefix. It wraps err, so errors.As finds encoding/json's error.
 type readError struct {
-	dir string
-	err error
+	prefix string // "artifact: <dir>: " or "artifact: render <dir>: "
+	err    error
 }
 
 func (e *readError) Error() string {
-	return "artifact: " + e.dir + ": " + strings.TrimPrefix(e.err.Error(), "artifact: ")
+	return e.prefix + strings.TrimPrefix(e.err.Error(), "artifact: ")
 }
 
 func (e *readError) Unwrap() error { return e.err }

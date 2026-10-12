@@ -129,6 +129,25 @@ func TestWriteTraceEdges(t *testing.T) {
 	}
 }
 
+// ART-030: headerFor makes every string of the header valid UTF-8. It finds them by reflection, so
+// a string field added to TraceHeader later is covered without a change to headerFor.
+func TestWriteTraceHeaderStrings(t *testing.T) {
+	var h TraceHeader
+	hv := reflect.ValueOf(&h).Elem()
+	for i := range hv.NumField() {
+		if f := hv.Field(i); f.Kind() == reflect.String {
+			f.SetString(hv.Type().Field(i).Name + "\xff\xfe")
+		}
+	}
+	got := reflect.ValueOf(headerFor(&Trace{Header: h}))
+	for i := range got.NumField() {
+		name := got.Type().Field(i).Name
+		if f := got.Field(i); f.Kind() == reflect.String && f.String() != name+"\uFFFD" {
+			t.Errorf("headerFor: %s = %q, want one U+FFFD for the invalid run", name, f.String())
+		}
+	}
+}
+
 // errWriter fails every write with err.
 type errWriter struct{ err error }
 
@@ -266,7 +285,7 @@ func TestReadTrace(t *testing.T) {
 	decodes := []struct {
 		name, text, want string
 	}{
-		{"header field type", with(0, headerLine), "artifact: trace.jsonl line 1: " + jsonErr(headerLine, &TraceHeader{})},
+		{"header field type", with(0, headerLine), "artifact: trace.jsonl line 1: invalid header: " + jsonErr(headerLine, &TraceHeader{})},
 	}
 	for _, c := range []struct {
 		name string
@@ -279,12 +298,25 @@ func TestReadTrace(t *testing.T) {
 		{"field type before attrs", 3, `{"seq":"2","at":0,"t":"0.000000000s","kind":"k","attrs":[["a"]]}` + "\n"},
 	} {
 		decodes = append(decodes, struct{ name, text, want string }{c.name, with(c.n-1, c.line),
-			fmt.Sprintf("artifact: trace.jsonl line %d: not a JSON object: %s", c.n, jsonErr(c.line, &recordLine{}))})
+			fmt.Sprintf("artifact: trace.jsonl line %d: invalid record: %s", c.n, jsonErr(c.line, &record{}))})
 	}
 	for _, c := range decodes {
 		_, err := ReadTrace(strings.NewReader(c.text))
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+	// The decode error wraps encoding/json's, on the header line and on a record line.
+	for _, c := range []struct {
+		name, text string
+		target     any
+	}{
+		{"header field type", with(0, headerLine), new(*json.UnmarshalTypeError)},
+		{"record field type", with(2, `{"seq":"2","kind":"k"}`+"\n"), new(*json.UnmarshalTypeError)},
+		{"truncated record", with(11, "{\n"), new(*json.SyntaxError)},
+	} {
+		if _, err := ReadTrace(strings.NewReader(c.text)); !errors.As(err, c.target) {
+			t.Errorf("%s: errors.As(%v, %T) is false", c.name, err, c.target)
 		}
 	}
 
@@ -353,7 +385,7 @@ func TestReadTrace(t *testing.T) {
 		`{"seq":1,"kind":"a","attrs":[` + strings.Repeat(`["k","v"],`, 16) + `["k","v"]]}`,
 		`{"seq":1,"kind":"a","attrs":[["a","b","c","d","e"]],"attrs":[["k","v"]]}`,
 	} {
-		var l recordLine
+		var l record
 		for _, line := range []string{first, `{"seq":2,"kind":"b","attrs":[["k","v"]]}`} {
 			if _, err := readRecord([]byte(line), &l); err != nil {
 				t.Fatalf("%s: %v", line, err)

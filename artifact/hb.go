@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -72,9 +73,6 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
-// MermaidMaxEdges is mermaid.js's default maxEdges: like MermaidMaxBytes, hb.mmd stays within it.
-const MermaidMaxEdges = 500
-
 // WriteHB writes hb.mmd, a Mermaid flowchart of the causal slice of root (see CausalSlice), with
 // one node per record and one edge per happens-before link. It halves cap while the text is
 // longer than MermaidMaxBytes bytes or has more than MermaidMaxEdges edges; at cap 1 it writes the
@@ -83,8 +81,21 @@ func WriteHB(w io.Writer, tr *Trace, root uint64, cap int) error {
 	if tr == nil {
 		return errors.New("artifact: trace is nil")
 	}
+	return writeHB(w, tr, nil, root, cap)
+}
+
+// writeHB is WriteHB with x, the index of tr.Records, built once and reused for every halving
+// of cap. A nil x is built here when there is a slice to find; Write and Render pass the one
+// their causalSlice built.
+func writeHB(w io.Writer, tr *Trace, x *hbIndex, root uint64, cap int) error {
+	if x == nil && root != 0 && cap >= 1 {
+		x = newHBIndex(tr.Records)
+	}
 	for {
-		s := CausalSlice(tr.Records, root, cap)
+		s := Slice{Cap: cap}
+		if x != nil {
+			s = x.slice(root, cap)
+		}
 		if s.Root == 0 {
 			_, err := fmt.Fprintf(w, "flowchart TD\n    %%%% faultline causal slice v%d: root=0 records=0 cap=%d truncated=false\n    n0[\"no failure record\"]\n", HBVersion, cap)
 			return err
@@ -96,7 +107,7 @@ func WriteHB(w io.Writer, tr *Trace, root uint64, cap int) error {
 			cap /= 2
 			continue
 		}
-		text, edges, err := renderHB(tr, s)
+		text, edges, err := renderHB(tr, x, s)
 		if err != nil {
 			return err
 		}
@@ -108,36 +119,30 @@ func WriteHB(w io.Writer, tr *Trace, root uint64, cap int) error {
 	}
 }
 
-// renderHB renders one slice as Mermaid (ART-055 steps 2 to 4) and returns its edge count.
-func renderHB(tr *Trace, s Slice) ([]byte, int, error) {
-	member := make(map[uint64]bool, len(s.Seqs)) // lookups only
+// renderHB renders one slice of x's records as Mermaid (ART-055 steps 2 to 4) and returns its edge
+// count. The edges come from x.preds, as the slice's members do, so both follow one rule (ART-050).
+func renderHB(tr *Trace, x *hbIndex, s Slice) ([]byte, int, error) {
+	idx := make([]int, 0, len(s.Seqs)) // the members' positions, ascending, as ART-055 adds them
 	for _, q := range s.Seqs {
-		member[q] = true
+		if i, ok := x.index(q); ok {
+			idx = append(idx, i)
+		}
 	}
+	slices.Sort(idx)
 	g := gograph.New[string](gograph.Directed())
-	bySeqKey := make(map[string]kernel.Record, len(s.Seqs)) // lookups only
-	last := make(map[poKey]uint64)                          // lookups only
+	bySeqKey := make(map[string]kernel.Record, len(idx)) // lookups only
 	edges := 0
-	for _, r := range tr.Records {
-		var po uint64
-		if r.Node != 0 {
-			k := poKey{r.Node, r.Inc}
-			po = last[k]
-			last[k] = r.Seq
-		}
-		if !member[r.Seq] {
-			continue
-		}
+	var preds []int
+	for _, i := range idx {
+		r := x.records[i]
 		v := g.AddVertexByLabel(hbKey(r.Seq))
 		bySeqKey[hbKey(r.Seq)] = r
-		if r.Cause != 0 && r.Cause < r.Seq && member[r.Cause] {
-			if _, err := g.AddEdge(g.GetVertexByID(hbKey(r.Cause)), v); err != nil {
-				return nil, 0, fmt.Errorf("artifact: hb.mmd: %w", err)
+		preds = x.preds(i, preds) // the cause, then the program-order predecessor
+		for _, p := range preds {
+			if _, member := slices.BinarySearch(idx, p); !member {
+				continue
 			}
-			edges++
-		}
-		if po != 0 && member[po] && po != r.Cause {
-			if _, err := g.AddEdge(g.GetVertexByID(hbKey(po)), v); err != nil {
+			if _, err := g.AddEdge(g.GetVertexByID(hbKey(x.records[p].Seq)), v); err != nil {
 				return nil, 0, fmt.Errorf("artifact: hb.mmd: %w", err)
 			}
 			edges++

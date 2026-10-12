@@ -30,7 +30,8 @@ const (
 	DefaultSliceCap        = 200    // records in the causal slice
 	DefaultTimelineRecords = 50_000 // records embedded in timeline.html
 	MinTimelineRecords     = 1_000  // smallest accepted TimelineRecords
-	MermaidMaxBytes        = 50_000 // mermaid.js default maxTextSize; hb.mmd stays below it
+	MermaidMaxBytes        = 50_000 // mermaid.js default maxTextSize; hb.mmd stays within it
+	MermaidMaxEdges        = 500    // mermaid.js default maxEdges; hb.mmd stays within it
 )
 
 // File names inside an artifact directory.

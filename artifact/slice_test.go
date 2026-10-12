@@ -4,6 +4,8 @@
 package artifact
 
 import (
+	"math"
+	"math/rand/v2"
 	"slices"
 	"testing"
 
@@ -115,12 +117,42 @@ func TestCausalSliceBadInput(t *testing.T) {
 		{rec(1, 1, 0), rec(3, 1, 2), rec(2, 0, 3), rec(4, 2, 9)}, // out of order, yet last - first + 1 == len
 		{rec(0, 1, 0), rec(0, 1, 0), rec(2, 1, 1)},               // seq 0, repeated
 		{rec(5, 1, 4), rec(3, 2, 5), rec(4, 1, 3)},               // last below first
+		{rec(0, 1, 0), rec(0, 1, 0), rec(3, 1, 1)},               // seq 0 first, last seq == len
 	} {
 		for root := uint64(0); root <= 6; root++ {
 			for _, c := range []int{0, 1, 200} {
 				s := CausalSlice(recs, root, c)
 				for q := uint64(0); q <= 6; q++ {
 					s.Contains(q)
+				}
+			}
+		}
+	}
+}
+
+// §7 and ART-051: a seeded loop over record lists outside ART-051's domain, with seqs near 0 and
+// near MaxUint64, repeated, out of order or 0, and in half the lists last - first + 1 == len,
+// which turns on index's arithmetic lookup. CausalSlice and Contains must not panic.
+func TestCausalSliceNoPanicRandom(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // a fixed seed, so every run tries the same lists
+	for range 20_000 {
+		n := rng.Uint64N(8) + 1
+		base := uint64(0)
+		if rng.IntN(2) == 0 {
+			base = math.MaxUint64 - 9
+		}
+		recs := make([]kernel.Record, n)
+		for i := range recs {
+			recs[i] = kernel.Record{Seq: base + rng.Uint64N(10), Node: kernel.NodeID(rng.Int32N(3)), Inc: rng.Uint32N(2), Cause: base + rng.Uint64N(10)}
+		}
+		if rng.IntN(2) == 0 {
+			recs[n-1].Seq = recs[0].Seq + n - 1
+		}
+		for _, root := range []uint64{recs[rng.Uint64N(n)].Seq, base + rng.Uint64N(10)} {
+			for _, c := range []int{1, 2, len(recs), 200} {
+				s := CausalSlice(recs, root, c)
+				for _, r := range recs {
+					s.Contains(r.Seq)
 				}
 			}
 		}

@@ -37,6 +37,8 @@ func TestSanitize(t *testing.T) {
 		{SanitizeTest, "test", "TestX/a:b*c?", "TestX__a_b_c_"},
 		{SanitizeTest, "test", "TestX/case#01", "TestX__case#01"},
 		{SanitizeTest, "test", "TestLong/" + strings.Repeat("abcdefghij", 11), "TestLong__abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc-72ac6d5da30ea3f3"},
+		// The cap and the hash of the input apply to packages too (a 102-byte import path).
+		{SanitizePackage, "pkg", "example.com/" + strings.Repeat("abcdefghij", 9), "example.com_" + strings.Repeat("abcdefghij", 7) + "a-21b7474bb521ea54"},
 		// Only "", "." and ".." are reserved.
 		{SanitizePackage, "pkg", ".", "_."},
 		{SanitizePackage, "pkg", "...", "..."},
@@ -684,15 +686,19 @@ func TestWriteRefusesFirst(t *testing.T) {
 	if err := os.Mkdir(leftover, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Records 0 is not the header Write would set, so a header changed before the refusal shows.
 	a := fixtureArtifact()
+	a.Trace.Header.Records = 0
+	want := fixtureArtifact()
+	want.Trace.Header.Records = 0
 	if err := Write(dir, a); err == nil || err.Error() != "artifact: refusing to replace "+dir+": not a faultline artifact directory (no report.json)" {
 		t.Fatalf("Write(empty dir) = %v", err)
 	}
 	if _, err := os.Stat(leftover); err != nil {
 		t.Fatal("the refused Write removed a leftover")
 	}
-	if a.Report.Dir != "" || a.Report.Files != nil {
-		t.Fatalf("the refused Write changed a: %q %v", a.Report.Dir, a.Report.Files)
+	if !reflect.DeepEqual(a, want) {
+		t.Fatalf("the refused Write changed a: report %+v, trace header %+v", a.Report, a.Trace.Header)
 	}
 }
 
