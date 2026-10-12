@@ -7,11 +7,14 @@ import (
 	"bytes"
 	cryptorand "crypto/rand"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/cryptotest"
@@ -1022,6 +1025,8 @@ func TestWorldMisuseAfterRun(t *testing.T) {
 	}{
 		{"passed", Options{}, func(w *World) {}, "passed"},
 		{"failed", Options{MaxEvents: 5}, func(w *World) {}, "failed"},
+		// RunFor stopped the body: the phase check still comes before the stop.
+		{"stopped by RunFor", Options{MaxEvents: 5}, func(w *World) { w.RunFor(time.Second) }, "failed"},
 		{"setup error", Options{}, func(w *World) { w.RunFor(-1) }, "setup error"},
 		{"setup error after body", Options{}, func(w *World) { w.Sim.Step() }, "setup error"},
 	}
@@ -1080,20 +1085,37 @@ func TestWorldServersClients(t *testing.T) {
 	}
 }
 
+// coverArgs returns the flag that makes a child process of this test binary write its coverage
+// data where go test collects this binary's, when go test measures coverage, so code that only a
+// child runs counts too.
+func coverArgs() []string {
+	if f := flag.Lookup("test.gocoverdir"); f != nil && f.Value.String() != "" {
+		return []string{"-test.gocoverdir=" + f.Value.String()}
+	}
+	return nil
+}
+
 // API-060: Logf records a global kernel.log record in every attempt and, in the primary attempt
 // only, logs "t=<time> <message>" with the caller's file and line (t.Helper). testing shows that
-// location only in its output, so this test reads it from a child process that runs it again.
+// location only in its output, so this test reads it from a child process that runs it again. The
+// child knows it is one because FAULTLINE_TEST_LOGF holds its parent's process ID, so the variable
+// set in the environment of go test itself does not turn the parent into a child.
 func TestWorldLogf(t *testing.T) {
+	var at [2]int // the line of each w.Logf call
 	body := func(w *World) {
+		_, _, line, _ := runtime.Caller(0)
 		w.Logf("hello %d", 7)
+		at[0] = line + 1
 		unitTicker(w, func(n *kernel.Node, c int) {
 			if c == 2 {
+				_, _, line, _ := runtime.Caller(0)
 				w.Logf("from a callback")
+				at[1] = line + 1
 			}
 		})
 	}
 	opts := Options{Seeds: 1, Duration: 50 * time.Millisecond}
-	if os.Getenv("FAULTLINE_TEST_LOGF") == "1" {
+	if os.Getenv("FAULTLINE_TEST_LOGF") == strconv.Itoa(os.Getppid()) {
 		unitRunner(t, opts, body).attempt(t, 1, full(), nil, true)
 		return
 	}
@@ -1101,13 +1123,17 @@ func TestWorldLogf(t *testing.T) {
 	if logs := recordsOf(res.records, "kernel.log"); len(logs) != 2 || logs[0].Text != "hello 7" || logs[1].Text != "from a callback" || logs[0].Node != 0 || logs[1].Node != 0 {
 		t.Errorf("kernel.log records %+v", logs)
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestWorldLogf$", "-test.v", "-test.count=1") //nolint:gosec // runs this test binary again
-	cmd.Env = append(os.Environ(), "FAULTLINE_TEST_LOGF=1")
+	args := append([]string{"-test.run=^TestWorldLogf$", "-test.v", "-test.count=1"}, coverArgs()...)
+	cmd := exec.Command(os.Args[0], args...) //nolint:gosec // runs this test binary again
+	cmd.Env = append(os.Environ(), "FAULTLINE_TEST_LOGF="+strconv.Itoa(os.Getpid()))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("child test: %v\n%s", err, out)
 	}
-	for _, line := range []string{`attempt_test\.go:\d+: t=0\.000000000s hello 7\n`, `attempt_test\.go:\d+: t=0\.020000000s from a callback\n`} {
+	for _, line := range []string{
+		fmt.Sprintf(`attempt_test\.go:%d: t=0\.000000000s hello 7\n`, at[0]),
+		fmt.Sprintf(`attempt_test\.go:%d: t=0\.020000000s from a callback\n`, at[1]),
+	} {
 		if !regexp.MustCompile(`\s` + line).Match(out) {
 			t.Errorf("child output has no line %s:\n%s", line, out)
 		}
