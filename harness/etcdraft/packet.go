@@ -69,7 +69,7 @@ func snapAckPacket(index uint64) *packet {
 	return &packet{data: wire.EncodeSnapAck(index), desc: fmt.Sprintf("snapack %d", index)}
 }
 
-func tagName(tag byte) string { //nolint:unused // used by the server's packet dispatch (Task 8a)
+func tagName(tag byte) string {
 	switch tag {
 	case wire.TagRaft:
 		return "raft"

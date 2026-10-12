@@ -27,8 +27,10 @@ func TestDefaultFaults(t *testing.T) {
 }
 
 // TestHunt is the Phase 1 bug hunt (ETC-195): 10 000 seeds of stage 1a and of stage 1b,
-// for 3 and 5 nodes, every seed run (KeepGoing). It runs only with ETCDRAFT_HUNT=1;
-// FAULTLINE_SEEDS overrides the seed count and FAULTLINE_RESULTS collects the results.
+// for 3 and 5 nodes, every seed run (KeepGoing). It runs only with ETCDRAFT_HUNT=1, and
+// FAULTLINE_RESULTS collects the results. The usual faultline variables change the runs of
+// each of the four subtests: FAULTLINE_SEEDS sets the seed count, FAULTLINE_SEED or
+// FAULTLINE_SEED_LIST replaces the seed list, and -short without FAULTLINE_SEEDS runs 5 seeds.
 func TestHunt(t *testing.T) {
 	if os.Getenv("ETCDRAFT_HUNT") != "1" {
 		t.Skip("set ETCDRAFT_HUNT=1 to run the Phase 1 bug hunt")

@@ -4,6 +4,9 @@
 package etcdraft
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +170,10 @@ func TestCrashLeaderAndRestart(t *testing.T) {
 	}
 }
 
+// mismatchDurations are the Config.Durations of the setup-duration-mismatch scenarios: one
+// longer and one shorter than their Options.Duration of 20s.
+var mismatchDurations = []time.Duration{30 * time.Second, 15 * time.Second}
+
 func init() { //nolint:gochecknoinits // registers the child-process scenarios
 	scenarios["early-send"] = func(t *testing.T) {
 		cfg := DefaultConfig()
@@ -182,6 +189,16 @@ func init() { //nolint:gochecknoinits // registers the child-process scenarios
 			Setup(w, cfg)
 			t.Error("Setup returned after an invalid config")
 		})
+	}
+	for _, d := range mismatchDurations {
+		scenarios["setup-duration-mismatch-"+d.String()] = func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Duration = d
+			faultline.Run(t, faultline.Options{Seeds: 1, Duration: 20 * time.Second}, func(w *faultline.World) {
+				Setup(w, cfg)
+				t.Error("Setup returned after a duration mismatch")
+			})
+		}
 	}
 	scenarios["setup-twice"] = func(t *testing.T) {
 		cfg := DefaultConfig()
@@ -233,6 +250,58 @@ func TestSetupRejectsInvalidConfig(t *testing.T) {
 	}
 	if strings.Contains(out, "Setup returned after an invalid config") {
 		t.Fatalf("Setup did not stop the body:\n%s", out)
+	}
+}
+
+// AT-ETC-02 (ETC-020 step 1): Setup called directly fails the seed when Config.Duration
+// differs from Options.Duration, longer or shorter, with the error Test reports for the same
+// mismatch.
+func TestSetupRejectsDurationMismatch(t *testing.T) {
+	for _, d := range mismatchDurations {
+		t.Run(d.String(), func(t *testing.T) {
+			results := resultsFile(t)
+			out, code := runScenario(t, "setup-duration-mismatch-"+d.String(), []string{"FAULTLINE_RESULTS=" + results}, "-test.v")
+			if rs := readResults(t, results); len(rs) != 1 || rs[0].Kind != "setup" {
+				t.Fatalf("results %+v, want one failure of kind setup\noutput:\n%s", rs, out)
+			}
+			if want := "etcdraft: Config.Duration (" + d.String() + ") differs from Options.Duration (20s)"; code == 0 || !strings.Contains(out, want) {
+				t.Fatalf("exit %d, want %q in the output:\n%s", code, want, out)
+			}
+			if strings.Contains(out, "Setup returned after a duration mismatch") {
+				t.Fatalf("Setup did not stop the body:\n%s", out)
+			}
+		})
+	}
+}
+
+// ETC-020 step 1 compares Config.Duration with Options.Duration, not with World.End: a replayed
+// schedule whose End is shorter than Options.Duration (how MIN shortens a run) sets up and runs
+// to the schedule's End.
+func TestSetupAcceptsShortenedReplay(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Faults = FaultsNone
+	opts := testOptions(t, &cfg, 20*time.Second, false)
+	end := kernel.Time(10 * time.Second)
+	var b bytes.Buffer
+	if err := (fault.Schedule{Version: fault.ScheduleVersion, End: end}).Write(&b); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "schedule.json")
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAULTLINE_SEED", "1")
+	for _, v := range []string{"FAULTLINE_SEED_LIST", "FAULTLINE_SEEDS", "FAULTLINE_BASE_SEED", "FAULTLINE_EXPLORE", "FAULTLINE_RESULTS"} {
+		t.Setenv(v, "")
+	}
+	t.Setenv("FAULTLINE_SCHEDULE", path)
+	var got kernel.Time
+	faultline.Run(t, opts, func(w *faultline.World) {
+		Setup(w, cfg)
+		got = w.End()
+	})
+	if got != end {
+		t.Fatalf("World.End() = %v, want the schedule's End %v", got, end)
 	}
 }
 

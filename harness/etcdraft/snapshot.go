@@ -12,6 +12,7 @@ import (
 
 	"github.com/hmdsefi/faultline/kernel"
 
+	"github.com/hmdsefi/faultline/harness/etcdraft/internal/kv"
 	"github.com/hmdsefi/faultline/harness/etcdraft/internal/wal"
 	"github.com/hmdsefi/faultline/harness/etcdraft/internal/wire"
 )
@@ -32,7 +33,9 @@ func (inc *incarnation) maybeSnapshot() bool {
 	return true
 }
 
-// takeSnapshot implements ETC-151 for index i.
+// takeSnapshot implements ETC-151 for the applied index i, which must be at least 1. It
+// returns false if a WAL error crashed the node or a harness error was recorded; the caller
+// must then return without touching node-scoped APIs (ETC-037).
 func (inc *incarnation) takeSnapshot(i uint64) bool {
 	c, cfg := inc.c, inc.cfg()
 	data := inc.kv.Encode()
@@ -64,7 +67,7 @@ func (inc *incarnation) takeSnapshot(i uint64) bool {
 	}
 	c.o.Persisted(inc.s.id, nil, inc.wal.Size(), l)
 	inc.snapIndex = l
-	h := fnv64(data)
+	h := kv.HashBytes(data)
 	c.o.SnapshotState(inc.now(), inc.n.Name(), "create", l, h, cs)
 	if l > cfg.CompactKeep {
 		if err := inc.ms.Compact(l - cfg.CompactKeep); err != nil && !errors.Is(err, raft.ErrCompacted) {

@@ -280,8 +280,8 @@ func (inc *incarnation) apply(rd raft.Ready) bool {
 		}
 		inc.kv = state
 		inc.applied, inc.raftApplied, inc.snapIndex = idx, idx, idx
-		inc.confState = clone(cs)
-		h := fnv64(snap.GetData())
+		inc.confState = proto.CloneOf(cs)
+		h := kv.HashBytes(snap.GetData())
 		c.o.SnapshotState(inc.now(), inc.n.Name(), "install", idx, h, inc.confState)
 		c.stats.SnapshotsInstalled++
 		c.emit(inc.n, "etcdraft.snapshot", fmt.Sprintf("snapshot install %d", idx),

@@ -18,7 +18,8 @@ import (
 
 // Setup adds the cluster to w: servers, clients, roles, invariants, and final checks.
 // It plans no faults. Call it exactly once per World, before any other World call that
-// adds nodes. Callers must not set Options.NoCryptoSeed: Setup cannot detect it, and
+// adds nodes. It fails the test if cfg is invalid or cfg.Duration differs from
+// Options.Duration. Callers must not set Options.NoCryptoSeed: Setup cannot detect it, and
 // etcd/raft's election timeouts are then not deterministic.
 func Setup(w *faultline.World, cfg Config) *Cluster {
 	if w.Sim.Lookup("n1") != nil {
@@ -27,6 +28,9 @@ func Setup(w *faultline.World, cfg Config) *Cluster {
 	cfg = cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		w.T().Fatalf("%v", err)
+	}
+	if d := w.Options().Duration; cfg.Duration != d {
+		w.T().Fatalf("%v", durationMismatch(cfg.Duration, d))
 	}
 	raft.SetLogger(&raftLogger{sim: w.Sim, level: cfg.LogLevel})
 	w.T().Cleanup(raft.ResetDefaultLogger)
