@@ -25,7 +25,7 @@ func fakeEnv(m map[string]string) lookupFunc {
 	}
 }
 
-func resolveWith(t *testing.T, opts Options, env map[string]string, short bool) (*plan, error) {
+func resolveWith(t *testing.T, opts Options, env map[string]string, short bool) (*runPlan, error) {
 	t.Helper()
 	return resolve(resolveInput{opts: opts, testName: "TestScenario", short: short, lookup: fakeEnv(env), exploreBase: func() uint64 { return 7 }})
 }
@@ -253,15 +253,15 @@ func TestResolveEffectiveOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p5.checkDeterminism || p5.envCheck {
-		t.Errorf("CheckDeterminism in both: check %v, from the environment %v", p5.checkDeterminism, p5.envCheck)
+	if !p5.opts.CheckDeterminism || p5.envCheck {
+		t.Errorf("CheckDeterminism in both: check %v, from the environment %v", p5.opts.CheckDeterminism, p5.envCheck)
 	}
 	// Only FAULTLINE_SEED_LIST forces KeepGoing (API-013), not FAULTLINE_SEED.
 	p4, err := resolveWith(t, Options{}, map[string]string{"FAULTLINE_SEED": "1"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p4.opts.KeepGoing || p4.keepGoing {
+	if p4.opts.KeepGoing {
 		t.Errorf("FAULTLINE_SEED forced KeepGoing: %+v", p4.opts)
 	}
 }
@@ -419,7 +419,7 @@ func TestResolveSchedule(t *testing.T) {
 	if want := fmt.Sprintf("0x%016x", NameBase(buf.String())); p.env.scheduleHash != want {
 		t.Errorf("schedule hash %s, want %s", p.env.scheduleHash, want)
 	}
-	if want := "faultline: FAULTLINE_SCHEDULE=" + path + ": 1 events; planners are disabled"; p.logs[len(p.logs)-1] != want {
+	if want := "faultline: FAULTLINE_SCHEDULE=" + path + ": 1 event; planners are disabled"; p.logs[len(p.logs)-1] != want {
 		t.Errorf("logs %q, want the last one %q", p.logs, want)
 	}
 	bad := filepath.Join(dir, "bad.json")
@@ -463,12 +463,12 @@ func TestResolveArtifactsAndResults(t *testing.T) {
 	if p.env.artifactsOff || p.env.artifactsRoot != filepath.Join(cwd, "0") {
 		t.Errorf("FAULTLINE_ARTIFACTS=./0: off %v, root %q", p.env.artifactsOff, p.env.artifactsRoot)
 	}
-	p, err = resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "rel", "FAULTLINE_RESULTS": " r.jsonl "}, false)
+	p, err = resolveWith(t, Options{}, map[string]string{"FAULTLINE_ARTIFACTS": "rel"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.env.artifactsOff || p.env.artifactsRoot != filepath.Join(cwd, "rel") || p.env.results != filepath.Join(cwd, "r.jsonl") {
-		t.Errorf("relative paths: off %v, root %q, results %q", p.env.artifactsOff, p.env.artifactsRoot, p.env.results)
+	if p.env.artifactsOff || p.env.artifactsRoot != filepath.Join(cwd, "rel") {
+		t.Errorf("relative paths: off %v, root %q", p.env.artifactsOff, p.env.artifactsRoot)
 	}
 	if got := resultsPath(fakeEnv(map[string]string{"FAULTLINE_RESULTS": " r.jsonl "})); got != filepath.Join(cwd, "r.jsonl") {
 		t.Errorf("resultsPath = %q", got)
@@ -518,6 +518,24 @@ func BenchmarkResolveSeeds(b *testing.B) {
 	for b.Loop() {
 		if _, err := resolve(resolveInput{testName: "TestKV", lookup: env, exploreBase: func() uint64 { return 0 }}); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// API-017, API-073: a count of 1 takes the singular.
+func TestCountOf(t *testing.T) {
+	for _, c := range []struct {
+		got, want string
+	}{
+		{countOf(0, "event"), "0 events"},
+		{countOf(1, "event"), "1 event"},
+		{countOf(uint64(1), "event"), "1 event"},
+		{countOf(uint64(12), "event"), "12 events"},
+		{countOf(1, "seed"), "1 seed"},
+		{countOf(50, "seed"), "50 seeds"},
+	} {
+		if c.got != c.want {
+			t.Errorf("countOf = %q, want %q", c.got, c.want)
 		}
 	}
 }

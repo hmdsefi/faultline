@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"runtime/debug"
@@ -109,10 +110,19 @@ func TestBuildReplay(t *testing.T) {
 // API-080: buildInfoOf reads the import path, the module path and the -tags and -race build
 // settings.
 func TestBuildInfoOf(t *testing.T) {
+	// API-081: the version comes from the folder of sourceFile, this package's replay.go. A fixed
+	// path keeps the result the same when the test runs from the module cache (go test all).
+	if base := filepath.Base(filepath.FromSlash(sourceFile)); base != "replay.go" {
+		t.Errorf("sourceFile = %q, want a path to replay.go", sourceFile)
+	}
+	// Not parallel: swaps sourceFile.
+	saved := sourceFile
+	t.Cleanup(func() { sourceFile = saved })
+	sourceFile = "/src/faultline/replay.go"
 	bi := &debug.BuildInfo{Path: "github.com/acme/kv.test", Main: debug.Module{Path: "github.com/acme"}, Settings: []debug.BuildSetting{
 		{Key: "-buildmode", Value: "exe"}, {Key: "-compiler", Value: "gc"}, {Key: "-race", Value: "true"}, {Key: "-tags", Value: "sim,x"}, {Key: "GOOS", Value: "linux"},
 	}}
-	want := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", faultline: "unknown", tags: "sim,x", race: true}
+	want := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", faultline: "(devel)", tags: "sim,x", race: true}
 	if got := buildInfoOf(bi); got != want {
 		t.Errorf("buildInfoOf(-tags sim,x -race) = %+v, want %+v", got, want)
 	}
@@ -121,46 +131,52 @@ func TestBuildInfoOf(t *testing.T) {
 	if got := buildInfoOf(bi); got != want {
 		t.Errorf("buildInfoOf(no -tags, -race=false) = %+v, want %+v", got, want)
 	}
+	sourceFile = "/home/u/go/pkg/mod/github.com/hmdsefi/faultline@v0.1.0/replay.go"
+	if got := buildInfoOf(bi).faultline; got != "v0.1.0" {
+		t.Errorf("buildInfoOf from the module cache: faultline %q, want v0.1.0", got)
+	}
 }
 
+// API-081: the faultline version comes from the folder the root package was compiled from, so a
+// Go 1.26 test binary, which records no dependencies, gives the same value as a Go 1.27 one.
 func TestVersionOf(t *testing.T) {
-	main := &debug.BuildInfo{Main: debug.Module{Path: "github.com/hmdsefi/faultline", Version: "(devel)"}}
-	if got := versionOf(main); got != "(devel)" {
-		t.Errorf("main module: %q", got)
+	const cache = "/home/u/go/pkg/mod/github.com/hmdsefi/faultline@v0.1.0/replay.go"
+	// The dependency lists of a Go 1.27 test binary; Go 1.26 records none (nil).
+	plain := []*debug.Module{{Path: "github.com/google/go-cmp", Version: "v0.7.0"}, {Path: faultlineModule, Version: "v0.1.0"}}
+	replaced := []*debug.Module{{Path: faultlineModule, Version: "v0.1.0", Replace: &debug.Module{Path: "../faultline", Version: "(devel)"}}}
+	cases := []struct {
+		name, main, mainVersion string
+		deps                    []*debug.Module
+		file, want              string
+	}{
+		{"main module", faultlineModule, "(devel)", nil, "/src/faultline/replay.go", "(devel)"},
+		{"main module with a version", faultlineModule, "v0.2.0", nil, cache, "v0.2.0"},
+		{"main module under faultline's path", faultlineModule + "/harness/etcdraft", "(devel)", nil, cache, "v0.1.0"},
+		{"module cache, Go 1.26", "github.com/acme", "(devel)", nil, cache, "v0.1.0"},
+		{"module cache, Go 1.27", "github.com/acme", "(devel)", plain, cache, "v0.1.0"},
+		{"local replace, Go 1.26", "github.com/acme", "(devel)", nil, "/src/faultline/replay.go", "(devel)"},
+		{"local replace, Go 1.27", "github.com/acme", "(devel)", replaced, "/src/faultline/replay.go", "(devel)"},
+		{"-trimpath", "github.com/acme", "(devel)", replaced, "github.com/hmdsefi/faultline@v0.1.0/replay.go", "v0.1.0"},
+		{"fork", "github.com/acme", "(devel)", nil, "/home/u/go/pkg/mod/example.com/fork@v0.1.1/replay.go", "(devel)"},
+		{"another module that ends in faultline's path", "github.com/acme", "(devel)", nil, "/m/xgithub.com/hmdsefi/faultline@v0.1.0/replay.go", "(devel)"},
+		{"local folder named faultline@v9.9.9", "github.com/acme", "(devel)", nil, "/src/faultline@v9.9.9/replay.go", "(devel)"},
+		{"faultline@vendor", "github.com/acme", "(devel)", nil, "/src/github.com/hmdsefi/faultline@vendor/replay.go", "(devel)"},
+		{"faultline@v", "github.com/acme", "(devel)", nil, "/src/github.com/hmdsefi/faultline@v/replay.go", "(devel)"},
+		{"pseudo-version", "github.com/acme", "(devel)", nil, "/m/github.com/hmdsefi/faultline@v0.3.1-0.20261009120000-6340e5e1a2b3/replay.go", "v0.3.1-0.20261009120000-6340e5e1a2b3"},
+		{"escaped upper case", "github.com/acme", "(devel)", nil, "/m/github.com/hmdsefi/faultline@v1.0.0-!r!c1/replay.go", "v1.0.0-RC1"},
+		{"escaped a and z", "github.com/acme", "(devel)", nil, "/m/github.com/hmdsefi/faultline@v1.0.0-!alpha.!z/replay.go", "v1.0.0-Alpha.Z"},
+		{"! before a non-letter", "github.com/acme", "(devel)", nil, "/m/github.com/hmdsefi/faultline@v1.0.0-!1!/replay.go", "v1.0.0-!1!"},
+		{"Windows path", "github.com/acme", "(devel)", nil, `C:\Users\u\go\pkg\mod\github.com\hmdsefi\faultline@v0.1.0\replay.go`, "v0.1.0"},
+		{"Windows path, @ in a parent folder", "github.com/acme", "(devel)", nil, `C:\src\x@v9.9.9\faultline\replay.go`, "(devel)"},
+		{"@ without a version", "github.com/acme", "(devel)", nil, "/src/faultline@work/replay.go", "(devel)"},
+		{"@ in a parent folder", "github.com/acme", "(devel)", nil, "/src/x@v9.9.9/faultline/replay.go", "(devel)"},
+		{"no folder", "github.com/acme", "(devel)", nil, "replay.go", "(devel)"},
 	}
-	main.Main.Version = "v0.2.0"
-	if got := versionOf(main); got != "v0.2.0" {
-		t.Errorf("main module with a version: %q", got)
-	}
-	dep := &debug.BuildInfo{Main: debug.Module{Path: "github.com/acme"}, Deps: []*debug.Module{
-		{Path: "github.com/hmdsefi/faultline", Version: "v0.1.0", Replace: &debug.Module{Path: "../faultline", Version: "(devel)"}},
-	}}
-	if got := versionOf(dep); got != "v0.1.0 => ../faultline" {
-		t.Errorf("replaced dep: %q", got)
-	}
-	dep.Deps[0].Replace = &debug.Module{Path: "../faultline"}
-	if got := versionOf(dep); got != "v0.1.0 => ../faultline" {
-		t.Errorf("replaced dep without a version: %q", got)
-	}
-	dep.Deps[0].Replace = &debug.Module{Path: "example.com/fork", Version: "v0.1.1"}
-	if got := versionOf(dep); got != "v0.1.0 => example.com/fork@v0.1.1" {
-		t.Errorf("replaced dep with version: %q", got)
-	}
-	// A tagged release or a pseudo-version, listed after other modules, with no replacement.
-	tagged := &debug.BuildInfo{Main: debug.Module{Path: "github.com/acme"}, Deps: []*debug.Module{
-		{Path: "github.com/google/go-cmp", Version: "v0.7.0"},
-		{Path: faultlineModule, Version: "v0.3.0"},
-		{Path: "github.com/hmdsefi/gograph", Version: "v0.8.2"},
-	}}
-	if got := versionOf(tagged); got != "v0.3.0" {
-		t.Errorf("tagged dep: %q", got)
-	}
-	tagged.Deps[1].Version = "v0.3.1-0.20261009120000-6340e5e1a2b3"
-	if got := versionOf(tagged); got != "v0.3.1-0.20261009120000-6340e5e1a2b3" {
-		t.Errorf("pseudo-version dep: %q", got)
-	}
-	if got := versionOf(&debug.BuildInfo{Main: debug.Module{Path: "x"}}); got != "unknown" {
-		t.Errorf("missing: %q", got)
+	for _, c := range cases {
+		bi := &debug.BuildInfo{Main: debug.Module{Path: c.main, Version: c.mainVersion}, Deps: c.deps}
+		if got := versionOf(bi, c.file); got != c.want {
+			t.Errorf("%s: versionOf(%s) = %q, want %q", c.name, c.file, got, c.want)
+		}
 	}
 	for _, c := range []struct{ in, want string }{
 		{"go1.26.2", "go1.26"},

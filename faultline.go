@@ -6,6 +6,7 @@ package faultline
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,9 +108,9 @@ func Run(t *testing.T, opts Options, body func(w *World)) {
 			res = &seedResult{index: i, seed: seed, start: time.Now()}
 			r.runSeed(st, res)
 		})
-		if res != nil && res.status == "fail" && !p.keepGoing {
-			if left := len(p.seeds) - i - 1; left > 0 {
-				t.Logf("faultline: stopping after failing seed 0x%016x; %d of %d seeds not run (set Options.KeepGoing to run all)", seed, left, len(p.seeds))
+		if res != nil && res.status == "fail" && !p.opts.KeepGoing {
+			if line := stopLine(seed, i, len(p.seeds), seedFilter(t.Name(), testFlag("test.run"), testFlag("test.skip"))); line != "" {
+				t.Log(line)
 			}
 			return
 		}
@@ -132,6 +133,37 @@ func onceLookup(lookup lookupFunc) lookupFunc {
 		}
 		return r.v, r.ok
 	}
+}
+
+// stopLine returns the line Run logs when it stops after the failing seed at index i of total
+// seeds (API-021), or "" when no seed comes after it. filtered says that -run or -skip may have
+// excluded the later seeds, so the line does not count them.
+func stopLine(seed uint64, i, total int, filtered bool) string {
+	left := total - i - 1
+	switch {
+	case left <= 0:
+		return ""
+	case filtered:
+		return fmt.Sprintf("faultline: stopping after failing seed 0x%016x; any later seeds that -run and -skip allow were not run (set Options.KeepGoing to run them)", seed)
+	}
+	return fmt.Sprintf("faultline: stopping after failing seed 0x%016x; %d of %d seeds not run (set Options.KeepGoing to run all)", seed, left, total)
+}
+
+// seedFilter reports whether the -run pattern run or the -skip pattern skip may exclude seed
+// subtests of the test named name (API-021). A pattern reaches them only with more '/' than name:
+// testing matches each '/'-separated part of a pattern with one level of a test's name.
+func seedFilter(name, run, skip string) bool {
+	n := strings.Count(name, "/")
+	return strings.Count(run, "/") > n || strings.Count(skip, "/") > n
+}
+
+// testFlag returns the value of the testing flag name, such as "test.run", or "" when the binary
+// does not define it.
+func testFlag(name string) string {
+	if f := flag.Lookup(name); f != nil {
+		return f.Value.String()
+	}
+	return ""
 }
 
 // parentSetupError reports a setup error before any seed started (API-001, API-087). It is a
@@ -229,7 +261,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	seed := res.seed
 	prev, prevDir := r.previousReport(seed)
 	res.attempts = 1
-	a1 := r.attempt(st, seed, r.plan.primaryTrace, r.plan.env.schedule, true)
+	a1 := r.attempt(st, seed, r.plan.opts.Trace, r.plan.env.schedule, true)
 	if a1.setupErr != "" {
 		res.status = "fail"
 		res.fail = &failure{kind: "setup", message: a1.setupErr}
@@ -259,8 +291,8 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			a3 := r.rerun(st, res, cfg)
 			outcome = newDeterminismFailure("artifact_rerun", seed, []attemptResult{a1, a2, a3}, a1.fail, a2.records, a3.records, a2)
 		}
-	} else if r.plan.checkDeterminism {
-		a2 := r.rerun(st, res, r.plan.primaryTrace)
+	} else if r.plan.opts.CheckDeterminism {
+		a2 := r.rerun(st, res, r.plan.opts.Trace)
 		switch {
 		case a2.hash != a1.hash:
 			full := kernel.TraceConfig{Level: kernel.TraceFull}
@@ -278,26 +310,14 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		}
 	}
 
+	warnings := r.compare(prev)
 	if outcome == nil {
-		res.status = "pass"
-		failedBefore := prev != nil && prev.Status == "fail" // a passing replay never replaces a failing artifact (API-073)
-		if r.plan.passArtifacts && !failedBefore {
-			r.writePassArtifact(st, res, a1)
-		}
-		// The pass note stands in for the pass log. A report without a failure object gets it only
-		// under FAULTLINE_TRACE=full, and without the signature and the warnings (API-083).
-		if failedBefore && (prev.Failure != nil || r.plan.passArtifacts) {
-			keptFailingNote(st, seed, prevDir, prev, r.compare(prev))
-		}
+		r.passSeed(st, res, a1, prev, prevDir, warnings)
 		completed = true
 		return
 	}
 
 	res.status, res.fail = "fail", outcome
-	var warnings []string
-	if prev != nil {
-		warnings = r.compare(prev)
-	}
 	rep := r.replay(seed, outcome)
 	dir := r.artifactDir(seed)
 	artifactsLine := "off"
@@ -321,8 +341,11 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	completed = true
 }
 
-// compare returns API-083's warnings for the previous report prev.
+// compare returns API-083's warnings for the previous report prev, or nil when there is none.
 func (r *runner) compare(prev *artifact.Report) []string {
+	if prev == nil {
+		return nil
+	}
 	p := r.plan
 	return compareReports(prev, versions(r.build), runOptions(p.opts, p.env), optionsHash(p.opts, p.env.scheduleHash))
 }
@@ -392,6 +415,23 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 	return a
 }
 
+// passSeed finishes a seed that passed (API-073, API-083). A failing artifact from an earlier run
+// (prev, read from prevDir) stays: the pass note stands in for the pass log, and a report without
+// a failure object gets it only under FAULTLINE_TRACE=full, without the signature and warnings.
+// Otherwise FAULTLINE_TRACE=full writes a pass artifact.
+func (r *runner) passSeed(st *testing.T, res *seedResult, a1 attemptResult, prev *artifact.Report, prevDir string, warnings []string) {
+	res.status = "pass"
+	if prev != nil && prev.Status == "fail" {
+		if prev.Failure != nil || r.plan.passArtifacts {
+			keptFailingNote(st, res.seed, prevDir, prev, warnings)
+		}
+		return
+	}
+	if r.plan.passArtifacts {
+		r.writePassArtifact(st, res, a1)
+	}
+}
+
 // keptFailingNote writes the line of a seed that passed while dir kept the failing report rep
 // (API-073, API-083). It ends with the recorded signature when rep has a failure object, and a
 // warning line follows for each of warnings.
@@ -426,7 +466,7 @@ func (r *runner) writePassArtifact(st *testing.T, res *seedResult, a1 attemptRes
 		fmt.Fprintf(st.Output(), "faultline: seed 0x%016x passed; kept the artifact at %s%c, whose report.json could not be read: %s\n", res.seed, dir, os.PathSeparator, printable(err.Error()))
 		return
 	}
-	passed := fmt.Sprintf("faultline: seed 0x%016x passed: %d events, ended at t=%s (%s)", res.seed, a1.executed, a1.now, a1.stop)
+	passed := passLine(res.seed, a1)
 	lines := func(dir string) []string {
 		return []string{passed, fmt.Sprintf("artifacts: %s%c", dir, os.PathSeparator)}
 	}
@@ -440,6 +480,11 @@ func (r *runner) writePassArtifact(st *testing.T, res *seedResult, a1 attemptRes
 	}
 	res.artifactDir = dir
 	fmt.Fprint(st.Output(), joinLines(lines(dir), ""))
+}
+
+// passLine is the first line of a pass artifact's output (API-073).
+func passLine(seed uint64, a attemptResult) string {
+	return fmt.Sprintf("faultline: seed 0x%016x passed: %s, ended at t=%s (%s)", seed, countOf(a.executed, "event"), a.now, a.stop)
 }
 
 // previousReport reads the report of a previous run of the same seed (API-083): only when the

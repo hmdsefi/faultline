@@ -58,7 +58,6 @@ type environment struct {
 	traceFull        bool            // FAULTLINE_TRACE=full
 	minimize         bool            // FAULTLINE_MINIMIZE enables minimization (Phase 3 acts on it)
 	seedList         []uint64        // FAULTLINE_SEED_LIST, duplicates removed
-	results          string          // FAULTLINE_RESULTS, absolute
 }
 
 // envValue returns the trimmed value of name and whether it is set (API-010).
@@ -105,6 +104,8 @@ func readEnv(lookup lookupFunc) (*environment, error) {
 	return e, nil
 }
 
+// parse sets the field of the variable name from its trimmed value v, or returns its setup error
+// (§7.1). FAULTLINE_RESULTS has no field: Run reads it with resultsPath before resolve (API-087).
 func (e *environment) parse(name, v string) error {
 	switch name {
 	case envSeed, envBaseSeed:
@@ -185,12 +186,11 @@ func (e *environment) parse(name, v string) error {
 			return err
 		}
 		e.seedList = list
-	case envResults:
-		e.results = resultsPath(func(string) (string, bool) { return v, true })
 	}
 	return nil
 }
 
+// allDigits reports whether s is one or more ASCII decimal digits.
 func allDigits(s string) bool {
 	if s == "" {
 		return false
@@ -203,6 +203,7 @@ func allDigits(s string) bool {
 	return true
 }
 
+// allHex reports whether s is one or more ASCII hexadecimal digits, in either letter case.
 func allHex(s string) bool {
 	if s == "" {
 		return false
@@ -380,28 +381,27 @@ func parseMinimize(v string) (enabled bool, reason string) {
 	return true, ""
 }
 
-// seedCount returns "1 seed" or "<n> seeds" for the seed-list summary (API-017).
-func seedCount(n int) string {
+// countOf returns n and noun, in the plural unless n is 1: "1 seed", "50 seeds", "0 events"
+// (API-017, API-073).
+func countOf[N int | uint64](n N, noun string) string {
 	if n == 1 {
-		return "1 seed"
+		return "1 " + noun
 	}
-	return strconv.Itoa(n) + " seeds"
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// plan is the resolved configuration of one Run call (API-001 to API-017).
-type plan struct {
-	opts             Options // effective options: World.Options()
-	seeds            []uint64
-	seedSource       string // report seed_source: "derived", "env", "list"
-	base             uint64 // derived lists only
-	baseSource       string // report base_source: "test_name", "options", "env", "explore"
-	env              *environment
-	primaryTrace     kernel.TraceConfig
-	checkDeterminism bool
-	envCheck         bool // FAULTLINE_CHECK_DETERMINISM turned the check on, Options.CheckDeterminism did not
-	keepGoing        bool
-	passArtifacts    bool     // FAULTLINE_TRACE=full
-	logs             []string // parent-level log lines (API-017), in order
+// runPlan is the resolved configuration of one Run call (API-001 to API-017). The effective
+// Trace, CheckDeterminism and KeepGoing, after the environment, are in opts only.
+type runPlan struct {
+	opts          Options  // effective options: World.Options()
+	seeds         []uint64 // may share its array with env.seedList
+	seedSource    string   // report seed_source: "derived", "env", "list"
+	base          uint64   // derived lists only
+	baseSource    string   // report base_source: "test_name", "options", "env", "explore"
+	env           *environment
+	envCheck      bool     // FAULTLINE_CHECK_DETERMINISM turned the check on, Options.CheckDeterminism did not
+	passArtifacts bool     // FAULTLINE_TRACE=full
+	logs          []string // parent-level log lines (API-017), in order
 }
 
 // resolveInput is what resolve needs from Run; unit tests fake the environment and the explore base.
@@ -415,7 +415,7 @@ type resolveInput struct {
 
 // resolve applies defaults, the environment, validation and seed derivation (API-001 to
 // API-017). Its error text is the setup error message.
-func resolve(in resolveInput) (*plan, error) {
+func resolve(in resolveInput) (*runPlan, error) {
 	o := applyDefaults(in.opts)
 	env, err := readEnv(in.lookup)
 	if err != nil {
@@ -424,7 +424,7 @@ func resolve(in resolveInput) (*plan, error) {
 	if err := validateOptions(o); err != nil {
 		return nil, err
 	}
-	p := &plan{env: env}
+	p := &runPlan{env: env}
 	ignore := func(winner string, names ...string) {
 		for _, n := range names {
 			if env.set[n] {
@@ -437,7 +437,7 @@ func resolve(in resolveInput) (*plan, error) {
 	case env.set[envSeedList]:
 		ignore(envSeedList, envSeeds, envBaseSeed, envExplore)
 		p.seeds, p.seedSource = env.seedList, "list"
-		p.logs = append(p.logs, "faultline: FAULTLINE_SEED_LIST: running "+seedCount(len(p.seeds)))
+		p.logs = append(p.logs, "faultline: FAULTLINE_SEED_LIST: running "+countOf(len(p.seeds), "seed"))
 	case env.set[envSeed]:
 		ignore(envSeed, envSeeds, envBaseSeed, envExplore)
 		p.seeds, p.seedSource = []uint64{env.seed}, "env"
@@ -477,7 +477,7 @@ func resolve(in resolveInput) (*plan, error) {
 			p.seeds[i] = DeriveSeed(p.base, i)
 		}
 		p.seedSource = "derived"
-		p.logs = append(p.logs, fmt.Sprintf("faultline: running %s from base 0x%016x (%s)", seedCount(n), p.base, label))
+		p.logs = append(p.logs, fmt.Sprintf("faultline: running %s from base 0x%016x (%s)", countOf(n, "seed"), p.base, label))
 	}
 	if shortLog != "" {
 		p.logs = append(p.logs, shortLog)
@@ -486,7 +486,7 @@ func resolve(in resolveInput) (*plan, error) {
 		p.logs = append(p.logs, exploreLog)
 	}
 	if env.schedule != nil {
-		p.logs = append(p.logs, fmt.Sprintf("faultline: FAULTLINE_SCHEDULE=%s: %d events; planners are disabled", env.schedulePath, len(env.schedule.Events)))
+		p.logs = append(p.logs, fmt.Sprintf("faultline: FAULTLINE_SCHEDULE=%s: %s; planners are disabled", env.schedulePath, countOf(len(env.schedule.Events), "event")))
 	}
 	if env.traceFull && env.artifactsOff {
 		p.logs = append(p.logs, "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them")
@@ -502,23 +502,18 @@ func resolve(in resolveInput) (*plan, error) {
 		p.logs = append(p.logs, "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring")
 	}
 
-	p.primaryTrace = o.Trace
 	if env.traceFull {
-		p.primaryTrace.Level = kernel.TraceFull
+		o.Trace.Level = kernel.TraceFull
 		p.passArtifacts = true
 	}
-	p.checkDeterminism = o.CheckDeterminism || env.checkDeterminism
 	p.envCheck = env.checkDeterminism && !o.CheckDeterminism
-	p.keepGoing = o.KeepGoing || env.set[envSeedList]
-
+	o.CheckDeterminism = o.CheckDeterminism || env.checkDeterminism
+	o.KeepGoing = o.KeepGoing || env.set[envSeedList]
 	o.Seeds = len(p.seeds)
 	o.BaseSeed = 0
 	if p.seedSource == "derived" {
 		o.BaseSeed = p.base
 	}
-	o.Trace = p.primaryTrace
-	o.CheckDeterminism = p.checkDeterminism
-	o.KeepGoing = p.keepGoing
 	p.opts = o
 	return p, nil
 }

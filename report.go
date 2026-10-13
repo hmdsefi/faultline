@@ -111,8 +111,8 @@ func determinismMessage(d *determinism) string {
 	}
 	switch {
 	case d.recorded != [2]uint64{}:
-		lines = append(lines, fmt.Sprintf("the two full-trace runs diverged before the records they kept: run %d recorded %d records and run %d recorded %d (trace hashes 0x%016x and 0x%016x)",
-			runA, d.recorded[0], runA+1, d.recorded[1], h[len(h)-2], h[len(h)-1]))
+		lines = append(lines, fmt.Sprintf("the two full-trace runs diverged before the records they kept: run %d recorded %s and run %d recorded %s (trace hashes 0x%016x and 0x%016x)",
+			runA, countOf(d.recorded[0], "record"), runA+1, countOf(d.recorded[1], "record"), h[len(h)-2], h[len(h)-1]))
 	case d.diff != nil:
 		seq := uint64(0)
 		if d.diff.a != nil {
@@ -130,7 +130,7 @@ func determinismMessage(d *determinism) string {
 		lines = append(lines, side(runA, d.diff.a, d.diff.lastA), side(runA+1, d.diff.b, d.diff.lastB))
 	case h[len(h)-2] != h[len(h)-1]:
 		// Only a limit re-run keeps part of its records (API-070).
-		lines = append(lines, fmt.Sprintf("the two full-trace runs differ before the last %d records they kept (trace hashes 0x%016x and 0x%016x); the kept records are identical", d.kept, h[len(h)-2], h[len(h)-1]))
+		lines = append(lines, fmt.Sprintf("the two full-trace runs differ before the last %s they kept (trace hashes 0x%016x and 0x%016x); the kept records are identical", countOf(d.kept, "record"), h[len(h)-2], h[len(h)-1]))
 	default:
 		odd := "the first two runs both differed"
 		switch d.same {
