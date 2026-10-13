@@ -37,9 +37,22 @@ func TestDefaultConfig(t *testing.T) {
 	if !configEqual(got, want) {
 		t.Fatalf("DefaultConfig() =\n%+v\nwant\n%+v", got, want)
 	}
-	d := Config{Duration: time.Minute}.withDefaults()
-	if d.SnapshotTimeout != 2*time.Second || d.Membership.Spares != 0 || d.LogLevel != LogInfo || d.Nodes != 3 || d.Workload.OpTimeout != 5*time.Second {
-		t.Fatalf("withDefaults of a zero config = %+v", d)
+	// ETC-011: every zero field with a default gets it; booleans, enums other than LogLevel, and
+	// the membership fields (membership off) stay zero.
+	zero := Config{
+		Nodes: 3, Clients: 3,
+		TickInterval: 100 * time.Millisecond, ElectionTick: 10, HeartbeatTick: 1,
+		MaxSizePerMsg: 1 << 20, MaxInflightMsgs: 256,
+		SnapshotTimeout: 2 * time.Second, CrashRestartDelay: 500 * time.Millisecond, CompactKeep: 10,
+		Workload: Workload{Keys: 8, AttemptTimeout: 500 * time.Millisecond, RetryDelay: 20 * time.Millisecond, OpTimeout: 5 * time.Second},
+		Duration: time.Minute, Quiet: 10 * time.Second, ProgressWithin: 5 * time.Second, Drain: 2 * time.Second,
+		LogLevel: LogInfo,
+	}
+	if d := (Config{Duration: time.Minute}).withDefaults(); !configEqual(d, zero) {
+		t.Fatalf("withDefaults of a zero config =\n%+v\nwant\n%+v", d, zero)
+	}
+	if d := (Config{SnapshotTimeout: 3 * time.Second}).withDefaults(); d.SnapshotTimeout != 3*time.Second {
+		t.Fatalf("withDefaults changed a set SnapshotTimeout to %v", d.SnapshotTimeout)
 	}
 	m := Config{Membership: Membership{Enabled: true}}.withDefaults()
 	if m.Membership.Spares != 2 || m.Membership.Every != 5*time.Second {
@@ -104,6 +117,79 @@ func TestValidateRows(t *testing.T) {
 	neg.TickInterval, neg.Drain = -1, -1
 	if err := neg.withDefaults().validate(); err == nil || !strings.HasSuffix(err.Error(), "TickInterval must not be negative") {
 		t.Errorf("two negative durations: err = %v, want the first in declaration order", err)
+	}
+	hb := base
+	hb.HeartbeatTick = -1
+	if err := hb.withDefaults().validate(); err == nil || err.Error() != "etcdraft: invalid config: ElectionTick (10) must be greater than HeartbeatTick (-1) >= 1" {
+		t.Errorf("HeartbeatTick -1: err = %v", err)
+	}
+}
+
+// ETC-012: each duration is checked for a negative value, in declaration order: each one alone,
+// and together with the next.
+func TestValidateNegativeDurations(t *testing.T) {
+	durations := []struct {
+		name string
+		set  func(c *Config)
+	}{
+		{"TickInterval", func(c *Config) { c.TickInterval = -1 }},
+		{"SyncLatencyMin", func(c *Config) { c.SyncLatencyMin = -1 }},
+		{"SyncLatencyMax", func(c *Config) { c.SyncLatencyMax = -1 }},
+		{"SnapshotTimeout", func(c *Config) { c.SnapshotTimeout = -1 }},
+		{"CrashRestartDelay", func(c *Config) { c.CrashRestartDelay = -1 }},
+		{"Membership.Every", func(c *Config) { c.Membership.Every = -1 }},
+		{"Workload.ThinkMin", func(c *Config) { c.Workload.ThinkMin = -1 }},
+		{"Workload.ThinkMax", func(c *Config) { c.Workload.ThinkMax = -1 }},
+		{"Workload.AttemptTimeout", func(c *Config) { c.Workload.AttemptTimeout = -1 }},
+		{"Workload.RetryDelay", func(c *Config) { c.Workload.RetryDelay = -1 }},
+		{"Workload.OpTimeout", func(c *Config) { c.Workload.OpTimeout = -1 }},
+		{"Duration", func(c *Config) { c.Duration = -1 }},
+		{"Quiet", func(c *Config) { c.Quiet = -1 }},
+		{"ProgressWithin", func(c *Config) { c.ProgressWithin = -1 }},
+		{"Drain", func(c *Config) { c.Drain = -1 }},
+	}
+	base := DefaultConfig()
+	base.Duration = time.Minute
+	for i, d := range durations {
+		want := "etcdraft: invalid config: " + d.name + " must not be negative"
+		c := base
+		d.set(&c)
+		if err := c.withDefaults().validate(); err == nil || err.Error() != want {
+			t.Errorf("%s alone: err = %v, want %q", d.name, err, want)
+		}
+		if i+1 < len(durations) {
+			durations[i+1].set(&c)
+			if err := c.withDefaults().validate(); err == nil || err.Error() != want {
+				t.Errorf("%s with %s: err = %v, want %q", d.name, durations[i+1].name, err, want)
+			}
+		}
+	}
+}
+
+// ETC-012: the valid edges. Every equal bound passes, every bug switch is defined, and Spares is
+// not checked while membership is off.
+func TestValidateEdges(t *testing.T) {
+	base := DefaultConfig()
+	base.Duration = time.Minute
+	for _, c := range []struct {
+		name string
+		set  func(c *Config)
+	}{
+		{"SyncLatencyMin == SyncLatencyMax", func(c *Config) { c.SyncLatencyMin = c.SyncLatencyMax }},
+		{"ReadPPM 1000000", func(c *Config) { c.Workload.ReadPPM = 1_000_000 }},
+		{"ThinkMin == ThinkMax", func(c *Config) { c.Workload.ThinkMin = c.Workload.ThinkMax }},
+		{"Quiet == ProgressWithin + Drain", func(c *Config) { c.Quiet = c.ProgressWithin + c.Drain }},
+		{"every bug switch", func(c *Config) {
+			c.Bugs = BugSendBeforePersist | BugSkipSync | BugApplyBeforeCommit | BugForgetHardState | BugSnapshotOffByOne
+		}},
+		{"Spares 9 with membership off", func(c *Config) { c.Membership = Membership{Spares: 9} }},
+		{"zero config", func(c *Config) { *c = Config{Duration: time.Minute} }},
+	} {
+		cfg := base
+		c.set(&cfg)
+		if err := cfg.withDefaults().validate(); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
 	}
 }
 

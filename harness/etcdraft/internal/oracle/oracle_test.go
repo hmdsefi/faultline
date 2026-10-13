@@ -16,6 +16,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 
 	"github.com/hmdsefi/faultline/harness/etcdraft/internal/kv"
+	"github.com/hmdsefi/faultline/harness/etcdraft/internal/wal"
 )
 
 func at(ms int) kernel.Time { return kernel.Time(time.Duration(ms) * time.Millisecond) }
@@ -78,6 +79,65 @@ func TestElectionSafety(t *testing.T) {
 	}
 	o.Role(at(6), "n3", 3, 2, raft.StateLeader, 3)
 	wantErr(t, o, ElectionSafety, "term 2 has two leaders: n1 (since 0.003000000s) and n3 (at 0.006000000s)")
+}
+
+// ETC-110: a change of Lead alone is a change, only a leader counts for election safety, and
+// Terms counts terms, not servers.
+func TestRoleDetails(t *testing.T) {
+	o := New(bootSnap())
+	o.Role(at(1), "n1", 1, 2, raft.StateFollower, 2)
+	if !o.Role(at(2), "n1", 1, 2, raft.StateFollower, 3) {
+		t.Fatal("a change of Lead alone was not reported")
+	}
+	o.Role(at(3), "n1", 1, 3, raft.StateLeader, 1)
+	o.Role(at(4), "n2", 2, 3, raft.StateCandidate, 0)
+	o.Role(at(5), "n3", 3, 3, raft.StatePreCandidate, 0)
+	wantNoErr(t, o, ElectionSafety)
+	o.Role(at(6), "n1", 1, 4, raft.StateLeader, 1)
+	if o.Terms() != 2 {
+		t.Fatalf("Terms() = %d after n1 led terms 3 and 4 among three servers, want 2", o.Terms())
+	}
+}
+
+// ETC-111: index 0 is never part of the canonical log.
+func TestIndexZero(t *testing.T) {
+	o := New(bootSnap())
+	if h, ok := o.RefHash(0); ok {
+		t.Fatalf("RefHash(0) = %x, true; want false", h)
+	}
+	o.Apply(at(1), "n1", 1, empty(0, 1))
+	wantErr(t, o, StateMachineSafety, "n1 applied index 0 but the canonical log ends at 1")
+}
+
+// confEntry returns a ConfChangeV2 entry adding learner 4, proposed by client op (client, id).
+func confEntry(index, term uint64, client uint32, id uint64) *raftpb.Entry {
+	cc := &raftpb.ConfChangeV2{Changes: []*raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode.Enum(), NodeId: new(uint64(4))}},
+		Context: kv.EncodeContext(client, id)}
+	return &raftpb.Entry{Index: new(index), Term: new(term), Type: raftpb.EntryConfChangeV2.Enum(), Data: wal.Marshal(cc)}
+}
+
+// ETC-111: the reference applies a conf change's session, so the change counts once (F2, F16),
+// and ConfChanges counts every conf-change entry of the canonical log, duplicates and v1 included.
+func TestConfChangeReference(t *testing.T) {
+	o := New(bootSnap())
+	o.Apply(at(1), "n1", 1, confEntry(2, 2, 5, 1))
+	o.Apply(at(2), "n1", 1, confEntry(3, 2, 5, 1)) // a retry of the same op
+	o.Apply(at(3), "n1", 1, &raftpb.Entry{Index: new(uint64(4)), Term: new(uint64(2)), Type: raftpb.EntryConfChange.Enum(),
+		Data: wal.Marshal(&raftpb.ConfChange{Type: raftpb.ConfChangeAddLearnerNode.Enum(), NodeId: new(uint64(5))})})
+	wantNoErr(t, o, StateMachineSafety)
+	if i, ok := o.FirstApplied(5, 1); !ok || i != 2 {
+		t.Fatalf("FirstApplied(5, 1) = %d, %v; want 2, true", i, ok)
+	}
+	ref := kv.New()
+	ref.ApplySession(5, 1, kv.OpConfChange)
+	for i := uint64(2); i <= 4; i++ {
+		if h, _ := o.RefHash(i); h != ref.Hash() {
+			t.Fatalf("RefHash(%d) is not the hash of a state holding client 5's session at op 1", i)
+		}
+	}
+	if o.ConfChanges() != 3 {
+		t.Fatalf("ConfChanges() = %d, want 3", o.ConfChanges())
+	}
 }
 
 // ETC-111
@@ -171,6 +231,10 @@ func TestConfigurationAgreement(t *testing.T) {
 	if got := raft.DescribeConfState(o.Conf()); got != raft.DescribeConfState(cs5) {
 		t.Fatalf("Conf() = %s", got)
 	}
+	cs5.Voters[0], cs5.Learners = 9, nil // the oracle keeps its own copy
+	if got := raft.DescribeConfState(o.ConfAt(5)); got != "Voters:[1 2 3] VotersOutgoing:[] Learners:[4] LearnersNext:[] AutoLeave:false" {
+		t.Fatalf("ConfAt(5) = %s after the caller changed the ConfState it passed", got)
+	}
 	o.ConfApplied(at(3), "n3", 5, &raftpb.ConfState{Voters: []uint64{1, 2, 3, 4}, AutoLeave: new(false)})
 	wantErr(t, o, ConfigAgreement, "index 5: n1 applied configuration Voters:[1 2 3] VotersOutgoing:[] Learners:[4] LearnersNext:[] AutoLeave:false but n3 got Voters:[1 2 3 4]")
 }
@@ -240,6 +304,10 @@ func TestDurableState(t *testing.T) {
 	o.Recovered(at(1), "n2", 2, Recovery{ValidEnd: 80, HardState: hs(2, 1, 4), SnapIndex: 1})
 	o.Recovered(at(2), "n2", 2, Recovery{ValidEnd: 70, HardState: hs(2, 1, 4), SnapIndex: 1})
 	wantErr(t, o, DurableState, "n2 recovered 70 WAL bytes but 80 were persisted") // D.walEnd = ValidEnd after recovery
+	// ETC-112 rule 3 needs a persisted HardState: a first boot with none is fine.
+	o4 := New(bootSnap())
+	o4.Recovered(at(1), "n4", 4, Recovery{Fresh: true})
+	wantNoErr(t, o4, DurableState)
 	// ETC-112 rule 3: a vote cast after an unvoted persist point is not older (the persisted vote is 0).
 	o3 := New(bootSnap())
 	o3.Persisted(3, hs(3, 0, 10), 100, 1)
@@ -266,6 +334,13 @@ func TestHardStateMonotonic(t *testing.T) {
 	o2.HardState(at(0), "n2", 2, hs(2, 0, 7), true)
 	o2.HardState(at(1), "n2", 2, hs(2, 0, 6), false)
 	wantErr(t, o2, HardStateMonotonic, "Commit:7 to Term:2 Commit:6")
+	// ETC-113 compares each server with its own previous HardState.
+	o4 := New(bootSnap())
+	o4.HardState(at(0), "n1", 1, hs(5, 1, 10), true)
+	o4.HardState(at(0), "n2", 2, hs(2, 0, 3), true)
+	o4.HardState(at(1), "n1", 1, hs(5, 1, 11), false)
+	o4.HardState(at(2), "n2", 2, hs(2, 0, 4), false)
+	wantNoErr(t, o4, HardStateMonotonic)
 	// ETC-113: a term that goes back.
 	o3 := New(bootSnap())
 	o3.HardState(at(0), "n3", 3, hs(3, 1, 5), true)

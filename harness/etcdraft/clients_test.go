@@ -5,8 +5,10 @@ package etcdraft
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,8 +56,8 @@ func TestNoFaults(t *testing.T) {
 	if len(leaders) != 1 || leaders[0].Term < 2 || st.Terms != 1 {
 		t.Fatalf("leaders = %+v, Terms = %d; want exactly one leader, for a term >= 2", leaders, st.Terms)
 	}
-	if !st.ProbeAcked || st.ProbeIndex == 0 || st.OpsOK == 0 || st.OpsPending != 0 {
-		t.Fatalf("stats %+v; want the probe acknowledged and applied, OK ops, nothing pending", st)
+	if !st.ProbeAcked || st.ProbeIndex == 0 || st.OpsOK == 0 || st.OpsPending != 0 || st.StepsDuringPersist == 0 {
+		t.Fatalf("stats %+v; want the probe acknowledged and applied, OK ops, nothing pending, and input events during a sync", st)
 	}
 	if debugLogs != 0 {
 		t.Fatalf("%d raft_log records at debug level with LogLevel = LogInfo", debugLogs)
@@ -286,12 +288,89 @@ func TestHistoryShapes(t *testing.T) {
 			if cl := c.clientByName("probe"); cl == nil || cl.cid != uint32(cfg.Clients+1) { //nolint:gosec // Clients <= 16
 				problems = append(problems, "the probe's client ID is not Clients+1")
 			}
+			problems = append(problems, checkValues(c, w.History.Ops())...)
 			return nil
 		})
 	})
 	if ok == 0 || len(problems) != 0 {
 		t.Fatalf("%d OK ops; problems: %v", ok, problems)
 	}
+}
+
+// checkValues checks the values in a stage 1a history. ETC-092 step 3: a workload key is
+// k0..k<Keys-1>, every one of them is used (the history has far more ops than keys), and a write's
+// value is <client>-<op ID>. ETC-096: the probe writes "probe" to key "probe" once, at R. An OK
+// read returns the value of the last write to its key at a lower log index than its own, or null if
+// there is none.
+func checkValues(c *Cluster, ops []history.Op) []string {
+	var problems []string
+	type write struct {
+		index      uint64
+		key, value string
+	}
+	var writes []write // every write in the log, any status
+	var reads []history.Op
+	var probes []string
+	used := make([]bool, c.cfg.Workload.Keys)
+	for _, op := range ops {
+		var in KVInput
+		raw, _ := op.Input.(json.RawMessage)
+		_ = json.Unmarshal(raw, &in) // TestHistoryShapes reports a bad input
+		id := c.opIDs[op.ID]
+		if op.Process == c.probe.name {
+			probes = append(probes, fmt.Sprintf("%s %s=%s at %s", op.F, in.Key, in.Value, op.Call))
+		} else {
+			if n, err := strconv.Atoi(strings.TrimPrefix(in.Key, "k")); err != nil || "k"+strconv.Itoa(n) != in.Key || n < 0 || n >= c.cfg.Workload.Keys {
+				problems = append(problems, fmt.Sprintf("op %d: key %q is not in k0..k%d", op.ID, in.Key, c.cfg.Workload.Keys-1))
+			} else {
+				used[n] = true
+			}
+			if want := op.Process + "-" + strconv.FormatUint(id, 10); op.F == "write" && in.Value != want {
+				problems = append(problems, fmt.Sprintf("op %d: value %q, want %q", op.ID, in.Value, want))
+			}
+		}
+		if op.F == "write" {
+			if i, ok := c.o.FirstApplied(c.clientByName(op.Process).cid, id); ok {
+				writes = append(writes, write{i, in.Key, in.Value})
+			}
+		}
+		if op.F == "read" && op.Status == history.OK {
+			reads = append(reads, op)
+		}
+	}
+	if want := fmt.Sprintf("write probe=probe at %s", c.recoveryStart); len(probes) != 1 || probes[0] != want {
+		problems = append(problems, fmt.Sprintf("probe ops %q, want [%q]", probes, want))
+	}
+	if len(reads) == 0 {
+		problems = append(problems, "no OK read")
+	}
+	if n := slices.Index(used, false); n >= 0 {
+		problems = append(problems, fmt.Sprintf("no op used key k%d", n))
+	}
+	slices.SortFunc(writes, func(a, b write) int { return cmp.Compare(a.index, b.index) })
+	for _, op := range reads {
+		var in KVInput
+		raw, _ := op.Input.(json.RawMessage)
+		_ = json.Unmarshal(raw, &in)
+		r, ok := c.o.FirstApplied(c.clientByName(op.Process).cid, c.opIDs[op.ID])
+		if !ok {
+			problems = append(problems, fmt.Sprintf("op %d: OK read not in the log", op.ID))
+			continue
+		}
+		want := "null"
+		k, _ := slices.BinarySearchFunc(writes, r, func(w write, r uint64) int { return cmp.Compare(w.index, r) })
+		for k--; k >= 0; k-- {
+			if writes[k].key == in.Key {
+				b, _ := json.Marshal(writes[k].value)
+				want = string(b)
+				break
+			}
+		}
+		if got, _ := op.Output.(json.RawMessage); string(got) != want {
+			problems = append(problems, fmt.Sprintf("op %d: read of %s at index %d returned %s, want %s", op.ID, in.Key, r, got, want))
+		}
+	}
+	return problems
 }
 
 // AT-ETC-28

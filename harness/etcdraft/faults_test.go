@@ -67,4 +67,15 @@ func TestFaultPresets(t *testing.T) {
 	if r, ok := Faults(DefaultConfig()).(*fault.Random); !ok || r.Quiet != 10*s {
 		t.Fatalf("default planner %T, want *fault.Random with Quiet 10s", Faults(DefaultConfig()))
 	}
+	// Faults applies the Quiet default, and every call returns a new planner with its own rules.
+	cfg = DefaultConfig()
+	cfg.Quiet = 0
+	r1, _ := Faults(cfg).(*fault.Random)
+	r2, _ := Faults(cfg).(*fault.Random)
+	if r1.Quiet != 10*s {
+		t.Fatalf("Quiet 0 gave a planner with Quiet %v, want the 10s default", r1.Quiet)
+	}
+	if r1 == r2 || &r1.Rules[0] == &r2.Rules[0] || r1.Rules[3].Link == r2.Rules[3].Link {
+		t.Fatal("two calls returned the same planner, rules or link")
+	}
 }
