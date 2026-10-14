@@ -25,6 +25,22 @@ func ExampleTest() {
 	_ = TestRaft
 }
 
+// Seed 0x5e1f9a2c4b7d3e80 of TestRaft failed, and the bug is fixed. TestRaftSeed5e1f9a2c keeps
+// that seed as a regression test: it runs only that seed, with the Config and Options of
+// TestRaft, and fails again if the bug comes back. Like ExampleTest, this example compiles the
+// test but does not run it.
+func ExampleTestSeeds() {
+	cfg, opts := etcdraft.DefaultConfig(), faultline.Options{Seeds: 100}
+
+	TestRaft := func(t *testing.T) {
+		etcdraft.Test(t, cfg, opts)
+	}
+	TestRaftSeed5e1f9a2c := func(t *testing.T) {
+		etcdraft.TestSeeds(t, cfg, opts, 0x5e1f9a2c4b7d3e80)
+	}
+	_, _ = TestRaft, TestRaftSeed5e1f9a2c
+}
+
 // A scenario with its own faults calls Setup inside faultline.Run, with the harness's network from
 // NetConfig, and plans the faults itself. Here a script crashes whichever server leads at 5s, and
 // an extra final check asks for a new leader after the crash. The harness's own checks run too.

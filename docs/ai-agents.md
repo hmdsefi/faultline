@@ -130,6 +130,9 @@ These steps check every seed and keep the failing seed as a test.
    replay](how-it-works.md#seeds-and-replay) lists what it depends on). It runs the same seed and
    options against the fixed code, and fails again if the bug comes back.
 
+   For a test that calls `etcdraft.Test`, pin the seed with `etcdraft.TestSeeds` (harness module
+   v0.1.1 or newer), not `RunSeeds`, so the harness's defaults still apply.
+
 9. If the fix changes when the code sends messages or fires timers, pin the faults too. Copy
    `schedule.json` from the artifact directory to `testdata/seed-287372ab-schedule.json`, and add
    this line before `faultline.RunSeeds`:
@@ -225,9 +228,10 @@ When a faultline test fails:
 6. Run `go test ./...` and `FAULTLINE_CHECK_DETERMINISM=1 go test ./...`. Both must pass.
 7. Add a regression test that pins the seed with `faultline.RunSeeds` (faultline v0.1.1 or newer),
    as in the following example. Give it the same options and world function as the failing test.
-   It must pass. If the fix changes when the code sends messages or fires timers, also copy the
-   run's `schedule.json` to `testdata/`. Then set `FAULTLINE_SCHEDULE` to that path with `t.Setenv`
-   in the same test.
+   It must pass. For a test that calls `etcdraft.Test`, pin the seed with `etcdraft.TestSeeds`
+   (harness module v0.1.1 or newer), not `RunSeeds`, so the harness's defaults still apply. If the
+   fix changes when the code sends messages or fires timers, also copy the run's `schedule.json` to
+   `testdata/`. Then set `FAULTLINE_SCHEDULE` to that path with `t.Setenv` in the same test.
 
 ```go
 func TestKVSeed287372ab(t *testing.T) {
