@@ -267,6 +267,9 @@ without a code change:
 - `FAULTLINE_SEEDS` sets the number of seeds;
 - `FAULTLINE_EXPLORE=1` picks a fresh base seed and prints it.
 
+`faultline.RunSeeds` runs the seeds listed in the test, such as one that failed once. It ignores
+`Options.Seeds`, `Options.BaseSeed` and every variable that chooses seeds.
+
 A *replay* runs a seed again and gets the same run: the same events, in the same order, at the same
 virtual times. faultline checks this with the *trace hash*, a hash of every record the run emits.
 When a seed fails, faultline runs it a second time with every record kept, to write the artifact,
@@ -296,10 +299,11 @@ what the rest of your Go code does, so code that runs inside the simulation foll
 - Give each message type a `Describe() string` method, so the trace shows what the message holds.
   Without one, the trace shows only the type name of a struct.
 
-`crypto/rand` is the one outside source faultline handles for you. `faultline.Run` seeds it for
-every run through `testing/cryptotest`. Go does not allow that in a parallel test, so a parallel
-test that calls `faultline.Run` fails with a setup error. `Options.NoCryptoSeed` turns the seeding
-off and allows `t.Parallel`, but `crypto/rand` is then no longer part of the replay.
+`crypto/rand` is the one outside source faultline handles for you. `faultline.Run` and
+`faultline.RunSeeds` seed it for every run through `testing/cryptotest`. Go does not allow that in a
+parallel test, so a parallel test that calls either one fails with a setup error.
+`Options.NoCryptoSeed` turns the seeding off and allows `t.Parallel`, but `crypto/rand` is then no
+longer part of the replay.
 
 faultline does not inspect your code for these rules. It checks their effect instead. When a broken
 rule changes the run, a second run of the same seed gets a different trace hash. Failing seeds

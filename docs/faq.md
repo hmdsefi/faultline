@@ -41,9 +41,6 @@ dates:
 - The `faultline view` web app. `timeline.html` is the run view of v0.1.0.
 - Harnesses for hashicorp/raft, CometBFT, Kubernetes controllers (controller-runtime), and NATS with
   JetStream.
-- Pinning a seed in code without environment variables; [issue
-  #259](https://github.com/hmdsefi/faultline/issues/259) tracks it. v0.1.0 pins a seed with
-  `t.Setenv("FAULTLINE_SEED", ...)`.
 
 ## What your code must do
 

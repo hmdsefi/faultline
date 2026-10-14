@@ -464,7 +464,8 @@ ok  	example.com/kv	0.987s
 
 ## Pin the seed
 
-Keep the seed as a regression test. Create `pin_test.go`:
+Keep the seed as a regression test with `faultline.RunSeeds`, which needs faultline v0.1.1 or newer.
+Create `pin_test.go`:
 
 ```go
 package kv_test
@@ -477,14 +478,14 @@ import (
 
 // TestKVSeed287372ab runs the seed that lost an acknowledged put before the fix.
 func TestKVSeed287372ab(t *testing.T) {
-	t.Setenv("FAULTLINE_SEED", "0x287372ab06f1482e")
-	t.Setenv("FAULTLINE_SEED_LIST", "") // FAULTLINE_SEED_LIST and FAULTLINE_SEED cannot both be set
-	faultline.Run(t, kvOptions, kvWorld)
+	faultline.RunSeeds(t, kvOptions, kvWorld, 0x287372ab06f1482e)
 }
 ```
 
-The test sets `FAULTLINE_SEED` for itself and reuses the options and the world function of `TestKV`.
-It clears `FAULTLINE_SEED_LIST`, because faultline stops with an error when both variables are set.
+`faultline.RunSeeds` runs only the seeds listed after the world function, here the one that failed.
+The test reuses the options and the world function of `TestKV`. `RunSeeds` ignores
+`Options.Seeds`, so the test runs one seed, not 50. It also ignores `FAULTLINE_SEED` and the other
+variables that choose seeds.
 
 Run it:
 
@@ -493,12 +494,17 @@ go test -run '^TestKVSeed287372ab$' .
 ```
 
 ```text
-ok  	example.com/kv	0.721s
+ok  	example.com/kv	0.316s
 ```
 
 With the fixed code, the seed no longer produces the run that failed, because the code changed. If
 the bug comes back, the test catches it: with the old `Boot` method, it fails with the original
-failure at 5.873034010s.
+failure at 5.873034010s. Its replay command then selects the seed's subtest with `-run`, since
+`RunSeeds` ignores `FAULTLINE_SEED`:
+
+```text
+replay:    go test -v -run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' example.com/kv
+```
 
 ## Next steps
 

@@ -53,6 +53,26 @@ func ExampleRun() {
 	_ = TestPing
 }
 
+// Seed 0x0fa36865fb584320 of TestPing failed, and the bug is fixed. TestPingSeed0fa36865 keeps
+// that seed as a regression test: it runs only that seed, with the options and the world function
+// of TestPing, and fails again if the bug comes back. Like ExampleRun, this example compiles the
+// test but does not run it.
+func ExampleRunSeeds() {
+	pingOptions := faultline.Options{Seeds: 50}
+	// pingWorld builds one world, as in the example of Run.
+	pingWorld := func(w *faultline.World) {
+		// ...
+	}
+
+	TestPing := func(t *testing.T) {
+		faultline.Run(t, pingOptions, pingWorld)
+	}
+	TestPingSeed0fa36865 := func(t *testing.T) {
+		faultline.RunSeeds(t, pingOptions, pingWorld, 0x0fa36865fb584320)
+	}
+	_, _ = TestPing, TestPingSeed0fa36865
+}
+
 // The seed list of a test depends only on its name, so the subtests of TestKV are the same on
 // every machine. This prints the names of its first three seed subtests.
 func ExampleDeriveSeed() {

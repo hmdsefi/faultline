@@ -266,6 +266,126 @@ func TestResolveEffectiveOptions(t *testing.T) {
 	}
 }
 
+// resolveSeeds resolves a RunSeeds call with seeds in TestScenario. Drawing an explore base fails
+// the test: RunSeeds ignores FAULTLINE_EXPLORE (API-111).
+func resolveSeeds(t *testing.T, opts Options, env map[string]string, short bool, seeds []uint64) (*runPlan, error) {
+	t.Helper()
+	explore := func() uint64 {
+		t.Error("RunSeeds drew an explore base")
+		return 7
+	}
+	return resolve(resolveInput{opts: opts, testName: "TestScenario", short: short, lookup: fakeEnv(env), exploreBase: explore, runSeeds: true, seeds: seeds})
+}
+
+// AT-API-55 (a), (b), (e); API-110 to API-112: RunSeeds runs exactly its seeds, in order, all of
+// them. Options.Seeds, Options.BaseSeed and -short do not change the list, and neither do the
+// seed-selection variables: one line names the ones that are set, in API-010 table order. Every
+// other variable applies as in Run.
+func TestResolveRunSeeds(t *testing.T) {
+	ignores := func(names string) []string {
+		return []string{"faultline: RunSeeds ignores " + names + "; it runs the seeds listed in the test"}
+	}
+	all := map[string]string{"FAULTLINE_SEED": "0x9", "FAULTLINE_SEEDS": "1", "FAULTLINE_BASE_SEED": "0x2a", "FAULTLINE_EXPLORE": "1", "FAULTLINE_SEED_LIST": "0x7,0x8"}
+	cases := []struct {
+		name  string
+		opts  Options
+		env   map[string]string
+		short bool
+		logs  []string
+	}{
+		{"no variable", Options{}, nil, false, nil},
+		{"FAULTLINE_SEED", Options{}, map[string]string{"FAULTLINE_SEED": "0x9"}, false, ignores("FAULTLINE_SEED")},
+		{"FAULTLINE_SEEDS", Options{}, map[string]string{"FAULTLINE_SEEDS": "1"}, false, ignores("FAULTLINE_SEEDS")},
+		{"FAULTLINE_BASE_SEED", Options{}, map[string]string{"FAULTLINE_BASE_SEED": "0x2a"}, false, ignores("FAULTLINE_BASE_SEED")},
+		{"FAULTLINE_EXPLORE=1", Options{}, map[string]string{"FAULTLINE_EXPLORE": "1"}, false, ignores("FAULTLINE_EXPLORE")},
+		{"FAULTLINE_EXPLORE=0", Options{}, map[string]string{"FAULTLINE_EXPLORE": "0"}, false, ignores("FAULTLINE_EXPLORE")},
+		{"FAULTLINE_SEED_LIST", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x7,0x8"}, false, ignores("FAULTLINE_SEED_LIST")},
+		// Run's setup error for this pair (API-011 row 1) does not apply.
+		{"FAULTLINE_SEED and FAULTLINE_SEED_LIST", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x7", "FAULTLINE_SEED": "0x9"}, false,
+			ignores("FAULTLINE_SEED and FAULTLINE_SEED_LIST")},
+		{"three", Options{}, map[string]string{"FAULTLINE_SEED_LIST": "0x7", "FAULTLINE_EXPLORE": "1", "FAULTLINE_SEED": "0x9"}, false,
+			ignores("FAULTLINE_SEED, FAULTLINE_EXPLORE, and FAULTLINE_SEED_LIST")},
+		{"all five", Options{}, all, false, ignores("FAULTLINE_SEED, FAULTLINE_SEEDS, FAULTLINE_BASE_SEED, FAULTLINE_EXPLORE, and FAULTLINE_SEED_LIST")},
+		{"empty values are unset", Options{}, map[string]string{"FAULTLINE_SEED": " ", "FAULTLINE_SEEDS": ""}, false, nil},
+		{"options and -short", Options{Seeds: -1, BaseSeed: 5}, nil, true, nil},
+		{"Options.Seeds above MaxSeeds", Options{Seeds: MaxSeeds + 1}, nil, false, nil},
+		{"Options.Seeds below the list", Options{Seeds: 1, BaseSeed: 5}, map[string]string{"FAULTLINE_SEEDS": "1"}, true, ignores("FAULTLINE_SEEDS")},
+		// The other parent-level lines follow, as in Run (API-017).
+		{"other lines", Options{}, map[string]string{"FAULTLINE_SEEDS": "3", "FAULTLINE_TRACE": "full", "FAULTLINE_ARTIFACTS": "off"}, false,
+			append(ignores("FAULTLINE_SEEDS"), "faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them")},
+	}
+	for _, c := range cases {
+		p, err := resolveSeeds(t, c.opts, c.env, c.short, []uint64{3, 2, 1})
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if !slices.Equal(p.seeds, []uint64{3, 2, 1}) || p.seedSource != "code" || !slices.Equal(p.logs, c.logs) {
+			t.Errorf("%s: seeds %x source %s logs %q\nwant 3 2 1, code, %q", c.name, p.seeds, p.seedSource, p.logs, c.logs)
+		}
+		if o := p.opts; o.Seeds != 3 || o.BaseSeed != 0 || !o.KeepGoing {
+			t.Errorf("%s: effective Seeds %d, BaseSeed %d, KeepGoing %v; want 3, 0, true", c.name, o.Seeds, o.BaseSeed, o.KeepGoing)
+		}
+	}
+
+	// The list is a copy: the caller may reuse its slice.
+	seeds := []uint64{3, 2, 1}
+	p, err := resolveSeeds(t, Options{}, nil, false, seeds)
+	seeds[0] = 9
+	if err != nil || p.seeds[0] != 3 {
+		t.Errorf("a change to the caller's slice changed the seed list: %v %v", p, err)
+	}
+
+	// -short does not cap the list, even above ShortSeeds (API-110).
+	long := []uint64{7, 6, 5, 4, 3, 2, 1}
+	if p, err := resolveSeeds(t, Options{Seeds: 1}, nil, true, long); err != nil {
+		t.Errorf("-short with %d seeds: %v", len(long), err)
+	} else if !slices.Equal(p.seeds, long) || len(p.logs) != 0 {
+		t.Errorf("-short with %d seeds: seeds %x, logs %q; want %x and no line", len(long), p.seeds, p.logs, long)
+	}
+
+	// Every other variable works as in Run (API-112).
+	p, err = resolveSeeds(t, Options{}, map[string]string{"FAULTLINE_CHECK_DETERMINISM": "1", "FAULTLINE_TRACE": "full"}, false, []uint64{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := p.opts; !o.CheckDeterminism || !p.envCheck || o.Trace.Level != kernel.TraceFull || !p.passArtifacts {
+		t.Errorf("FAULTLINE_CHECK_DETERMINISM=1 and FAULTLINE_TRACE=full: %+v, check from the environment %v, pass artifacts %v", o, p.envCheck, p.passArtifacts)
+	}
+}
+
+// AT-API-55 (c), (d); API-111, API-113, §7.1: RunSeeds still validates the seed-selection
+// variables, and rejects an empty list and a seed listed twice, after the variables and the options.
+func TestResolveRunSeedsErrors(t *testing.T) {
+	pinned := []uint64{3, 2, 1}
+	const twice = "faultline: RunSeeds: seed 0x%016x is listed twice; list each seed once"
+	for _, c := range []struct {
+		opts  Options
+		env   map[string]string
+		seeds []uint64
+		want  string
+	}{
+		{Options{}, map[string]string{"FAULTLINE_SEED": "0xZZ"}, pinned, `faultline: invalid FAULTLINE_SEED value "0xZZ": want a decimal or 0x-prefixed hexadecimal uint64`},
+		{Options{}, map[string]string{"FAULTLINE_SEEDS": "0"}, pinned, `faultline: invalid FAULTLINE_SEEDS value "0": want a decimal integer from 1 to 1000000`},
+		{Options{}, map[string]string{"FAULTLINE_BASE_SEED": "x"}, pinned, `faultline: invalid FAULTLINE_BASE_SEED value "x": want a decimal or 0x-prefixed hexadecimal uint64`},
+		{Options{}, map[string]string{"FAULTLINE_EXPLORE": "yes"}, pinned, `faultline: invalid FAULTLINE_EXPLORE value "yes": want 0 or 1`},
+		{Options{}, map[string]string{"FAULTLINE_SEED_LIST": "1,,0xZZ"}, pinned, `faultline: invalid FAULTLINE_SEED_LIST entry 2 "0xZZ" on line 1: want decimal or 0x-prefixed hexadecimal uint64 seeds separated by commas or white space`},
+		{Options{}, nil, nil, "faultline: RunSeeds: no seeds; list at least one seed after body"},
+		{Options{}, nil, []uint64{}, "faultline: RunSeeds: no seeds; list at least one seed after body"},
+		{Options{}, nil, []uint64{1, 2, 2, 1}, fmt.Sprintf(twice, 2)},
+		{Options{}, nil, []uint64{1, 2, 1, 2}, fmt.Sprintf(twice, 1)},
+		{Options{}, nil, []uint64{0, 0}, fmt.Sprintf(twice, 0)},
+		// A variable, then an option, then the list (API-113).
+		{Options{Duration: -time.Second}, map[string]string{"FAULTLINE_TRACE": "x"}, nil, `faultline: invalid FAULTLINE_TRACE value "x": want hash or full`},
+		{Options{Duration: -time.Second}, nil, []uint64{1, 1}, "faultline: Options.Duration is -1s; want 0 (default 1m0s) or more"},
+	} {
+		_, err := resolveSeeds(t, c.opts, c.env, false, c.seeds)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("opts %+v env %v seeds %x: err = %v\nwant %s", c.opts, c.env, c.seeds, err, c.want)
+		}
+	}
+}
+
 // AT-API-05, AT-API-41 and §7.1 at the unit level.
 func TestResolveErrors(t *testing.T) {
 	dir := t.TempDir()

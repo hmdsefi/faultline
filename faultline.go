@@ -71,10 +71,40 @@ type seedResult struct {
 // An invalid value fails t before any seed runs.
 func Run(t *testing.T, opts Options, body func(w *World)) {
 	t.Helper()
+	run(t, opts, body, false, nil)
+}
+
+// RunSeeds is Run for a fixed list of seeds, such as a regression test for a seed that failed.
+// It runs exactly the listed seeds, in the order given, each in its own subtest named
+// "seed=0x%016x". It runs all of them, even after one fails. No seeds, or a seed listed twice,
+// fails t before any seed runs. As with Run, call it from the test goroutine of t, and call Run
+// or RunSeeds at most once per t.
+//
+// RunSeeds ignores Options.Seeds and Options.BaseSeed, and the variables that choose seeds:
+// FAULTLINE_SEED, FAULTLINE_SEEDS, FAULTLINE_BASE_SEED, FAULTLINE_EXPLORE and
+// FAULTLINE_SEED_LIST. It logs the ones that are set, and an invalid value still fails t. Every
+// other option and variable works as in Run.
+//
+// The replay command of a failing seed selects the seed's subtest with -run instead of setting
+// FAULTLINE_SEED:
+//
+//	go test -v -run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' example.com/kv
+//
+// Like Run, RunSeeds seeds crypto/rand for every run, which Go does not allow in a parallel
+// test. A test that calls RunSeeds can call t.Parallel only with Options.NoCryptoSeed set.
+func RunSeeds(t *testing.T, opts Options, body func(w *World), seeds ...uint64) {
+	t.Helper()
+	run(t, opts, body, true, seeds)
+}
+
+// run is Run, or RunSeeds when runSeeds is set; then seeds is the seed list (API-110). The seed
+// list is the only input that differs.
+func run(t *testing.T, opts Options, body func(w *World), runSeeds bool, seeds []uint64) {
+	t.Helper()
 	lookup := onceLookup(os.LookupEnv) // resultsPath and resolve share it: one read per variable (API-010)
-	r := &runner{t: t, body: body, build: readBuild(), results: resultsPath(lookup)}
+	r := &runner{t: t, body: body, build: readBuild(), results: resultsPath(lookup), runSeeds: runSeeds}
 	if body == nil {
-		r.parentSetupError("faultline: Run: body is nil")
+		r.parentSetupError("faultline: " + r.caller() + ": body is nil")
 		return
 	}
 	runMu.Lock()
@@ -90,7 +120,7 @@ func Run(t *testing.T, opts Options, body func(w *World)) {
 		delete(runActive, t)
 		runMu.Unlock()
 	})
-	p, err := resolve(resolveInput{opts: opts, testName: t.Name(), short: testing.Short(), lookup: lookup, exploreBase: exploreBase})
+	p, err := resolve(resolveInput{opts: opts, testName: t.Name(), short: testing.Short(), lookup: lookup, exploreBase: exploreBase, runSeeds: runSeeds, seeds: seeds})
 	if err != nil {
 		r.parentSetupError(err.Error())
 		return
@@ -192,10 +222,10 @@ func hex16(v uint64) string { return fmt.Sprintf("0x%016x", v) }
 
 // replay returns report.replay for seed, whose outcome is f (nil for a pass). The command of a
 // determinism failure that only FAULTLINE_CHECK_DETERMINISM looked for sets that variable too
-// (API-080).
+// (API-080), and the command for a seed of RunSeeds selects its subtest (API-114).
 func (r *runner) replay(seed uint64, f *failure) artifact.Replay {
 	check := r.plan.envCheck && f != nil && f.determinism != nil && f.determinism.context == "check_determinism"
-	return buildReplay(r.build, r.cwd, r.t.Name(), seed, r.plan.env.schedulePath, check)
+	return buildReplay(r.build, r.cwd, r.t.Name(), seed, r.plan.env.schedulePath, check, r.plan.seedSource == "code")
 }
 
 // artifactRoot returns the artifact root, or "" when artifacts are off (API-074).

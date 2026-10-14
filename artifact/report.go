@@ -21,7 +21,7 @@ type Report struct {
 	Test        string     `json:"test"`
 	Subtest     string     `json:"subtest"`
 	Seed        string     `json:"seed"`
-	SeedSource  string     `json:"seed_source"`           // "derived", "env", "list"
+	SeedSource  string     `json:"seed_source"`           // "derived", "env", "list", "code"
 	BaseSeed    string     `json:"base_seed,omitempty"`   // derived only
 	BaseSource  string     `json:"base_source,omitempty"` // "test_name", "options", "env", "explore"
 	SeedIndex   int        `json:"seed_index"`
@@ -107,7 +107,7 @@ type RecordDiff struct {
 type Replay struct {
 	Command    string            `json:"command"`     // a shell command line
 	Env        map[string]string `json:"env"`         // the variables Command sets; encoded with sorted keys
-	Run        string            `json:"run"`         // the -run pattern that selects the test
+	Run        string            `json:"run"`         // the -run pattern that selects the test, or the seed's subtest
 	PackageArg string            `json:"package_arg"` // the package relative to Dir: "." or "./<path>"
 	// Dir is the directory PackageArg is relative to: the module root, or for a package outside a
 	// module, the package directory; "" if unknown. Command names a module's package by import

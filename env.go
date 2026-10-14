@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -84,8 +85,8 @@ func resultsPath(lookup lookupFunc) string {
 	return abs
 }
 
-// readEnv reads and validates every FAULTLINE_* variable once (API-010, API-011 row 1). The
-// first invalid variable in table order is the error.
+// readEnv reads and validates every FAULTLINE_* variable once (API-010). The first invalid
+// variable in table order is the error.
 func readEnv(lookup lookupFunc) (*environment, error) {
 	e := &environment{set: map[string]bool{}}
 	for _, name := range envOrder {
@@ -97,9 +98,6 @@ func readEnv(lookup lookupFunc) (*environment, error) {
 		if err := e.parse(name, v); err != nil {
 			return nil, err
 		}
-	}
-	if e.set[envSeed] && e.set[envSeedList] {
-		return nil, errors.New("faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one")
 	}
 	return e, nil
 }
@@ -395,7 +393,7 @@ func countOf[N int | uint64](n N, noun string) string {
 type runPlan struct {
 	opts          Options  // effective options: World.Options()
 	seeds         []uint64 // may share its array with env.seedList
-	seedSource    string   // report seed_source: "derived", "env", "list"
+	seedSource    string   // report seed_source: "derived", "env", "list", "code" (RunSeeds)
 	base          uint64   // derived lists only
 	baseSource    string   // report base_source: "test_name", "options", "env", "explore"
 	env           *environment
@@ -404,22 +402,31 @@ type runPlan struct {
 	logs          []string // parent-level log lines (API-017), in order
 }
 
-// resolveInput is what resolve needs from Run; unit tests fake the environment and the explore base.
+// resolveInput is what resolve needs from Run and RunSeeds; unit tests fake the environment and
+// the explore base.
 type resolveInput struct {
 	opts        Options
 	testName    string
 	short       bool
 	lookup      lookupFunc
 	exploreBase func() uint64
+	runSeeds    bool     // RunSeeds: seeds is the seed list (API-110)
+	seeds       []uint64 // the seeds RunSeeds lists
 }
 
 // resolve applies defaults, the environment, validation and seed derivation (API-001 to
-// API-017). Its error text is the setup error message.
+// API-017), or for RunSeeds the listed seeds (API-110 to API-113). Its error text is the setup
+// error message.
 func resolve(in resolveInput) (*runPlan, error) {
 	o := applyDefaults(in.opts)
 	env, err := readEnv(in.lookup)
 	if err != nil {
 		return nil, err
+	}
+	if in.runSeeds {
+		o.Seeds = 0 // RunSeeds ignores Options.Seeds, so it is not validated (API-110)
+	} else if env.set[envSeed] && env.set[envSeedList] {
+		return nil, errors.New("faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one") // API-011 row 1
 	}
 	if err := validateOptions(o); err != nil {
 		return nil, err
@@ -434,6 +441,15 @@ func resolve(in resolveInput) (*runPlan, error) {
 	}
 	var shortLog, exploreLog string
 	switch {
+	case in.runSeeds:
+		seeds, err := listedSeeds(in.seeds)
+		if err != nil {
+			return nil, err
+		}
+		p.seeds, p.seedSource = seeds, "code"
+		if names := setNames(env, envSeed, envSeeds, envBaseSeed, envExplore, envSeedList); names != "" {
+			p.logs = append(p.logs, "faultline: RunSeeds ignores "+names+"; it runs the seeds listed in the test")
+		}
 	case env.set[envSeedList]:
 		ignore(envSeedList, envSeeds, envBaseSeed, envExplore)
 		p.seeds, p.seedSource = env.seedList, "list"
@@ -508,7 +524,7 @@ func resolve(in resolveInput) (*runPlan, error) {
 	}
 	p.envCheck = env.checkDeterminism && !o.CheckDeterminism
 	o.CheckDeterminism = o.CheckDeterminism || env.checkDeterminism
-	o.KeepGoing = o.KeepGoing || env.set[envSeedList]
+	o.KeepGoing = o.KeepGoing || env.set[envSeedList] || in.runSeeds
 	o.Seeds = len(p.seeds)
 	o.BaseSeed = 0
 	if p.seedSource == "derived" {
@@ -516,4 +532,40 @@ func resolve(in resolveInput) (*runPlan, error) {
 	}
 	p.opts = o
 	return p, nil
+}
+
+// listedSeeds returns a copy of the seeds a RunSeeds call lists, or its setup error: no seeds, or
+// the first seed that repeats an earlier one (API-113).
+func listedSeeds(seeds []uint64) ([]uint64, error) {
+	if len(seeds) == 0 {
+		return nil, errors.New("faultline: RunSeeds: no seeds; list at least one seed after body")
+	}
+	seen := make(map[uint64]bool, len(seeds)) // lookups only
+	for _, s := range seeds {
+		if seen[s] {
+			return nil, fmt.Errorf("faultline: RunSeeds: seed 0x%016x is listed twice; list each seed once", s)
+		}
+		seen[s] = true
+	}
+	return slices.Clone(seeds), nil
+}
+
+// setNames returns the names that are set in env, in the order given, joined as a list in prose:
+// "A", "A and B", or "A, B, and C". It returns "" when none is set.
+func setNames(env *environment, names ...string) string {
+	var set []string
+	for _, n := range names {
+		if env.set[n] {
+			set = append(set, n)
+		}
+	}
+	switch len(set) {
+	case 0:
+		return ""
+	case 1:
+		return set[0]
+	case 2:
+		return set[0] + " and " + set[1]
+	}
+	return strings.Join(set[:len(set)-1], ", ") + ", and " + set[len(set)-1]
 }

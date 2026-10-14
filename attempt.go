@@ -23,13 +23,23 @@ import (
 
 // runner is the state of one Run call.
 type runner struct {
-	t       *testing.T
-	body    func(w *World)
-	plan    *runPlan
-	build   buildInfo
-	cwd     string
-	results string
-	cur     *World // World of the attempt in progress, for Goexit handling (API-101)
+	t        *testing.T
+	body     func(w *World)
+	plan     *runPlan
+	build    buildInfo
+	cwd      string
+	results  string
+	cur      *World // World of the attempt in progress, for Goexit handling (API-101)
+	runSeeds bool   // the test called RunSeeds, not Run (API-113)
+}
+
+// caller returns the name of the function the test called, Run or RunSeeds, for the setup errors
+// that name it (API-113, §7.1).
+func (r *runner) caller() string {
+	if r.runSeeds {
+		return "RunSeeds"
+	}
+	return "Run"
 }
 
 // failure is the classified failure of one attempt (API-061, API-066).
@@ -160,7 +170,7 @@ func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfi
 		if v := recover(); v != nil {
 			w = nil
 			if stage == "crypto" {
-				setupErr = fmt.Sprintf("faultline: crypto seeding: %v (Run cannot be used in a parallel test; remove t.Parallel or set Options.NoCryptoSeed)", v)
+				setupErr = fmt.Sprintf("faultline: crypto seeding: %v (%s cannot be used in a parallel test; remove t.Parallel or set Options.NoCryptoSeed)", v, r.caller())
 			} else {
 				setupErr = fmt.Sprintf("faultline: world construction for seed 0x%016x: %v", seed, v)
 			}

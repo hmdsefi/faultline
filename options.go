@@ -47,16 +47,17 @@ const (
 	MaxSeeds = 1_000_000
 )
 
-// Options configures Run. The zero value is valid: 20 seeds of 60 s virtual time each,
-// default network, default disks, hash-only tracing.
+// Options configures Run and RunSeeds. The zero value is valid: 20 seeds of 60 s virtual time
+// each, default network, default disks, hash-only tracing.
 type Options struct {
 	// Seeds is the number of seeds to run. 0 means DefaultSeeds. Negative or more than
 	// MaxSeeds is a setup error.
 	// FAULTLINE_SEEDS overrides it; FAULTLINE_SEED and FAULTLINE_SEED_LIST replace the seed list.
+	// RunSeeds ignores it.
 	Seeds int
 
 	// BaseSeed is the base from which the seed list is derived. 0 means FNV-1a 64 of t.Name().
-	// FAULTLINE_BASE_SEED and FAULTLINE_EXPLORE override it.
+	// FAULTLINE_BASE_SEED and FAULTLINE_EXPLORE override it. RunSeeds ignores it.
 	BaseSeed uint64
 
 	// Duration is the virtual length of each run. 0 means DefaultDuration. Negative is a setup error.
@@ -88,7 +89,7 @@ type Options struct {
 	CheckDeterminism bool
 
 	// KeepGoing runs all seeds even after one fails. Without it, Run stops starting new
-	// seeds after the first failing seed. Forced on by FAULTLINE_SEED_LIST.
+	// seeds after the first failing seed. Forced on by FAULTLINE_SEED_LIST and by RunSeeds.
 	KeepGoing bool
 
 	// NoCryptoSeed stops Run from seeding crypto/rand with cryptotest.SetGlobalRandom. crypto/rand

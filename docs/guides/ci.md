@@ -66,7 +66,7 @@ The log line names the base seed and the command that runs the same set again:
 ```
 
 `go test` prints a test's log lines when the test fails, or with `-v`. You do not need the base seed
-to debug a failure: the replay command of a failing seed sets `FAULTLINE_SEED` and works on its own.
+to debug a failure: the replay command of a failing seed works on its own.
 When a nightly seed finds a bug, fix it and pin the seed as a regression test, as [Get
 started](../getting-started.md#pin-the-seed) shows.
 

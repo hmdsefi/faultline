@@ -139,10 +139,10 @@ The top-level object has these fields, in this order:
 | `faultline_report` | integer | format version, `1` |
 | `status` | string | `fail`, or `pass` for an artifact written under `FAULTLINE_TRACE=full` |
 | `package` | string | import path of the test package |
-| `test` | string | name of the test that called `Run` |
+| `test` | string | name of the test that called `Run` or `RunSeeds` |
 | `subtest` | string | the seed's subtest, such as `TestKV/seed=0x287372ab06f1482e` |
 | `seed` | string | `0x` and 16 hex digits |
-| `seed_source` | string | `derived`, `env` (`FAULTLINE_SEED`) or `list` (`FAULTLINE_SEED_LIST`) |
+| `seed_source` | string | `derived`, `env` (`FAULTLINE_SEED`), `list` (`FAULTLINE_SEED_LIST`) or `code` (`RunSeeds`) |
 | `base_seed`, `base_source` | string | for derived seeds: the base, and where it came from (`test_name`, `options`, `env`, `explore`) |
 | `seed_index` | integer | position of the seed in the seed list |
 | `failure` | object | why the seed failed; absent when `status` is `pass` |
@@ -189,7 +189,9 @@ The kinds mean:
 ### replay, versions and options
 
 `replay.command` is the shell command that replays the seed, as the console prints it. `replay.env`
-holds the variables it sets, and `replay.run` its `-run` pattern. To run the test another way,
+holds the variables it sets, and `replay.run` its `-run` pattern. For a seed of `RunSeeds`, the
+pattern selects the seed's subtest, and `replay.env` has no `FAULTLINE_SEED`. It is `{}` unless the
+command sets `FAULTLINE_SCHEDULE` or `FAULTLINE_CHECK_DETERMINISM`. To run the test another way,
 `replay.dir` is the module root, `replay.package_arg` the package argument relative to it, and
 `replay.package_dir` the test package's directory.
 

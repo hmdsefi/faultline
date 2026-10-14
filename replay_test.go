@@ -66,7 +66,7 @@ func TestBuildReplay(t *testing.T) {
 			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "", "^TestRaft$"},
 	}
 	for _, c := range cases {
-		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule, false)
+		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule, false, false)
 		if got.Command != c.command || got.PackageArg != c.pkgArg || got.Dir != c.dir || got.Run != c.run || got.PackageDir != c.cwd {
 			t.Errorf("buildReplay(%q, %q, %q, %q, %q) = %+v\nwant command %s, package_arg %q, dir %q", c.importPath, c.modulePath, c.cwd, c.test, c.schedule, got, c.command, c.pkgArg, c.dir)
 		}
@@ -92,18 +92,57 @@ func TestBuildReplay(t *testing.T) {
 		{"a b", false, "FAULTLINE_SEED=0x0000000000000001 go test -v -tags 'a b' -run '^TestKV$' github.com/acme/kv"},
 	} {
 		b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", tags: c.tags, race: c.race}
-		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "", false); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
+		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "", false, false); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
 			t.Errorf("buildReplay(tags %q, race %v) = %+v\nwant command %s", c.tags, c.race, got, c.command)
 		}
 	}
 	// A determinism failure that only FAULTLINE_CHECK_DETERMINISM looked for: the variable follows
 	// FAULTLINE_SCHEDULE in the command and is in env, so the replay runs the check attempt.
 	b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", race: true}
-	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true)
+	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true, false)
 	want := "FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/s.json FAULTLINE_CHECK_DETERMINISM=1 go test -v -race -run '^TestKV$' github.com/acme/kv"
 	env := map[string]string{"FAULTLINE_SEED": "0x0000000000000001", "FAULTLINE_SCHEDULE": "/s.json", "FAULTLINE_CHECK_DETERMINISM": "1"}
 	if got.Command != want || !maps.Equal(got.Env, env) {
 		t.Errorf("buildReplay(check) = %+v\nwant command %s and env %v", got, want, env)
+	}
+}
+
+// AT-API-60; API-114: the replay command of a RunSeeds seed has no FAULTLINE_SEED, and its -run
+// pattern selects the seed subtest. Everything else is built as for Run.
+func TestBuildReplayRunSeeds(t *testing.T) {
+	kv := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme"}
+	cases := []struct {
+		b                   buildInfo
+		test                string
+		seed                uint64
+		schedule            string
+		check               bool
+		command, run, dir   string
+		env                 map[string]string
+		pkgArg, packagePath string
+	}{
+		{kv, "TestKV", 0x5e1f9a2c4b7d3e80, "", false,
+			"go test -v -run '^TestKV$/^seed=0x5e1f9a2c4b7d3e80$' github.com/acme/kv", "^TestKV$/^seed=0x5e1f9a2c4b7d3e80$", "/src/acme",
+			map[string]string{}, "./kv", "/src/acme/kv"},
+		{buildInfo{importPath: "github.com/acme", modulePath: "github.com/acme"}, "TestKV/raft_3_nodes", 1, "", false,
+			"go test -v -run '^TestKV$/^raft_3_nodes$/^seed=0x0000000000000001$' github.com/acme", "^TestKV$/^raft_3_nodes$/^seed=0x0000000000000001$", "/src/acme/kv",
+			map[string]string{}, ".", "/src/acme/kv"},
+		{kv, "TestKV", 1, "/tmp/my sched.json", true,
+			"FAULTLINE_SCHEDULE='/tmp/my sched.json' FAULTLINE_CHECK_DETERMINISM=1 go test -v -run '^TestKV$/^seed=0x0000000000000001$' github.com/acme/kv", "^TestKV$/^seed=0x0000000000000001$", "/src/acme",
+			map[string]string{"FAULTLINE_SCHEDULE": "/tmp/my sched.json", "FAULTLINE_CHECK_DETERMINISM": "1"}, "./kv", "/src/acme/kv"},
+		{buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", tags: "sim,x", race: true}, "TestKV", 1, "", false,
+			"go test -v -tags sim,x -race -run '^TestKV$/^seed=0x0000000000000001$' github.com/acme/kv", "^TestKV$/^seed=0x0000000000000001$", "/src/acme",
+			map[string]string{}, "./kv", "/src/acme/kv"},
+	}
+	for _, c := range cases {
+		got := buildReplay(c.b, "/src/acme/kv", c.test, c.seed, c.schedule, c.check, true)
+		if got.Command != c.command || got.Run != c.run || got.Dir != c.dir || got.PackageArg != c.pkgArg || got.PackageDir != c.packagePath {
+			t.Errorf("buildReplay(%q, %q, RunSeeds) = %+v\nwant command %s, run %s", c.test, c.schedule, got, c.command, c.run)
+		}
+		// env is {} in report.json, not null, when the command sets no variable.
+		if got.Env == nil || !maps.Equal(got.Env, c.env) {
+			t.Errorf("buildReplay(%q, %q, RunSeeds) env = %#v, want %v", c.test, c.schedule, got.Env, c.env)
+		}
 	}
 }
 
