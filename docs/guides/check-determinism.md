@@ -125,16 +125,17 @@ points at a log line. A timer that fires at different times points at the code t
 ## Parallel tests and crypto/rand
 
 faultline seeds `crypto/rand` for every run, through Go's `testing/cryptotest`. Go does not allow
-that in a parallel test, so a test that calls `t.Parallel` and then `faultline.Run` fails its seeds
-with this setup error:
+that in a parallel test, so a test that calls `t.Parallel` and then `faultline.Run` or
+`faultline.RunSeeds` fails its seeds with this setup error:
 
 ```text
         faultline: crypto seeding: testing: test using t.Setenv, t.Chdir, or cryptotest.SetGlobalRandom can not use t.Parallel (Run cannot be used in a parallel test; remove t.Parallel or set Options.NoCryptoSeed)
 ```
 
-Remove `t.Parallel` from tests that call `faultline.Run`. `Options.NoCryptoSeed` turns the seeding
-off instead, and allows a parallel test. Then `crypto/rand` in the code under test is no longer
-deterministic, and the check reports it when a read changes the trace.
+With `faultline.RunSeeds`, the message names `RunSeeds` instead of `Run`. Remove `t.Parallel` from
+tests that call either one. `Options.NoCryptoSeed` turns the seeding off instead, and allows a
+parallel test. Then `crypto/rand` in the code under test is no longer deterministic, and the check
+reports it when a read changes the trace.
 
 ## Verify it works
 

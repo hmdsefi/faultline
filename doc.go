@@ -10,8 +10,10 @@
 // client pings a server every 100 ms while a fault planner crashes the server at random times.
 // The final check asks for pongs after the faults stop:
 //
+//	var pingOptions = faultline.Options{Seeds: 50}
+//
 //	func TestPing(t *testing.T) {
-//		faultline.Run(t, faultline.Options{Seeds: 50}, pingWorld)
+//		faultline.Run(t, pingOptions, pingWorld)
 //	}
 //
 //	// pingWorld builds one world. Run calls it once for every run.
@@ -63,12 +65,11 @@
 // same run, record for record. That holds as long as the faultline version, the Go minor version,
 // the code and the options stay the same.
 //
-// To keep a seed as a regression test, set FAULTLINE_SEED in a test of its own:
+// To keep a seed as a regression test, run it with RunSeeds in a test of its own. RunSeeds runs
+// only the seeds it lists. The following test gives it the options and world function of TestPing:
 //
 //	func TestPingSeed0fa36865(t *testing.T) {
-//		t.Setenv("FAULTLINE_SEED", "0x0fa36865fb584320")
-//		t.Setenv("FAULTLINE_SEED_LIST", "") // FAULTLINE_SEED and FAULTLINE_SEED_LIST cannot both be set
-//		faultline.Run(t, faultline.Options{Seeds: 50}, pingWorld)
+//		faultline.RunSeeds(t, pingOptions, pingWorld, 0x0fa36865fb584320)
 //	}
 //
 // Run's documentation lists the environment variables that choose seeds, replay a schedule and

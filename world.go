@@ -91,10 +91,10 @@ func (w *World) T() testing.TB { return w.st }
 // Seed returns the seed of this world.
 func (w *World) Seed() uint64 { return w.seed }
 
-// Options returns the effective options of this Run call: defaults applied, environment
-// overrides applied, Seeds set to the length of the seed list, BaseSeed set to the resolved
-// base (0 when the list came from FAULTLINE_SEED or FAULTLINE_SEED_LIST), Trace set to the
-// config of the seed's first run. It returns the same value in every run.
+// Options returns the effective options of this Run or RunSeeds call: defaults applied,
+// environment overrides applied, Seeds set to the length of the seed list, BaseSeed set to the
+// resolved base (0 when the list came from FAULTLINE_SEED, FAULTLINE_SEED_LIST or RunSeeds),
+// Trace set to the config of the seed's first run. It returns the same value in every run.
 func (w *World) Options() Options { return w.r.plan.opts }
 
 func (w *World) checkNotEnded(method string) {

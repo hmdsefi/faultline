@@ -180,8 +180,10 @@ func runPattern(name string) string {
 // schedulePath is the absolute FAULTLINE_SCHEDULE path, or ""; check adds
 // FAULTLINE_CHECK_DETERMINISM=1, so the replay runs the check attempt again. The command names a
 // package of the module by its import path, so it works from any directory in the module, and
-// passes -v, so go test prints the output of a seed that passes.
-func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check bool) artifact.Replay {
+// passes -v, so go test prints the output of a seed that passes. For a seed of RunSeeds
+// (runSeeds), which ignores FAULTLINE_SEED, the -run pattern names the seed subtest instead
+// (API-114).
+func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check, runSeeds bool) artifact.Replay {
 	importPath, modulePath := b.importPath, b.modulePath
 	pkg := "." // the package argument of command
 	var pkgArg, dir string
@@ -197,19 +199,25 @@ func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath st
 	default:
 		pkgArg, dir = ".", cwd
 	}
-	run := runPattern(testName)
 	seedText := fmt.Sprintf("0x%016x", seed)
-	env := map[string]string{"FAULTLINE_SEED": seedText}
-	command := "FAULTLINE_SEED=" + seedText
+	env := map[string]string{} // {} in report.json when the command sets no variable
+	var vars []string          // the command's variables, in order
+	run := runPattern(testName)
+	if runSeeds {
+		run = runPattern(testName + "/seed=" + seedText)
+	} else {
+		env[envSeed] = seedText
+		vars = append(vars, envSeed+"="+seedText)
+	}
 	if schedulePath != "" {
-		env["FAULTLINE_SCHEDULE"] = schedulePath
-		command += " FAULTLINE_SCHEDULE=" + shellQuote(schedulePath)
+		env[envSchedule] = schedulePath
+		vars = append(vars, envSchedule+"="+shellQuote(schedulePath))
 	}
 	if check {
 		env[envCheckDeterminism] = "1"
-		command += " " + envCheckDeterminism + "=1"
+		vars = append(vars, envCheckDeterminism+"=1")
 	}
-	command += " go test -v"
+	command := strings.Join(append(vars, "go test -v"), " ")
 	if b.tags != "" {
 		command += " -tags " + shellQuote(b.tags)
 	}

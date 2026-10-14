@@ -118,6 +118,14 @@ The run fails at the same virtual time and event, with the same trace hash. Only
 warning appears, because the build flags changed. A breakpoint does not change the run: virtual time
 moves only when the event loop runs the next event.
 
+For a pinned test that calls `RunSeeds` ([Keep the seed as a regression
+test](#keep-the-seed-as-a-regression-test)), pass the replay command's `-run` pattern instead.
+`FAULTLINE_SEED` changes nothing there:
+
+```sh
+./kv.test -test.run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' -test.v
+```
+
 ## Get the full trace of a passing seed
 
 A passing seed writes no artifact by default. Set `FAULTLINE_TRACE=full` to get one, for example to
@@ -146,9 +154,20 @@ seed's.
 ## Keep the seed as a regression test
 
 Once the fix passes the replay, pin the seed in a test of its own, as [Get
-started](../getting-started.md#pin-the-seed) shows. The test sets `FAULTLINE_SEED` with `t.Setenv`
-and clears `FAULTLINE_SEED_LIST`. To pin the faults as well, copy `schedule.json` into `testdata/`
-and set `FAULTLINE_SCHEDULE` to it in the same test.
+started](../getting-started.md#pin-the-seed) shows. The test calls `faultline.RunSeeds` with the
+options and the world function of the failing test, and the seed. `RunSeeds` needs faultline v0.1.1
+or newer. To pin the faults as well, copy `schedule.json` into `testdata/` and set
+`FAULTLINE_SCHEDULE` to it with `t.Setenv` in the same test.
+
+`RunSeeds` ignores `FAULTLINE_SEED`, so a failing pinned seed prints a replay command that selects
+its subtest by name instead:
+
+```text
+replay:    go test -v -run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' example.com/kv
+```
+
+Like the [subtest form](#replay-one-seed-by-its-subtest-name), it does not compare the run with the
+seed's previous artifact, so it prints no replay warnings.
 
 ## Narrow a failure by editing its schedule
 

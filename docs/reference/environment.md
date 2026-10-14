@@ -66,6 +66,16 @@ variables change the list. The first one of these rules that applies decides it:
 
 A variable that a higher rule overrides is ignored, and `Run` logs that it ignored it.
 
+`faultline.RunSeeds`, in faultline v0.1.1 and newer, runs the seeds listed in the test instead.
+None of these five variables changes its list, and `-short` does not shorten it. Setting both
+`FAULTLINE_SEED` and `FAULTLINE_SEED_LIST` is not an error there. `RunSeeds` still checks their
+values, so an invalid value is a setup error. When any of them is set, it logs one line that names
+them, such as this one:
+
+```text
+    pin_test.go:11: faultline: RunSeeds ignores FAULTLINE_SEED and FAULTLINE_SEEDS; it runs the seeds listed in the test
+```
+
 ### FAULTLINE_SEED
 
 `FAULTLINE_SEED=<seed>` runs that one seed. It is how you replay a failure: the replay command that
@@ -80,9 +90,12 @@ that passes in the replay keeps the failing artifact and says so:
     warning: the test binary differs from the one that recorded the previous artifact (code, dependencies or build flags changed)
 ```
 
-To pin a seed in a regression test, set `FAULTLINE_SEED` with `t.Setenv` and clear
-`FAULTLINE_SEED_LIST` the same way. [Use faultline with an AI coding agent](../ai-agents.md#protect)
-shows the test.
+To pin a seed in a regression test, list it in a call to `faultline.RunSeeds` instead. [Use
+faultline with an AI coding agent](../ai-agents.md#protect) shows the test.
+
+faultline v0.1.0 has no `RunSeeds`. There, the test sets `FAULTLINE_SEED` with `t.Setenv` before it
+calls `Run`. It also sets `FAULTLINE_SEED_LIST` to an empty string the same way, because `Run`
+rejects the two together.
 
 ### FAULTLINE_SEEDS
 
@@ -237,6 +250,9 @@ When a variable cannot turn an option off, `Run` logs it, for example:
 faultline: FAULTLINE_CHECK_DETERMINISM=0 does not turn off Options.CheckDeterminism; the determinism check still runs (set Options.CheckDeterminism to false to turn it off)
 ```
 
+`RunSeeds` ignores `Options.Seeds`, `Options.BaseSeed` and the five variables that choose seeds,
+and it runs every listed seed as if `Options.KeepGoing` were set.
+
 The `options` object of `report.json` records the effective values after the environment applied.
 
 ## Log lines
@@ -261,6 +277,9 @@ faultline: -short: running 5 of 50 seeds
 faultline: FAULTLINE_TRACE=full writes no artifacts while FAULTLINE_ARTIFACTS is off; unset one of them
 faultline: FAULTLINE_TRACE=hash does not lower Options.Trace.Level from kernel.TraceFull; runs still record full traces (set Options.Trace.Level to kernel.TraceHash to lower it)
 ```
+
+`RunSeeds` logs no seed list. It logs the line in [Choosing the seeds](#choosing-the-seeds) when a
+variable that chooses seeds is set.
 
 ## Next steps
 

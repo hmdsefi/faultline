@@ -112,16 +112,19 @@ These steps check every seed and keep the failing seed as a test.
    time is about twice as long, because every seed runs twice.
 
 8. Pin the seed in a regression test that uses the same options and world function (the function
-   passed to `faultline.Run`) as the failing test. The following test pins `0x287372ab06f1482e`:
+   passed to `faultline.Run`) as the failing test. `faultline.RunSeeds`, in faultline v0.1.1 and
+   newer, runs only the seeds it lists. The following test pins `0x287372ab06f1482e`:
 
    ```go
    // TestKVSeed287372ab runs the seed that lost an acknowledged put before the fix.
    func TestKVSeed287372ab(t *testing.T) {
-       t.Setenv("FAULTLINE_SEED", "0x287372ab06f1482e")
-       t.Setenv("FAULTLINE_SEED_LIST", "") // FAULTLINE_SEED_LIST and FAULTLINE_SEED cannot both be set
-       faultline.Run(t, kvOptions, kvWorld)
+       faultline.RunSeeds(t, kvOptions, kvWorld, 0x287372ab06f1482e)
    }
    ```
+
+   `RunSeeds` ignores `FAULTLINE_SEED` and the other variables that choose seeds, so the test runs
+   its seed under any environment. If it fails, its replay command selects the seed's subtest with
+   `-run` instead of setting `FAULTLINE_SEED`.
 
    The test does not replay the failing run, because a replay needs the same code ([Seeds and
    replay](how-it-works.md#seeds-and-replay) lists what it depends on). It runs the same seed and
@@ -129,7 +132,7 @@ These steps check every seed and keep the failing seed as a test.
 
 9. If the fix changes when the code sends messages or fires timers, pin the faults too. Copy
    `schedule.json` from the artifact directory to `testdata/seed-287372ab-schedule.json`, and add
-   this line before `faultline.Run`:
+   this line before `faultline.RunSeeds`:
 
    ```go
    t.Setenv("FAULTLINE_SCHEDULE", "testdata/seed-287372ab-schedule.json")
@@ -149,7 +152,7 @@ go test -run '^TestKVSeed287372ab$' .
 ```
 
 ```text
-ok  	example.com/kv	0.325s
+ok  	example.com/kv	0.316s
 ```
 
 On the code from before the fix, the same test fails with the original failure.
@@ -205,8 +208,8 @@ The test names in it come from the example on this page; change them to match yo
 ````markdown
 ## faultline simulation tests
 
-Tests that call `faultline.Run` run in a deterministic simulation: running a seed again replays the
-identical run.
+Tests that call `faultline.Run` or `faultline.RunSeeds` run in a deterministic simulation: running a
+seed again replays the identical run.
 
 When a faultline test fails:
 
@@ -220,16 +223,15 @@ When a faultline test fails:
    pass.
 5. Run the replay command again. It must pass; a warning that the test binary changed is expected.
 6. Run `go test ./...` and `FAULTLINE_CHECK_DETERMINISM=1 go test ./...`. Both must pass.
-7. Add a regression test that pins the seed, with the same options and world function as the
-   failing test, as in the following example. It must pass. If the fix changes when the code sends
-   messages or fires timers, also copy the run's `schedule.json` to `testdata/` and set
-   `FAULTLINE_SCHEDULE` to that path in the same test.
+7. Add a regression test that pins the seed with `faultline.RunSeeds` (faultline v0.1.1 or newer),
+   as in the following example. Give it the same options and world function as the failing test.
+   It must pass. If the fix changes when the code sends messages or fires timers, also copy the
+   run's `schedule.json` to `testdata/`. Then set `FAULTLINE_SCHEDULE` to that path with `t.Setenv`
+   in the same test.
 
 ```go
 func TestKVSeed287372ab(t *testing.T) {
-	t.Setenv("FAULTLINE_SEED", "0x287372ab06f1482e")
-	t.Setenv("FAULTLINE_SEED_LIST", "")
-	faultline.Run(t, kvOptions, kvWorld)
+	faultline.RunSeeds(t, kvOptions, kvWorld, 0x287372ab06f1482e)
 }
 ```
 
@@ -251,8 +253,8 @@ Code inside the simulation (boot functions, message handlers, timers, invariants
   stopped by `t.Fatal` writes no artifact. `n.Sim()` is the same simulator as `w.Sim`, so a boot
   function calls `n.Sim().Fail(err)`. `w.T().Fatal` suits only setup errors in the world function.
 
-Do not add `t.Parallel` to a test that calls `faultline.Run`: Run seeds `crypto/rand` for every
-run, and a parallel test fails with a setup error.
+Do not add `t.Parallel` to a test that calls `faultline.Run` or `faultline.RunSeeds`: both seed
+`crypto/rand` for every run, and a parallel test fails with a setup error.
 
 faultline settings are `FAULTLINE_*` environment variables, not test flags. The [documentation
 index for agents](https://raw.githubusercontent.com/hmdsefi/faultline/main/llms.txt) links every
