@@ -1,0 +1,19 @@
+{
+  "faultline_schedule": 1,
+  "end": "10s",
+  "recovery": "7.5s",
+  "events": [
+    {"id": 1, "at": "1.011425347s", "kind": "crash", "node": "n1"},
+    {"id": 2, "at": "1.479910348s", "kind": "restart", "node": "n1", "undoes": [1]},
+    {"id": 3, "at": "1.56992872s", "kind": "crash", "node": "n1"},
+    {"id": 4, "at": "2.026566051s", "kind": "restart", "node": "n1", "undoes": [3]},
+    {"id": 5, "at": "2.78777029s", "kind": "crash", "node": "n1"},
+    {"id": 6, "at": "2.862679138s", "kind": "restart", "node": "n1", "undoes": [5]},
+    {"id": 7, "at": "3.602924326s", "kind": "crash", "node": "n1"},
+    {"id": 8, "at": "3.704492528s", "kind": "restart", "node": "n1", "undoes": [7]},
+    {"id": 9, "at": "4.762963737s", "kind": "crash", "node": "n1"},
+    {"id": 10, "at": "4.843233266s", "kind": "restart", "node": "n1", "undoes": [9]},
+    {"id": 11, "at": "5.551909068s", "kind": "crash", "node": "n1"},
+    {"id": 12, "at": "5.87303401s", "kind": "restart", "node": "n1", "undoes": [11]}
+  ]
+}

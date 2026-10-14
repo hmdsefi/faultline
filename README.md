@@ -50,6 +50,21 @@ example step by step in [Get started](docs/getting-started.md).
 
 <h3 align="center">⭐ If faultline is useful to you, a star on GitHub helps other Go developers find it.</h3>
 
+## Claude Code plugin
+
+The faultline plugin for Claude Code turns the agent guide into a skill, an agent and two commands.
+Add its marketplace and install it from a Claude Code session:
+
+```text
+/plugin marketplace add hmdsefi/faultline
+/plugin install faultline@faultline
+```
+
+The skill loads when a distributed Go test is flaky or a faultline test fails, the agent summarizes
+a failing seed's artifact directory, and `/faultline:replay` and `/faultline:pin` replay a seed and pin it in a test. [Use
+faultline with an AI coding agent](docs/ai-agents.md#claude-code-plugin) describes each part and how
+to update the plugin.
+
 ## Who it is for
 
 faultline is for Go teams, and their agents, that build a distributed system: a consensus or

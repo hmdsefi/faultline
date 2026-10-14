@@ -1,0 +1,5 @@
+--- FAIL: TestKV/seed=0x287372ab06f1482e
+    faultline: invariant "acked puts survive" violated at t=5.873034010s (event 1455)
+      k169=v169 was acknowledged, but n1 holds ""
+    replay:    FAULTLINE_SEED=0x287372ab06f1482e go test -v -run '^TestKV$' example.com/kv
+    artifacts: /tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/
