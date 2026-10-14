@@ -113,12 +113,40 @@ func (c *Cluster) onCrash(n *kernel.Node) {
 // if Options.NoCryptoSeed is set, Mode is not ModeEvent, or the two durations differ.
 func Test(t *testing.T, cfg Config, opts faultline.Options) {
 	t.Helper()
+	test(t, cfg, opts, false, nil)
+}
+
+// TestSeeds is Test for a fixed list of seeds, such as a regression test for a seed that failed.
+// It fills in and checks cfg and opts as Test does, with the same errors, then runs the harness
+// under faultline.RunSeeds. RunSeeds runs exactly the listed seeds, in the order given. It
+// ignores Options.Seeds, Options.BaseSeed and the variables that choose seeds. No seeds, or a seed
+// listed twice, fails t before any seed runs. The replay command of a failing seed selects the
+// seed's subtest with -run. Like Test, TestSeeds rejects Options.NoCryptoSeed, so a test that
+// calls it cannot call t.Parallel.
+func TestSeeds(t *testing.T, cfg Config, opts faultline.Options, seeds ...uint64) {
+	t.Helper()
+	test(t, cfg, opts, true, seeds)
+}
+
+// test is Test, or TestSeeds when pinned is set; then seeds is the seed list (ETC-025). The
+// options, the body and ETC-022's errors are the same for both; TestSeeds also fails with no
+// seeds, after those errors.
+func test(t *testing.T, cfg Config, opts faultline.Options, pinned bool, seeds []uint64) {
+	t.Helper()
 	cfg, opts, err := validateOptions(cfg, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	faultline.Run(t, opts, func(w *faultline.World) {
+	body := func(w *faultline.World) {
 		Setup(w, cfg)
 		w.Plan(Faults(cfg))
-	})
+	}
+	if pinned {
+		if len(seeds) == 0 {
+			t.Fatal("etcdraft: TestSeeds needs at least one seed; list the seeds after opts")
+		}
+		faultline.RunSeeds(t, opts, body, seeds...)
+		return
+	}
+	faultline.Run(t, opts, body)
 }

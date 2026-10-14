@@ -281,6 +281,30 @@ at the same time and event:
   <img alt="A terminal runs go test on an etcd/raft harness test with a bug switch on, and seed 0x089cc95a16ce9a11 fails the durable state check. The seed's timeline page jumps to the failure and zooms in on the crash of n1, and its replay command is copied. Pasted into the terminal, the command fails the same check at the same time and event." src="../../.github/assets/etcd-raft-demo.gif" width="860">
 </p>
 
+To run only this seed from a test of its own, call `etcdraft.TestSeeds` with the configuration and
+options of the failing test, and the seed. That is how you keep a seed as a regression test once its
+bug is fixed. `TestSeeds` needs version v0.1.1 or newer of the harness module. Add the following
+test to `bugs_test.go`:
+
+```go
+func TestSkipSyncSeed089cc95a(t *testing.T) {
+	cfg := etcdraft.SelfTestConfig(etcdraft.BugSkipSync)
+	opts := faultline.Options{
+		Duration: 20 * time.Second,
+		Disk:     simdisk.Config{Crash: simdisk.CrashLoseUnsynced},
+	}
+	etcdraft.TestSeeds(t, cfg, opts, 0x089cc95a16ce9a11)
+}
+```
+
+The test leaves out `Options.Seeds`, which `TestSeeds` ignores. It fails the same check at the same
+time and event, with the same trace hash. `TestSeeds` also ignores `FAULTLINE_SEED`, so its replay
+command selects the seed's subtest with `-run`:
+
+```text
+replay:    go test -v -run '^TestSkipSyncSeed089cc95a$/^seed=0x089cc95a16ce9a11$' example.com/raftdemo
+```
+
 ## Results of 40,000 seeds
 
 faultline ran 40,000 seeds of the harness against etcd/raft v3.7.0. It ran 10,000 seeds each for
@@ -296,7 +320,7 @@ whole hunt took about 32 minutes, with two `go test` processes at a time.
 A failing seed is not yet an etcd/raft bug. Work through these steps first, and keep the result of
 each:
 
-1. Replay the seed with `FAULTLINE_SEED`, and confirm that the trace hash matches.
+1. Run the seed's replay command, and confirm that the trace hash matches.
 2. Narrow the fault schedule, as [Replay a failing
    seed](replay-a-seed.md#narrow-a-failure-by-editing-its-schedule) shows.
 3. Check the failing check's name and the bug switches. A failure of `etcdraft: harness` or
