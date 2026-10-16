@@ -1,0 +1,14 @@
+{
+  "name": "faultline",
+  "owner": {
+    "name": "Hamed Yousefi"
+  },
+  "description": "The faultline plugin for Claude Code, from the faultline repository.",
+  "plugins": [
+    {
+      "name": "faultline",
+      "source": "./plugins/claude-code",
+      "description": "Debug, replay and pin failing seeds of faultline simulation tests, deterministic simulation testing for distributed Go code."
+    }
+  ]
+}

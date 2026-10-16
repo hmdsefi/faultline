@@ -1,0 +1,18 @@
+{
+  "name": "faultline",
+  "version": "0.1.1",
+  "description": "Debug, replay and pin failing seeds of faultline simulation tests, deterministic simulation testing for distributed Go code.",
+  "author": {
+    "name": "Hamed Yousefi"
+  },
+  "homepage": "https://github.com/hmdsefi/faultline/blob/main/docs/ai-agents.md",
+  "repository": "https://github.com/hmdsefi/faultline",
+  "license": "MPL-2.0",
+  "keywords": [
+    "go",
+    "testing",
+    "deterministic-simulation-testing",
+    "distributed-systems",
+    "fault-injection"
+  ]
+}

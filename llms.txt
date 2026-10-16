@@ -5,6 +5,7 @@
 ## AI coding agents
 
 - [Use faultline with an AI coding agent](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/ai-agents.md): read this first. The loop from a failing seed to a fix and a pinned regression test, which artifact file answers which question, the rules for code inside the simulation, what v0.1.0 cannot do, and a block to paste into `AGENTS.md` or `CLAUDE.md`.
+- [Claude Code plugin](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/ai-agents.md): when the agent is Claude Code, read the "Claude Code plugin" section of the agent guide. Install it with `/plugin marketplace add hmdsefi/faultline` and `/plugin install faultline@faultline`. It adds a skill with the loop from the agent guide, a `faultline:triage` agent that summarizes an artifact directory, and the `/faultline:replay` and `/faultline:pin` commands.
 
 ## Tutorial
 

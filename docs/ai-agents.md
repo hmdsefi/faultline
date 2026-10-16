@@ -7,6 +7,38 @@ with a block to paste into your agent's instruction file, which also holds the r
 inside the simulation. The agent needs only a shell that runs `go test`, so the guide applies to
 Claude Code, Codex, Cursor and other coding agents.
 
+## Claude Code plugin
+
+For Claude Code, the faultline plugin holds this guide as a skill, an agent and two commands. Add
+its marketplace and install it from a Claude Code session:
+
+```text
+/plugin marketplace add hmdsefi/faultline
+/plugin install faultline@faultline
+```
+
+From a shell, run `claude plugin marketplace add hmdsefi/faultline`, then
+`claude plugin install faultline@faultline`. The plugin adds these parts:
+
+- The `faultline` skill. Claude loads it when a distributed Go test is flaky or fails once, when a
+  faultline test fails, when output shows a seed or an artifact directory, or when it writes a
+  simulation test. It follows the loop on this page. For a flaky test with no faultline test yet, it
+  offers to write one and says what v0.1.x cannot run unchanged.
+- The `faultline:triage` agent. It reads an artifact directory and answers in at most 20 lines: the
+  failed check, the events that led to it, the replay command and one next step, so the main
+  session does not read `trace.jsonl`.
+- `/faultline:replay <seed>`. It runs the seed's replay command and says whether the failure and the
+  trace hash match the artifact.
+- `/faultline:pin <seed>`. It adds a regression test next to the test that failed. The test calls
+  `faultline.RunSeeds`, which needs faultline v0.1.1 or later, or `etcdraft.TestSeeds` for a test
+  that calls `etcdraft.Test`, which needs the harness module v0.1.1 or later.
+
+The plugin's version matches the faultline release it was written for. Claude Code leaves
+auto-update off for this marketplace by default. Run `claude plugin update faultline@faultline` to
+update, or turn on auto-update for the `faultline` marketplace on the **Marketplaces** tab of
+`/plugin`. Other agents use the block in [Instructions for your agent](#instructions-for-your-agent)
+instead.
+
 ## Why faultline suits an agent
 
 An agent that changes distributed code meets two problems that unit tests leave open. Many of the
