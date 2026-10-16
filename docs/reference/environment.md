@@ -2,7 +2,7 @@
 
 The `FAULTLINE_*` environment variables change how `faultline.Run` runs a test, without a code
 change. They choose the seeds, the faults, the artifact root and the checks. This page lists every
-variable that v0.1.0 reads, its values, its default and how it combines with `Options`.
+variable that v0.1.1 reads, its values, its default and how it combines with `Options`.
 
 ## How Run reads them
 
@@ -66,7 +66,7 @@ variables change the list. The first one of these rules that applies decides it:
 
 A variable that a higher rule overrides is ignored, and `Run` logs that it ignored it.
 
-`faultline.RunSeeds`, in faultline v0.1.1 and newer, runs the seeds listed in the test instead.
+`faultline.RunSeeds`, in faultline v0.1.1 or newer, runs the seeds listed in the test instead.
 None of these five variables changes its list, and `-short` does not shorten it. Setting both
 `FAULTLINE_SEED` and `FAULTLINE_SEED_LIST` is not an error there. `RunSeeds` still checks their
 values, so an invalid value is a setup error. When any of them is set, it logs one line that names
@@ -212,7 +212,7 @@ of `-1` and the error as its `message`.
 
 ## Reserved variables
 
-v0.1.0 checks four reserved variables and reports any use, so a command written for another version
+v0.1.1 checks four reserved variables and reports any use, so a command written for another version
 cannot run here unnoticed.
 
 `FAULTLINE_MINIMIZE` accepts `0`, `1`, or a comma-separated list of `runs=<n>`, `time=<duration>`
