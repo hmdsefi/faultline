@@ -1,0 +1,89 @@
+{
+ "api_ms": 95591,
+ "arm": "plugin",
+ "budget_out": false,
+ "bug": "b1",
+ "cli_version": "2.1.299 (Claude Code)",
+ "cost_notes": [],
+ "cost_usd": 0.530598,
+ "denials": 2,
+ "denied": [
+  {
+   "input": {
+    "command": "python3 - <<'EOF'\np='server.go'\ns=open(p).read()\ns=s.replace(\"\"\"// epoch the server loads the store's data into its cache before it serves. Appends go to the\n// store; the server adds the value to its cache and acknowledges the append as it sends it. Gets\n// are answered from the cache.\"\"\",\"\"\"// epoch the server loads the store's data into its cache before it serves. Appends go to the\n// store; the server updates its cache and acknowledges the append only when the store confirms\n// it is durable. Gets are answered from the cache.\"\"\")\ns=s.replace(\"\"\"\t\ts.written(m)\n\"\"\",\"\"\"\t\ts.written(n, m)\n\"\"\")\ns=s.replace(\"\"\"\ts.W.Net.Send(n, s.Store, Write{Epoch: s.epoch, Client: client, Seq: m.Seq, Key: m.Key, Value: m.Value})\n\ts.cache[m.Key] = append(s.cache[m.Key], m.Value)\n\ts.W.Net.Send(n, from, AppendOK{Seq: m.Seq})\n}\n\n// written updates the cache with the store's list.\nfunc (s *Server) written(m Written) {\n\tif len(m.List) > len(s.cache[m.Key]) {\n\t\ts.cache[m.Key] = m.List\n\t}\n}\"\"\",\"\"\"\ts.W.Net.Send(n, s.Store, Write{Epoch: s.epoch, Client: client, Seq: m.Seq, Key: m.Key, Value: m.Value})\n}\n\n// written updates the cache with the store's list and acknowledges the append, which is now\n// durable.\nfunc (s *Server) written(n *kernel.Node, m Written) {\n\tif len(m.List) > len(s.cache[m.Key]) {\n\t\ts.cache[m.Key] = m.List\n\t}\n\tif c := n.Sim().Lookup(m.Client); c != nil {\n\t\ts.W.Net.Send(n, c.ID(), AppendOK{Seq: m.Seq})\n\t}\n}\"\"\")\nopen(p,'w').write(s)\nEOF\ngit diff --stat\nFAULTLINE_SEED=0x641d981e7dba290b go test -run '^TestLeaseKV$' . 2>&1 | tail -3\ngo test ./... 2>&1 | tail -15; FAULTLINE_CHECK_DETERMINISM=1 go test ./... 2>&1 | tail -5",
+    "description": "Apply fix and run tests"
+   },
+   "round": 1,
+   "tool": "Bash"
+  },
+  {
+   "input": {
+    "command": "git stash -q && FAULTLINE_SEED=0x641d981e7dba290b go test -run '^TestLeaseKV$' . 2>&1 | grep -E 'violated|^ok|FAIL' | head -3; git stash pop -q && git diff --stat",
+    "description": "Verify seed fails without fix, then restore"
+   },
+   "round": 1,
+   "tool": "Bash"
+  }
+ ],
+ "faultline_source": "replace:local-export",
+ "finished": "2026-10-17T02:14:28",
+ "fixed": true,
+ "fixed_round": 1,
+ "forbidden_hits": [],
+ "forbidden_path": false,
+ "go_test_calls": 8,
+ "hidden_exit": [
+  0
+ ],
+ "initial_commit": "2293eea5b5e2e0e7e87bf46b6603726263f24a73",
+ "isolation": "pass",
+ "isolation_notes": [],
+ "model": "claude-opus-5-5",
+ "model_usage": {
+  "claude-opus-5-5": {
+   "cacheCreationInputTokens": 27788.0,
+   "cacheReadInputTokens": 519533.0,
+   "costUSD": 0.459027,
+   "inputTokens": 34.0,
+   "outputTokens": 6634.0
+  },
+  "claude-sonnet-5-5": {
+   "cacheCreationInputTokens": 16448.0,
+   "cacheReadInputTokens": 35734.0,
+   "costUSD": 0.071571,
+   "inputTokens": 14.0,
+   "outputTokens": 2685.0
+  }
+ },
+ "new_tests": [
+  "TestLeaseKVSeed641d981e"
+ ],
+ "output_tokens": 7007,
+ "processed_tokens": 606558,
+ "regression_test": "protects",
+ "round_cost_usd": [
+  0.530598
+ ],
+ "round_end": [
+  "success"
+ ],
+ "round_wall_s": [
+  94.0
+ ],
+ "rounds": 1,
+ "run": 1,
+ "run_id": "pilot-b1-plugin-1",
+ "session_ids": [
+  "8b674480-f68a-41eb-a1b3-7c0510a72781"
+ ],
+ "set": "pilot",
+ "started": "2026-10-17T02:12:46",
+ "status": "done",
+ "timed_out": false,
+ "turns": 17,
+ "version": "faultline",
+ "visible_checks_changed": [],
+ "wall_s": 94.0,
+ "weighted_tokens": 145905,
+ "wrong_fixes": 0
+}

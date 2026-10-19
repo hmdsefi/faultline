@@ -1,0 +1,53 @@
+diff -ru reference/lock.go epoch/lock.go
+--- reference/lock.go	2026-10-17 17:41:48
++++ epoch/lock.go	2026-10-17 17:45:31
+@@ -9,9 +9,8 @@
+ 
+ // Lock grants the leases, each with its own holder and expiry, and with epochs from one counter.
+ // The holder renews its lease. Another node gets a lease only after it expired on the lock's
+-// clock, and then with the next epoch. An expired lease that nobody took since goes back to its
+-// last holder with the same epoch: nobody else held it in between, so nothing was written under
+-// another epoch, and what the holder loaded for that epoch is still current.
++// clock. A node gets the next epoch with its first grant of a lease, and that epoch again with
++// every later grant of the lease.
+ type Lock struct {
+ 	Conn Conn
+ 	TTL  time.Duration
+@@ -23,8 +22,8 @@
+ 
+ type lease struct {
+ 	holder string
+-	epoch  uint64
+ 	expiry time.Time
++	epochs map[string]uint64 // per node: the epoch of its grants
+ }
+ 
+ // Handle handles one message from the node named from.
+@@ -40,7 +39,7 @@
+ 	}
+ 	ls := l.leases[req.Lease]
+ 	if ls == nil {
+-		ls = &lease{}
++		ls = &lease{epochs: map[string]uint64{}}
+ 		l.leases[req.Lease] = ls
+ 	}
+ 	now := time.Now()
+@@ -49,12 +48,15 @@
+ 		l.Conn.Send(from, Busy{Holder: ls.holder})
+ 		return
+ 	}
+-	if !held && ls.holder != from {
++	if !held {
++		ls.holder = from
++	}
++	if ls.epochs[from] == 0 {
+ 		l.epoch++
+-		ls.holder, ls.epoch = from, l.epoch
++		ls.epochs[from] = l.epoch
+ 	}
+ 	ls.expiry = now.Add(l.TTL)
+-	l.Conn.Send(from, Grant{Epoch: ls.epoch, TTL: l.TTL, Sent: req.Sent})
++	l.Conn.Send(from, Grant{Epoch: ls.epochs[from], TTL: l.TTL, Sent: req.Sent})
+ }
+ 
+ // every runs f every d until ctx is done, the first time after a random delay in [0, d].

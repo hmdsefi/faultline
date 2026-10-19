@@ -1,0 +1,5 @@
+--- FAIL: TestLeaseKV (7.00s)
+    leasekv_test.go:40: reads are fresh: get k1 by c2, started at 4.429849s, returned 20 values without c1-55, which c1 had acked at 4.382408s
+FAIL
+FAIL	example.com/leasekv	7.211s
+FAIL

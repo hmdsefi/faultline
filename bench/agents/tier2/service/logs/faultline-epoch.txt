@@ -1,0 +1,11 @@
+--- FAIL: TestLeaseKV (0.04s)
+    leasekv_test.go:39: faultline: running 100 seeds from base 0x576c1e295054f8c0 (test name)
+    --- FAIL: TestLeaseKV/seed=0x641d981e7dba290b (0.04s)
+        faultline: final check "every op completes" failed after the run at t=7.000000000s
+          c1 completed 55 of 56 ops
+        replay:    FAULTLINE_SEED=0x641d981e7dba290b go test -v -run '^TestLeaseKV$' example.com/leasekv
+        artifacts: /tmp/faultline-1001/example.com_leasekv/TestLeaseKV/641d981e7dba290b/
+    leasekv_test.go:39: faultline: stopping after failing seed 0x641d981e7dba290b; 99 of 100 seeds not run (set Options.KeepGoing to run all)
+FAIL
+FAIL	example.com/leasekv	0.354s
+FAIL

@@ -1,0 +1,128 @@
+diff -ru reference/messages.go b1/messages.go
+--- reference/messages.go	2026-10-16 21:29:56
++++ b1/messages.go	2026-10-16 23:48:47
+@@ -40,13 +40,8 @@
+ 		Key    string
+ 		List   []string
+ 	}
+-	// Fenced rejects a request of Epoch, which is below the store's fence. Client and Seq name
+-	// the write it rejects, if any.
+-	Fenced struct {
+-		Epoch, Fence uint64
+-		Client       string
+-		Seq          uint64
+-	}
++	// Fenced rejects a request of Epoch, which is below the store's fence.
++	Fenced struct{ Epoch, Fence uint64 }
+ 	// Append asks a server to append Value to Key.
+ 	Append struct {
+ 		Seq        uint64
+diff -ru reference/server.go b1/server.go
+--- reference/server.go	2026-10-16 21:25:22
++++ b1/server.go	2026-10-16 22:10:18
+@@ -11,31 +11,25 @@
+ // Server serves clients while it holds the lease. It asks the lock for the lease every
+ // RenewEvery. A grant is valid until the time the server sent the request plus the TTL. On a new
+ // epoch the server loads the store's data into its cache before it serves. Appends go to the
+-// store, and the server acknowledges them when the store confirms them. Gets are answered from
+-// the cache.
++// store; the server adds the value to its cache and acknowledges the append as it sends it. Gets
++// are answered from the cache.
+ type Server struct {
+ 	W          *faultline.World
+ 	Lock       kernel.NodeID
+ 	Store      kernel.NodeID
+ 	RenewEvery time.Duration
+ 
+-	epoch   uint64
+-	until   time.Time // the lease is valid before until
+-	ready   bool      // the cache holds the store's data for epoch
+-	holder  string    // the holder the lock named last
+-	cache   map[string][]string
+-	waiting map[string]waiter // per client: the write sent to the store for it
++	epoch  uint64
++	until  time.Time // the lease is valid before until
++	ready  bool      // the cache holds the store's data for epoch
++	holder string    // the holder the lock named last
++	cache  map[string][]string
+ }
+ 
+-type waiter struct {
+-	seq uint64
+-	to  kernel.NodeID
+-}
+-
+ // Boot starts the server with an empty cache and no lease.
+ func (s *Server) Boot(n *kernel.Node) {
+ 	s.epoch, s.until, s.ready, s.holder = 0, time.Time{}, false, ""
+-	s.cache, s.waiting = map[string][]string{}, map[string]waiter{}
++	s.cache = map[string][]string{}
+ 	s.W.Net.Handle(n, func(from kernel.NodeID, msg any) { s.handle(n, from, msg) })
+ 	var renew func()
+ 	renew = func() {
+@@ -59,9 +53,9 @@
+ 			s.cache, s.ready = m.Data, true
+ 		}
+ 	case Fenced:
+-		s.fenced(n, m)
++		s.fenced(m)
+ 	case Written:
+-		s.written(n, m)
++		s.written(m)
+ 	case Append:
+ 		s.append(n, from, m)
+ 	case Get:
+@@ -95,14 +89,10 @@
+ }
+ 
+ // fenced steps down: a newer epoch exists.
+-func (s *Server) fenced(n *kernel.Node, m Fenced) {
++func (s *Server) fenced(m Fenced) {
+ 	if m.Epoch == s.epoch {
+ 		s.ready, s.until = false, time.Time{}
+ 	}
+-	if w, ok := s.waiting[m.Client]; ok && w.seq == m.Seq {
+-		delete(s.waiting, m.Client)
+-		s.W.Net.Send(n, w.to, NotLeader{Seq: m.Seq})
+-	}
+ }
+ 
+ func (s *Server) append(n *kernel.Node, from kernel.NodeID, m Append) {
+@@ -111,21 +101,16 @@
+ 		return
+ 	}
+ 	client := n.Sim().Node(from).Name()
+-	s.waiting[client] = waiter{seq: m.Seq, to: from}
+ 	s.W.Net.Send(n, s.Store, Write{Epoch: s.epoch, Client: client, Seq: m.Seq, Key: m.Key, Value: m.Value})
++	s.cache[m.Key] = append(s.cache[m.Key], m.Value)
++	s.W.Net.Send(n, from, AppendOK{Seq: m.Seq})
+ }
+ 
+-// written updates the cache with the store's list and acknowledges the append it confirms.
+-func (s *Server) written(n *kernel.Node, m Written) {
++// written updates the cache with the store's list.
++func (s *Server) written(m Written) {
+ 	if len(m.List) > len(s.cache[m.Key]) {
+ 		s.cache[m.Key] = m.List
+ 	}
+-	w, ok := s.waiting[m.Client]
+-	if !ok || w.seq != m.Seq {
+-		return
+-	}
+-	delete(s.waiting, m.Client)
+-	s.W.Net.Send(n, w.to, AppendOK{Seq: m.Seq})
+ }
+ 
+ // hint names the holder the lock named last, if that is another server.
+diff -ru reference/store.go b1/store.go
+--- reference/store.go	2026-10-16 23:48:50
++++ b1/store.go	2026-10-16 23:48:50
+@@ -78,7 +78,7 @@
+ 
+ func (s *Store) write(n *kernel.Node, from kernel.NodeID, m Write) {
+ 	if m.Epoch < s.fence {
+-		s.W.Net.Send(n, from, Fenced{Epoch: m.Epoch, Fence: s.fence, Client: m.Client, Seq: m.Seq})
++		s.W.Net.Send(n, from, Fenced{Epoch: m.Epoch, Fence: s.fence})
+ 		return
+ 	}
+ 	if m.Seq > s.last[m.Client] {

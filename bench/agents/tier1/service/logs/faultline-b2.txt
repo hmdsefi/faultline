@@ -1,0 +1,11 @@
+--- FAIL: TestLeaseKV (0.04s)
+    leasekv_test.go:39: faultline: running 100 seeds from base 0x576c1e295054f8c0 (test name)
+    --- FAIL: TestLeaseKV/seed=0x23d0735a8cee2a51 (0.01s)
+        faultline: invariant "no duplicate appends" violated at t=1.490272099s (event 313)
+          key k1 holds c1-20 twice
+        replay:    FAULTLINE_SEED=0x23d0735a8cee2a51 go test -v -run '^TestLeaseKV$' example.com/leasekv
+        artifacts: /tmp/faultline-1001/example.com_leasekv/TestLeaseKV/23d0735a8cee2a51/
+    leasekv_test.go:39: faultline: stopping after failing seed 0x23d0735a8cee2a51; 90 of 100 seeds not run (set Options.KeepGoing to run all)
+FAIL
+FAIL	example.com/leasekv	0.350s
+FAIL

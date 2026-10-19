@@ -1,0 +1,114 @@
+diff -ru reference/server.go b2/server.go
+--- reference/server.go	2026-10-16 21:25:22
++++ b2/server.go	2026-10-16 22:10:18
+@@ -11,8 +11,9 @@
+ // Server serves clients while it holds the lease. It asks the lock for the lease every
+ // RenewEvery. A grant is valid until the time the server sent the request plus the TTL. On a new
+ // epoch the server loads the store's data into its cache before it serves. Appends go to the
+-// store, and the server acknowledges them when the store confirms them. Gets are answered from
+-// the cache.
++// store, and the server acknowledges them when the store confirms them. It remembers the last
++// confirmed append of every client, so an append sent again is not written twice. Gets are
++// answered from the cache.
+ type Server struct {
+ 	W          *faultline.World
+ 	Lock       kernel.NodeID
+@@ -25,6 +26,7 @@
+ 	holder  string    // the holder the lock named last
+ 	cache   map[string][]string
+ 	waiting map[string]waiter // per client: the write sent to the store for it
++	applied map[string]uint64 // per client: Seq of its last confirmed append
+ }
+ 
+ type waiter struct {
+@@ -35,7 +37,7 @@
+ // Boot starts the server with an empty cache and no lease.
+ func (s *Server) Boot(n *kernel.Node) {
+ 	s.epoch, s.until, s.ready, s.holder = 0, time.Time{}, false, ""
+-	s.cache, s.waiting = map[string][]string{}, map[string]waiter{}
++	s.cache, s.waiting, s.applied = map[string][]string{}, map[string]waiter{}, map[string]uint64{}
+ 	s.W.Net.Handle(n, func(from kernel.NodeID, msg any) { s.handle(n, from, msg) })
+ 	var renew func()
+ 	renew = func() {
+@@ -111,6 +113,10 @@
+ 		return
+ 	}
+ 	client := n.Sim().Node(from).Name()
++	if m.Seq <= s.applied[client] {
++		s.W.Net.Send(n, from, AppendOK{Seq: m.Seq})
++		return
++	}
+ 	s.waiting[client] = waiter{seq: m.Seq, to: from}
+ 	s.W.Net.Send(n, s.Store, Write{Epoch: s.epoch, Client: client, Seq: m.Seq, Key: m.Key, Value: m.Value})
+ }
+@@ -120,6 +126,7 @@
+ 	if len(m.List) > len(s.cache[m.Key]) {
+ 		s.cache[m.Key] = m.List
+ 	}
++	s.applied[m.Client] = max(s.applied[m.Client], m.Seq)
+ 	w, ok := s.waiting[m.Client]
+ 	if !ok || w.seq != m.Seq {
+ 		return
+diff -ru reference/store.go b2/store.go
+--- reference/store.go	2026-10-16 23:48:50
++++ b2/store.go	2026-10-16 23:48:50
+@@ -16,30 +16,26 @@
+ const walPath = "/wal"
+ 
+ // Store keeps the list of every key in a write-ahead log on its volume. It syncs the log before
+-// every reply, so a reply only describes durable state. It remembers the last write of every
+-// client in the same log, so a write sent again is applied once. It rejects requests whose epoch
+-// is below the highest epoch it has seen.
++// every reply, so a reply only describes durable state. It rejects requests whose epoch is below
++// the highest epoch it has seen.
+ type Store struct {
+ 	W *faultline.World
+ 
+ 	data  map[string][]string
+-	last  map[string]uint64 // per client: Seq of its last applied write
+ 	fence uint64
+ 	wal   *simdisk.File
+ }
+ 
+ // record is one line of the write-ahead log: a write, or only an epoch when Key is empty.
+ type record struct {
+-	Epoch  uint64 `json:"epoch"`
+-	Client string `json:"client,omitempty"`
+-	Seq    uint64 `json:"seq,omitempty"`
+-	Key    string `json:"key,omitempty"`
+-	Value  string `json:"value,omitempty"`
++	Epoch uint64 `json:"epoch"`
++	Key   string `json:"key,omitempty"`
++	Value string `json:"value,omitempty"`
+ }
+ 
+ // Boot rebuilds the store from its log and starts serving.
+ func (s *Store) Boot(n *kernel.Node) {
+-	s.data, s.last, s.fence = map[string][]string{}, map[string]uint64{}, 0
++	s.data, s.fence = map[string][]string{}, 0
+ 	wal, err := s.recover(s.W.Disk.Volume(n))
+ 	if err != nil {
+ 		n.Sim().Fail(err)
+@@ -81,11 +77,9 @@
+ 		s.W.Net.Send(n, from, Fenced{Epoch: m.Epoch, Fence: s.fence, Client: m.Client, Seq: m.Seq})
+ 		return
+ 	}
+-	if m.Seq > s.last[m.Client] {
+-		r := record{Epoch: m.Epoch, Client: m.Client, Seq: m.Seq, Key: m.Key, Value: m.Value}
+-		if err := s.log(r); err != nil {
+-			return
+-		}
++	r := record{Epoch: m.Epoch, Key: m.Key, Value: m.Value}
++	if err := s.log(r); err != nil {
++		return
+ 	}
+ 	s.W.Net.Send(n, from, Written{Client: m.Client, Seq: m.Seq, Key: m.Key, List: slices.Clone(s.data[m.Key])})
+ }
+@@ -110,7 +104,6 @@
+ 	s.fence = max(s.fence, r.Epoch)
+ 	if r.Key != "" {
+ 		s.data[r.Key] = append(s.data[r.Key], r.Value)
+-		s.last[r.Client] = r.Seq
+ 	}
+ }
+ 

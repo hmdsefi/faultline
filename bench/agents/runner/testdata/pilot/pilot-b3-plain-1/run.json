@@ -1,0 +1,78 @@
+{
+ "api_ms": 67540,
+ "arm": "plain",
+ "budget_out": false,
+ "bug": "b3",
+ "cli_version": "2.1.299 (Claude Code)",
+ "cost_notes": [],
+ "cost_usd": 0.331709,
+ "denials": 2,
+ "denied": [
+  {
+   "input": {
+    "command": "git ls-files && wc -l $(git ls-files)"
+   },
+   "round": 1,
+   "tool": "Bash"
+  },
+  {
+   "input": {
+    "command": "git -C /private/tmp/w/da50b57b ls-files"
+   },
+   "round": 1,
+   "tool": "Bash"
+  }
+ ],
+ "faultline_source": "-",
+ "finished": "2026-10-17T02:21:07",
+ "fixed": true,
+ "fixed_round": 1,
+ "forbidden_hits": [],
+ "forbidden_path": false,
+ "go_test_calls": 0,
+ "hidden_exit": [
+  0
+ ],
+ "initial_commit": "5b259c0451b6d66078ce0fb2ad2781bda0191c90",
+ "isolation": "pass",
+ "isolation_notes": [],
+ "model": "claude-opus-5-5",
+ "model_usage": {
+  "claude-opus-5-5": {
+   "cacheCreationInputTokens": 23594.0,
+   "cacheReadInputTokens": 157764.0,
+   "costUSD": 0.331709,
+   "inputTokens": 16.0,
+   "outputTokens": 5567.0
+  }
+ },
+ "new_tests": [],
+ "output_tokens": 5567,
+ "processed_tokens": 186941,
+ "regression_test": "none",
+ "round_cost_usd": [
+  0.331709
+ ],
+ "round_end": [
+  "success"
+ ],
+ "round_wall_s": [
+  69.0
+ ],
+ "rounds": 1,
+ "run": 1,
+ "run_id": "pilot-b3-plain-1",
+ "session_ids": [
+  "c65f0aa4-8f82-4d73-8699-c2cf523e2c9c"
+ ],
+ "set": "pilot",
+ "started": "2026-10-17T02:18:48",
+ "status": "done",
+ "timed_out": false,
+ "turns": 18,
+ "version": "plain",
+ "visible_checks_changed": [],
+ "wall_s": 69.0,
+ "weighted_tokens": 73120,
+ "wrong_fixes": 0
+}

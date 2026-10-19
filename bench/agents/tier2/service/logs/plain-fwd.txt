@@ -1,0 +1,5 @@
+--- FAIL: TestLeaseKV (7.00s)
+    leasekv_test.go:40: every op completes: c1 completed 11 of 12 ops
+FAIL
+FAIL	example.com/leasekv	7.206s
+FAIL

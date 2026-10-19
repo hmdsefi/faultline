@@ -1,0 +1,20 @@
+diff -ru reference/server.go fwd/server.go
+--- reference/server.go	2026-10-17 17:41:48
++++ fwd/server.go	2026-10-17 17:45:31
+@@ -111,10 +111,13 @@
+ }
+ 
+ // request handles request req of client: from the client itself, or with fwd in a Fwd from the
+-// server from. A server that does not serve passes a client's own request on to the holder it
+-// knows and records it as the client's relay entry. It never passes on a request that came in a
+-// Fwd.
++// server from. It skips a request that matches the client's relay entry. A server that does not
++// serve passes a client's own request on to the holder it knows and records it as the client's
++// relay entry. It never passes on a request that came in a Fwd.
+ func (s *Server) request(n *kernel.Node, from kernel.NodeID, client string, req any, fwd bool) {
++	if r, ok := s.relay[client]; ok && r.seq == seq(req) {
++		return
++	}
+ 	if !s.serving(n) {
+ 		if h := s.hint(n); h != "" && !fwd {
+ 			s.relay[client] = waiter{seq: seq(req), to: from}

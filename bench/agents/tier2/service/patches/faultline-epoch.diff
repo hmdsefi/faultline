@@ -1,0 +1,53 @@
+diff -ru reference/lock.go epoch/lock.go
+--- reference/lock.go	2026-10-17 17:41:48
++++ epoch/lock.go	2026-10-17 17:45:31
+@@ -9,9 +9,8 @@
+ 
+ // Lock grants the leases, each with its own holder and expiry, and with epochs from one counter.
+ // The holder renews its lease. Another node gets a lease only after it expired on the lock's
+-// clock, and then with the next epoch. An expired lease that nobody took since goes back to its
+-// last holder with the same epoch: nobody else held it in between, so nothing was written under
+-// another epoch, and what the holder loaded for that epoch is still current.
++// clock. A node gets the next epoch with its first grant of a lease, and that epoch again with
++// every later grant of the lease.
+ type Lock struct {
+ 	W   *faultline.World
+ 	TTL time.Duration
+@@ -22,8 +21,8 @@
+ 
+ type lease struct {
+ 	holder string
+-	epoch  uint64
+ 	expiry time.Time
++	epochs map[string]uint64 // per node: the epoch of its grants
+ }
+ 
+ // Boot starts the lock with no lease granted.
+@@ -36,7 +35,7 @@
+ 		}
+ 		ls := l.leases[req.Lease]
+ 		if ls == nil {
+-			ls = &lease{}
++			ls = &lease{epochs: map[string]uint64{}}
+ 			l.leases[req.Lease] = ls
+ 		}
+ 		name, now := n.Sim().Node(from).Name(), n.Now()
+@@ -45,12 +44,15 @@
+ 			l.W.Net.Send(n, from, Busy{Holder: ls.holder})
+ 			return
+ 		}
+-		if !held && ls.holder != name {
++		if !held {
++			ls.holder = name
++		}
++		if ls.epochs[name] == 0 {
+ 			l.epoch++
+-			ls.holder, ls.epoch = name, l.epoch
++			ls.epochs[name] = l.epoch
+ 		}
+ 		ls.expiry = now.Add(l.TTL)
+-		l.W.Net.Send(n, from, Grant{Epoch: ls.epoch, TTL: l.TTL, Sent: req.Sent})
++		l.W.Net.Send(n, from, Grant{Epoch: ls.epochs[name], TTL: l.TTL, Sent: req.Sent})
+ 	})
+ }
+ 
