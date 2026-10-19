@@ -22,12 +22,12 @@ const (
 	RuleWallClock  Rule = "DL001" // wall-clock time and real timers
 	RuleGlobalRand Rule = "DL002" // package-level math/rand and math/rand/v2 functions
 	RuleCryptoRand Rule = "DL003" // import of crypto/rand
-	RuleGo         Rule = "DL004" // goroutines: go statement, context.AfterFunc, WaitGroup.Go
+	RuleGo         Rule = "DL004" // goroutines: go statement, context.AfterFunc, WaitGroup.Go, SetFinalizer, AddCleanup
 	RuleSelect     Rule = "DL005" // select statement
 	RuleMapRange   Rule = "DL006" // range over a map
 	RuleFloat      Rule = "DL007" // floating-point and complex types
 	RuleEnv        Rule = "DL008" // environment access
-	RuleUnordered  Rule = "DL009" // reflect map iteration, sync.Map.Range
+	RuleUnordered  Rule = "DL009" // reflect map iteration, sync.Map.Range, maps.DeleteFunc, maps.EqualFunc
 	RuleMapIter    Rule = "DL010" // maps.All, maps.Keys, maps.Values
 	RulePlatform   Rule = "DL011" // GOOS/GOARCH-specific files
 	RuleImport     Rule = "DL012" // import boundary (architecture §5.1)

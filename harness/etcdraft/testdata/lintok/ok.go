@@ -51,6 +51,11 @@ func sumEmbedded[S interface{ sliceLike }](s S) int {
 	return n
 }
 
+// list has a Seq method, but it is not reflect.Value's.
+type list struct{}
+
+func (list) Seq() int { return 0 }
+
 // describeSelf passes on a kernel.Describer, which kernel.Describe describes with its Describe method.
 func describeSelf[T kernel.Describer](v T) string { return kernel.Describe(v) }
 
@@ -83,6 +88,8 @@ func ok(r *rand.Rand, m map[string]int, hs *raftpb.HardState, ents []*raftpb.Ent
 	_ = reflect.ValueOf(m).MapIndex(reflect.ValueOf("a"))
 	_ = reflect.ValueOf(ents).Len()
 	_ = slices.DeleteFunc(keys, func(string) bool { return false })
+	_ = slices.EqualFunc(keys, keys, func(string, string) bool { return true })
+	_ = list{}.Seq()
 	delete(m, "a")
 
 	_ = Stdout + Stderr

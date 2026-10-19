@@ -125,13 +125,29 @@ var (
 		"time":    {"Now", "Since", "Until", "Sleep", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick"},
 		"context": {"WithDeadline", "WithDeadlineCause", "WithTimeout", "WithTimeoutCause"},
 	}
-	// goroutineFuncs start a goroutine without a go statement, by types.Func.FullName (DL004).
-	goroutineFuncs = []string{"context.AfterFunc", "(*sync.WaitGroup).Go"}
-	randCtors      = []string{"New", "NewSource", "NewZipf", "NewPCG", "NewChaCha8"}
-	envFuncs       = []string{"os.Getenv", "os.LookupEnv", "os.Environ", "os.ExpandEnv", "syscall.Getenv", "syscall.Environ"}
-	unorderedFuncs = []string{"(reflect.Value).MapRange", "(reflect.Value).MapKeys", "(*sync.Map).Range"}
-	mapIterFuncs   = []string{"All", "Keys", "Values"}
-	sortedFuncs    = []string{"Sorted", "SortedFunc", "SortedStableFunc"}
+	// goroutineFuncs run a function on another goroutine without a go statement, by
+	// types.Func.FullName, with what each does (DL004). SetFinalizer and AddCleanup run it when the
+	// garbage collector decides.
+	goroutineFuncs = map[string]string{
+		"context.AfterFunc":    "starts a goroutine",
+		"(*sync.WaitGroup).Go": "starts a goroutine",
+		"runtime.SetFinalizer": "runs a function on a runtime goroutine",
+		"runtime.AddCleanup":   "runs a function on a runtime goroutine",
+	}
+	randCtors = []string{"New", "NewSource", "NewZipf", "NewPCG", "NewChaCha8"}
+	// envFuncs read environment variables, by pkgpath.Name (DL008). TempDir and the User*Dir
+	// functions read them to find a directory.
+	envFuncs = []string{"os.Getenv", "os.LookupEnv", "os.Environ", "os.ExpandEnv", "syscall.Getenv", "syscall.Environ",
+		"os.TempDir", "os.UserHomeDir", "os.UserCacheDir", "os.UserConfigDir"}
+	// unorderedFuncs list a map in random order, or call a function in map order, by
+	// types.Func.FullName (DL009). Seq and Seq2 do so only for a map value, but the lint cannot tell
+	// the value's kind.
+	unorderedFuncs = []string{
+		"(reflect.Value).MapRange", "(reflect.Value).MapKeys", "(reflect.Value).Seq", "(reflect.Value).Seq2",
+		"(*sync.Map).Range", "maps.DeleteFunc", "maps.EqualFunc",
+	}
+	mapIterFuncs = []string{"All", "Keys", "Values"}
+	sortedFuncs  = []string{"Sorted", "SortedFunc", "SortedStableFunc"}
 )
 
 // lintFile applies the syntax and identifier rules (DL001 to DL006, DL008 to DL010) to f.
@@ -165,17 +181,16 @@ func (l *linter) lintFile(f *ast.File, info *types.Info, has func(Rule) bool, qu
 			if !ok || fn.Pkg() == nil {
 				return true
 			}
-			pkg, name := fn.Pkg().Path(), fn.Name()
-			method := fn.Signature().Recv() != nil
+			pkg, name, full := fn.Pkg().Path(), fn.Name(), fn.FullName()
 			switch {
-			case slices.Contains(goroutineFuncs, fn.FullName()):
+			case goroutineFuncs[full] != "":
 				add(n.Pos(), RuleGo, fmt.Sprintf(
-					"%s starts a goroutine, which is forbidden in simulation code", fn.FullName()))
-			case method:
-				if slices.Contains(unorderedFuncs, fn.FullName()) {
-					add(n.Pos(), RuleUnordered, fmt.Sprintf(
-						"unordered iteration: %s; sort the keys or annotate //faultline:maporder <reason>", fn.FullName()))
-				}
+					"%s %s, which is forbidden in simulation code", full, goroutineFuncs[full]))
+			case slices.Contains(unorderedFuncs, full):
+				add(n.Pos(), RuleUnordered, fmt.Sprintf(
+					"unordered iteration: %s; sort the keys or annotate //faultline:maporder <reason>", full))
+			case fn.Signature().Recv() != nil:
+				// The remaining rules name package-level functions only.
 			case slices.Contains(wallClockFuncs[pkg], name):
 				add(n.Pos(), RuleWallClock, fmt.Sprintf(
 					"wall-clock time: %s.%s is forbidden; use Sim.Now, Node.Now or Node.After", pkg, name))
