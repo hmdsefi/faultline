@@ -1,0 +1,76 @@
+faultline timeline v1
+test:     TestKV/seed=0x287372ab06f1482e
+package:  example.com/kv
+seed:     0x287372ab06f1482e
+status:   fail
+failure:  invariant "acked puts survive" violated at t=5.873034010s (event 1455)
+records:  63 (dropped 3568), trace hash 0x34d831a670e30100
+nodes:    1=n1 [server], 2=c1 [client]
+slice:    61 records, root 3629
+legend:   ! failure record, * causal slice, <- cause
+
+   SEQ         TIME NODE   KIND               TEXT
+  ... 3568 earlier records were not retained
+* 3569 5.538233266s n1#6   disk.sync          sync /wal ops=0 size=1454 path=/wal ops=0 size=1454 <-3568
+* 3570 5.540995344s c1#1   kernel.event       next id=1605 <-3561
+* 3571 5.540995344s c1#1   history.invoke     c1 invoke put "k168=v168" id=168 process=c1 f=put input="\"k168=v168\"" <-3570
+* 3572 5.540995344s c1#1   net.send           send #360 c1 -> n1: put k168=v168 msg=360 from=c1 to=n1 payload="put k168=v168" <-3571
+* 3573 5.542669708s global kernel.event       net.deliver id=1610 <-3572
+* 3574 5.542669708s n1#6   net.deliver        deliver #360.1 c1 -> n1 msg=360 copy=1 from=c1 to=n1 latency_ns=1674364 <-3573
+* 3575 5.542669708s n1#6   disk.write         append /wal off=1454 len=10 path=/wal op=append off=1454 len=10 <-3574
+* 3576 5.542669708s n1#6   net.send           send #361 n1 -> c1: ack k168 msg=361 from=n1 to=c1 payload="ack k168" <-3575
+* 3577 5.543233266s n1#6   kernel.event       flush id=1609 <-3569
+* 3578 5.543233266s n1#6   disk.sync          sync /wal ops=1 size=1464 path=/wal ops=1 size=1464 <-3577
+* 3579 5.543853656s global kernel.event       net.deliver id=1612 <-3576
+* 3580 5.543853656s c1#1   net.deliver        deliver #361.1 n1 -> c1 msg=361 copy=1 from=n1 to=c1 latency_ns=1183948 <-3579
+* 3581 5.543853656s c1#1   history.complete   c1 ok put null id=168 process=c1 f=put status=ok output=null <-3580
+* 3582 5.546690866s c1#1   kernel.event       next id=1614 <-3581
+* 3583 5.546690866s c1#1   history.invoke     c1 invoke put "k169=v169" id=169 process=c1 f=put input="\"k169=v169\"" <-3582
+* 3584 5.546690866s c1#1   net.send           send #362 c1 -> n1: put k169=v169 msg=362 from=c1 to=n1 payload="put k169=v169" <-3583
+* 3585 5.548233266s n1#6   kernel.event       flush id=1613 <-3578
+* 3586 5.548233266s n1#6   disk.sync          sync /wal ops=0 size=1464 path=/wal ops=0 size=1464 <-3585
+* 3587 5.551630705s global kernel.event       net.deliver id=1615 <-3584
+* 3588 5.551630705s n1#6   net.deliver        deliver #362.1 c1 -> n1 msg=362 copy=1 from=c1 to=n1 latency_ns=4939839 <-3587
+* 3589 5.551630705s n1#6   disk.write         append /wal off=1464 len=10 path=/wal op=append off=1464 len=10 <-3588
+* 3590 5.551630705s n1#6   net.send           send #363 n1 -> c1: ack k169 msg=363 from=n1 to=c1 payload="ack k169" <-3589
+* 3591 5.551909068s global kernel.event       fault/random/start id=1371 <-3043
+* 3592 5.551909068s global fault.target       target random rules[0] crash -> n1 planner=random rule=0 candidates=n1 chosen=n1 <-3591
+* 3593 5.551909068s n1#6   fault.crash        crash n1 id=11 source=random node=n1 effect=applied <-3592
+* 3594 5.551909068s n1#6   kernel.crash       crash from=up <-3593
+* 3595 5.551909068s n1#6   disk.crash_meta    crash metadata strict: kept 0 of 0 model=strict pending=0 kept=0 <-3594
+* 3596 5.551909068s n1#6   disk.crash_apply   crash /wal torn: kept 0 of 1 path=/wal model=torn pending=1 kept=0 torn_sectors=0 size=1464 <-3595
+* 3597 5.553747583s global kernel.event       net.deliver id=1618 <-3590
+* 3598 5.553747583s c1#1   net.deliver        deliver #363.1 n1 -> c1 msg=363 copy=1 from=n1 to=c1 latency_ns=2116878 <-3597
+* 3599 5.553747583s c1#1   history.complete   c1 ok put null id=169 process=c1 f=put status=ok output=null <-3598
+* 3600 5.586225234s c1#1   kernel.event       next id=1621 <-3599
+* 3601 5.586225234s c1#1   history.invoke     c1 invoke put "k170=v170" id=170 process=c1 f=put input="\"k170=v170\"" <-3600
+* 3602 5.586225234s c1#1   net.send           send #364 c1 -> n1: put k170=v170 msg=364 from=c1 to=n1 payload="put k170=v170" <-3601
+* 3603 5.590433471s global kernel.event       net.deliver id=1622 <-3602
+* 3604 5.590433471s n1#6   net.drop           drop #364.1 c1 -> n1: down msg=364 copy=1 from=c1 to=n1 reason=down <-3603
+* 3605 5.636225234s c1#1   kernel.event       retry id=1623 <-3602
+* 3606 5.636225234s c1#1   net.send           send #365 c1 -> n1: put k170=v170 msg=365 from=c1 to=n1 payload="put k170=v170" <-3605
+* 3607 5.640382478s global kernel.event       net.deliver id=1624 <-3606
+* 3608 5.640382478s n1#6   net.drop           drop #365.1 c1 -> n1: down msg=365 copy=1 from=c1 to=n1 reason=down <-3607
+* 3609 5.686225234s c1#1   kernel.event       retry id=1625 <-3606
+* 3610 5.686225234s c1#1   net.send           send #366 c1 -> n1: put k170=v170 msg=366 from=c1 to=n1 payload="put k170=v170" <-3609
+* 3611 5.690196673s global kernel.event       net.deliver id=1626 <-3610
+* 3612 5.690196673s n1#6   net.drop           drop #366.1 c1 -> n1: down msg=366 copy=1 from=c1 to=n1 reason=down <-3611
+* 3613 5.736225234s c1#1   kernel.event       retry id=1627 <-3610
+* 3614 5.736225234s c1#1   net.send           send #367 c1 -> n1: put k170=v170 msg=367 from=c1 to=n1 payload="put k170=v170" <-3613
+* 3615 5.740179092s global kernel.event       net.deliver id=1628 <-3614
+* 3616 5.740179092s n1#6   net.drop           drop #367.1 c1 -> n1: down msg=367 copy=1 from=c1 to=n1 reason=down <-3615
+* 3617 5.786225234s c1#1   kernel.event       retry id=1629 <-3614
+* 3618 5.786225234s c1#1   net.send           send #368 c1 -> n1: put k170=v170 msg=368 from=c1 to=n1 payload="put k170=v170" <-3617
+* 3619 5.791201211s global kernel.event       net.deliver id=1630 <-3618
+* 3620 5.791201211s n1#6   net.drop           drop #368.1 c1 -> n1: down msg=368 copy=1 from=c1 to=n1 reason=down <-3619
+* 3621 5.836225234s c1#1   kernel.event       retry id=1631 <-3618
+* 3622 5.836225234s c1#1   net.send           send #369 c1 -> n1: put k170=v170 msg=369 from=c1 to=n1 payload="put k170=v170" <-3621
+* 3623 5.838775160s global kernel.event       net.deliver id=1632 <-3622
+* 3624 5.838775160s n1#6   net.drop           drop #369.1 c1 -> n1: down msg=369 copy=1 from=c1 to=n1 reason=down <-3623
+* 3625 5.873034010s global kernel.event       fault/random/undo id=1619 <-3596
+* 3626 5.873034010s n1#6   fault.restart      restart n1 id=12 source=random node=n1 undoes=11 effect=applied <-3625
+* 3627 5.873034010s n1#7   kernel.boot        boot <-3626
+* 3628 5.873034010s n1#7   net.handle         handler installed on n1 node=n1 installed=true <-3627
+! 3629 5.873034010s global check.violation    invariant "acked puts survive" violated kind=invariant check="acked puts survive" error="k169=v169 was acknowledged, but n1 holds \"\"" event=1455 <-3628
+  3630 5.873034010s global kernel.fail        invariant "acked puts survive": k169=v169 was acknowledged, but n1 holds "" <-3629
+  3631 5.873034010s global run.phase          end phase=end stop=failed events=1455 <-3630

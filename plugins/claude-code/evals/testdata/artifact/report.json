@@ -1,0 +1,141 @@
+{
+  "faultline_report": 1,
+  "status": "fail",
+  "package": "example.com/kv",
+  "test": "TestKV",
+  "subtest": "TestKV/seed=0x287372ab06f1482e",
+  "seed": "0x287372ab06f1482e",
+  "seed_source": "derived",
+  "base_seed": "0x75c66bf05fc438d4",
+  "base_source": "test_name",
+  "seed_index": 0,
+  "failure": {
+    "kind": "invariant",
+    "check": "acked puts survive",
+    "signature": "invariant:acked puts survive",
+    "headline": "invariant \"acked puts survive\" violated at t=5.873034010s (event 1455)",
+    "message": "k169=v169 was acknowledged, but n1 holds \"\"",
+    "at_ns": 5873034010,
+    "at": "5.873034010s",
+    "event": 1455,
+    "record_seq": 3629
+  },
+  "replay": {
+    "command": "FAULTLINE_SEED=0x287372ab06f1482e go test -v -run '^TestKV$' example.com/kv",
+    "env": {
+      "FAULTLINE_SEED": "0x287372ab06f1482e"
+    },
+    "run": "^TestKV$",
+    "package_arg": ".",
+    "dir": "/home/dev/kv",
+    "package_dir": "/home/dev/kv"
+  },
+  "versions": {
+    "faultline": "(devel)",
+    "go": "go1.27.1",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "test_binary_sha256": "131eb04316363ae499ad864e00b4444736e705f292b538b5ec6c879d84befafc"
+  },
+  "options": {
+    "seeds": 50,
+    "duration_ns": 10000000000,
+    "duration": "10s",
+    "max_events": 10000000,
+    "mode": "event",
+    "trace": "hash",
+    "trace_buffer": 0,
+    "check_determinism": false,
+    "keep_going": false,
+    "no_crypto_seed": false,
+    "allow_limit": false,
+    "net": {
+      "Default": {
+        "Latency": 1000000,
+        "Jitter": 4000000,
+        "TailPPM": 0,
+        "Tail": 0,
+        "DropPPM": 0,
+        "DupPPM": 0,
+        "FIFO": false
+      },
+      "NoDeliveryCheck": false
+    },
+    "disk": {
+      "Crash": 0,
+      "Metadata": 0,
+      "FailedSync": 0,
+      "SectorSize": 0,
+      "Capacity": 0,
+      "Latency": {
+        "Read": {
+          "Base": 0,
+          "Jitter": 0
+        },
+        "Write": {
+          "Base": 0,
+          "Jitter": 0
+        },
+        "Sync": {
+          "Base": 0,
+          "Jitter": 0
+        },
+        "Meta": {
+          "Base": 0,
+          "Jitter": 0
+        },
+        "SlowPPM": 0,
+        "Slow": 0
+      }
+    }
+  },
+  "options_hash": "0x5603791a69c69e0d",
+  "run": {
+    "trace_hash": "0x34d831a670e30100",
+    "events": 1455,
+    "records": 3631,
+    "dropped": 3568,
+    "end_ns": 5873034010,
+    "end": "5.873034010s",
+    "stop": "failed",
+    "recovery_ns": 7500000000,
+    "recovery": "7.500000000s",
+    "planners": [
+      "random"
+    ],
+    "attempts": 2
+  },
+  "nodes": [
+    {
+      "id": 1,
+      "name": "n1",
+      "tags": [
+        "server"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "c1",
+      "tags": [
+        "client"
+      ]
+    }
+  ],
+  "dir": "/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e",
+  "files": [
+    {
+      "name": "report.txt",
+      "type": "report_text"
+    },
+    {
+      "name": "schedule.json",
+      "type": "schedule",
+      "version": 1
+    },
+    {
+      "name": "timeline.txt",
+      "type": "timeline_text",
+      "version": 1
+    }
+  ]
+}
