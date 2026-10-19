@@ -28,7 +28,7 @@ func TestTimelineDataFixture(t *testing.T) {
 	if tl.Trace != fixtureTraceText {
 		t.Fatalf("trace text mismatch:\n%s", tl.Trace)
 	}
-	if tl.Schedule != string(sched) || tl.Window != nil || tl.Version != 1 || tl.Title != "faultline TestToy/seed=0x0000000000000001" {
+	if tl.Schedule != string(sched) || tl.Window != nil || tl.Version != 2 || tl.Title != "faultline TestToy/seed=0x0000000000000001" {
 		t.Fatalf("timeline = %+v", tl)
 	}
 	if tl.Total != 12 || tl.Dropped != 0 || tl.Report != &rep {

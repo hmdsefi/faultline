@@ -152,11 +152,11 @@ var ErrOtherTest = errors.New("it holds the artifact of another test")
 // Write writes a to dir atomically. It writes every file into a temporary directory next to dir,
 // then renames it to dir, so dir never mixes old and new files. It refuses to replace a symbolic
 // link or a directory without report.json. It does not replace the artifact of another package,
-// test or seed either: the error then wraps ErrOtherTest. Once a and dir pass its checks,
-// and before it writes a file, Write changes a: a.Report becomes the copy it writes, with every
-// string valid UTF-8, nil Nodes, Planners and Files empty, and Version, Dir and Files set, and
-// a.Trace.Header the header line it writes, with Version, Records and Dropped set. An error after
-// that point, such as a file system error, leaves these changes in a.
+// test or seed either: the error then wraps ErrOtherTest. Write changes a only when it succeeds.
+// a.Report then holds the copy it wrote. In that copy every string is valid UTF-8, nil Nodes,
+// Planners and Files are empty slices, and Version, Dir and Files are set. a.Trace.Header holds
+// the header line it wrote, with Version, Records and Dropped set. An error leaves a as it was, so
+// the caller can retry with the same a.
 func Write(dir string, a *Artifact) error {
 	if a == nil {
 		return errors.New("artifact: artifact is nil")
@@ -188,16 +188,17 @@ func Write(dir string, a *Artifact) error {
 	if err != nil {
 		return err
 	}
+	// Write works on copies of the report and the trace header: a changes only once every file is
+	// in place (ART-011).
 	extras := slices.Sorted(maps.Keys(a.Extra))
-	a.Trace.Header = headerFor(a.Trace)
-	a.Report = rep
-	a.Report.Dir = abs
-	a.Report.Files = fileIndex(a, extras)
+	tr := &Trace{Header: headerFor(a.Trace), Records: a.Trace.Records}
+	rep.Dir = abs
+	rep.Files = fileIndex(a, extras)
 	root := uint64(0)
-	if a.Report.Failure != nil {
-		root = a.Report.Failure.RecordSeq
+	if rep.Failure != nil {
+		root = rep.Failure.RecordSeq
 	}
-	s, x := causalSlice(a.Trace.Records, root, DefaultSliceCap) // x serves hb.mmd too
+	s, x := causalSlice(tr.Records, root, DefaultSliceCap) // x serves hb.mmd too
 
 	parent, base := filepath.Dir(abs), filepath.Base(abs)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -247,7 +248,7 @@ func Write(dir string, a *Artifact) error {
 	bytesOf := func(b []byte) func(f *os.File) error {
 		return func(f *os.File) error { _, err := f.Write(b); return err }
 	}
-	if err := write(FileTrace, func(f *os.File) error { return WriteTrace(f, a.Trace) }); err != nil {
+	if err := write(FileTrace, func(f *os.File) error { return WriteTrace(f, tr) }); err != nil {
 		return err
 	}
 	if a.Schedule != nil {
@@ -265,21 +266,21 @@ func Write(dir string, a *Artifact) error {
 			return err
 		}
 	}
-	if err := write(FileTimelineText, func(f *os.File) error { return WriteTimelineText(f, &a.Report, a.Trace, s) }); err != nil {
+	if err := write(FileTimelineText, func(f *os.File) error { return WriteTimelineText(f, &rep, tr, s) }); err != nil {
 		return err
 	}
-	if err := write(FileHB, func(f *os.File) error { return writeHB(f, a.Trace, x, root, DefaultSliceCap) }); err != nil {
+	if err := write(FileHB, func(f *os.File) error { return writeHB(f, tr, x, root, DefaultSliceCap) }); err != nil {
 		return err
 	}
 	if err := write(FileTimelineHTML, func(f *os.File) error {
-		return WriteTimelineHTML(f, &a.Report, a.Trace, sched, s, DefaultTimelineRecords)
+		return WriteTimelineHTML(f, &rep, tr, sched, s, DefaultTimelineRecords)
 	}); err != nil {
 		return err
 	}
 	if err := write(FileReportText, bytesOf([]byte(a.Text))); err != nil {
 		return err
 	}
-	if err := write(FileReport, func(f *os.File) error { return WriteReport(f, &a.Report) }); err != nil {
+	if err := write(FileReport, func(f *os.File) error { return WriteReport(f, &rep) }); err != nil {
 		return err
 	}
 	// The old directory is set aside, not deleted, until the new one is in place: a kill or an
@@ -306,6 +307,7 @@ func Write(dir string, a *Artifact) error {
 	if old != "" {
 		_ = os.RemoveAll(old)
 	}
+	a.Report, a.Trace.Header = rep, tr.Header
 	return nil
 }
 
@@ -338,14 +340,20 @@ func checkTarget(abs string, rep *Report) (target, error) {
 		return target{}, fmt.Errorf("artifact: %w", err)
 	case fi.Mode()&fs.ModeSymlink != 0:
 		return target{}, fmt.Errorf("artifact: refusing to replace %s: it is a symbolic link", abs)
-	case !replaceable(abs):
+	}
+	old, rfi, _ := readReportFile(abs) // a report.json it cannot read names no other test
+	if rfi == nil && !onlyStall(abs) {
 		return target{}, fmt.Errorf("artifact: refusing to replace %s: not a faultline artifact directory (no report.json)", abs)
 	}
-	t := target{dir: fi, report: lstatOrNil(filepath.Join(abs, FileReport))}
-	if old := oldReport(abs, t.report); old != nil && (old.Package != rep.Package || old.Test != rep.Test || old.Seed != rep.Seed) {
+	if old != nil && !sameTest(old, rep) {
 		return target{}, fmt.Errorf("artifact: refusing to replace %s: %w (package %q, test %q, seed %q)", abs, ErrOtherTest, old.Package, old.Test, old.Seed)
 	}
-	return t, nil
+	return target{dir: fi, report: rfi}, nil
+}
+
+// sameTest reports whether a and b are artifacts of one package, test and seed, the inputs of Dir.
+func sameTest(a, b *Report) bool {
+	return a.Package == b.Package && a.Test == b.Test && a.Seed == b.Seed
 }
 
 // recheckTarget checks dir again just before Write sets it aside (ART-012). Reading report.json is
@@ -379,31 +387,41 @@ func sameReport(a, b fs.FileInfo) bool {
 	return sameFile(a, b) && a.Mode().IsRegular() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
 }
 
-// oldReport returns the report of the artifact in dir, or nil when report.json (fi, its os.Lstat
-// result) is not a regular file or ReadReport rejects it (ART-012). A link is not followed, and a
-// FIFO is not opened.
-func oldReport(dir string, fi fs.FileInfo) *Report {
-	if fi == nil || !fi.Mode().IsRegular() {
-		return nil
-	}
-	f, err := os.Open(filepath.Join(dir, FileReport))
+// ReadReportFile reads report.json in the artifact directory dir. It opens report.json only when
+// os.Lstat reports a regular file, so it does not open a symbolic link or a FIFO there. It follows
+// a symbolic link at dir or above it. It also opens a file that replaces report.json after the
+// os.Lstat and before the open. A failed os.Lstat counts as no report, whatever the reason:
+// ReadReportFile then returns nil and a nil error. That covers a missing report.json, a dir without
+// search permission and a path through a file. Otherwise the error says why the file could not be
+// read: it is not a regular file, it cannot be opened, or ReadReport rejects it.
+func ReadReportFile(dir string) (*Report, error) {
+	rep, _, err := readReportFile(dir)
+	return rep, err
+}
+
+// readReportFile is ReadReportFile, and it also returns the os.Lstat result of report.json, nil
+// when os.Lstat failed, which Write keeps for its second check (ART-012).
+func readReportFile(dir string) (*Report, fs.FileInfo, error) {
+	path := filepath.Join(dir, FileReport)
+	fi, err := os.Lstat(path)
 	if err != nil {
-		return nil
+		return nil, nil, nil // no report.json to read
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fi, errors.New("artifact: report.json: not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fi, fmt.Errorf("artifact: report.json: %w", err)
 	}
 	defer f.Close()
 	rep, err := ReadReport(f)
-	if err != nil {
-		return nil
-	}
-	return rep
+	return rep, fi, err
 }
 
-// replaceable reports whether an existing dir may be replaced (ART-012): it holds report.json, or
-// its only entry is stall.txt (GOR-081).
-func replaceable(dir string) bool {
-	if _, err := os.Lstat(filepath.Join(dir, FileReport)); err == nil {
-		return true
-	}
+// onlyStall reports whether dir's only entry is stall.txt, which GOR's stall watchdog leaves
+// (GOR-081): Write replaces such a dir although it has no report.json (ART-012).
+func onlyStall(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	return err == nil && len(entries) == 1 && entries[0].Name() == "stall.txt"
 }

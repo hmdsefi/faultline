@@ -49,7 +49,8 @@ func needsEscape(r rune) bool { return r == '\\' || !strconv.IsPrint(r) }
 
 // WriteTimelineText writes timeline.txt: a header that summarizes the run, then one line per
 // trace record with its Seq, time, node, kind, text, attributes and cause. A "!" marks the root of
-// the causal slice s and a "*" its other records.
+// the causal slice s and a "*" its other records. The node and kind columns fit values of up to 32
+// bytes; a longer value is written whole and shifts the rest of its own row only.
 func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 	if rep == nil {
 		return errors.New("artifact: report is nil")
@@ -106,8 +107,8 @@ func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 	for _, r := range tr.Records {
 		wSeq = max(wSeq, len(strconv.FormatUint(r.Seq, 10)))
 		wTime = max(wTime, len(r.At.String()))
-		wNode = max(wNode, len(esc(nodeLabel(r, names))))
-		wKind = max(wKind, len(esc(r.Kind)))
+		wNode = widen(wNode, len(esc(nodeLabel(r, names))))
+		wKind = widen(wKind, len(esc(r.Kind)))
 	}
 	row := func(mark, seq, t, node, kind, rest string) string {
 		return mark + " " + padLeft(seq, wSeq) + " " + padLeft(t, wTime) + " " + padRight(node, wNode) + " " + padRight(kind, wKind) + " " + rest
@@ -139,6 +140,20 @@ func WriteTimelineText(w io.Writer, rep *Report, tr *Trace, s Slice) error {
 		line(row(mark, strconv.FormatUint(r.Seq, 10), r.At.String(), esc(nodeLabel(r, names)), esc(r.Kind), rest.String()))
 	}
 	return bw.Flush()
+}
+
+// maxWidth is the longest NODE or KIND value, in bytes, that sets its column's width in
+// timeline.txt (ART-040).
+const maxWidth = 32
+
+// widen returns the width w of a NODE or KIND column after a value of n bytes: max(w, n), or w when
+// n is above maxWidth. Such a value is written whole and pushes the rest of its own row, so that
+// one long kind or node name does not pad every row (ART-040).
+func widen(w, n int) int {
+	if n > maxWidth {
+		return w
+	}
+	return max(w, n)
 }
 
 func padLeft(s string, w int) string {

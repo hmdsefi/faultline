@@ -21,7 +21,7 @@ package artifact
 const (
 	ReportVersion   = 1 // report.json "faultline_report"
 	TraceVersion    = 1 // trace.jsonl header "faultline_trace"
-	TimelineVersion = 1 // timeline data "faultline_timeline"; timeline.txt "faultline timeline v1"
+	TimelineVersion = 2 // timeline data "faultline_timeline"; timeline.txt "faultline timeline v2"
 	HBVersion       = 1 // hb.mmd comment "faultline causal slice v1"
 )
 

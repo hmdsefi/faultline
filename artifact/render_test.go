@@ -201,6 +201,62 @@ func TestRenderPassNoSchedule(t *testing.T) {
 	}
 }
 
+// ART-014, ART-040: an artifact written with TimelineVersion 1 still renders. Render writes the
+// version 2 render files and leaves report.json, whose file index names version 1, as it was.
+func TestRenderVersion1(t *testing.T) {
+	dir := renderWritten(t, fixtureArtifact())
+	want := readAll(t, dir)
+	// index1 makes the file index entries of timeline.txt and timeline.html in b name version 1,
+	// in report.json (indented) or in the report that timeline.html embeds (compact).
+	index1 := func(b []byte, indented bool) []byte {
+		colon, next := ":", ","
+		if indented {
+			colon, next = ": ", ",\n      "
+		}
+		for _, typ := range []string{"timeline_text", "timeline_html"} {
+			entry := `"type"` + colon + `"` + typ + `"` + next + `"version"` + colon
+			b = replaceOnce(t, b, entry+"2", entry+"1")
+		}
+		return b
+	}
+	v1 := map[string][]byte{
+		FileReport:       index1(want[FileReport], true),
+		FileTimelineText: replaceOnce(t, want[FileTimelineText], "faultline timeline v2\n", "faultline timeline v1\n"),
+		FileTimelineHTML: index1(replaceOnce(t, want[FileTimelineHTML], `"faultline_timeline":2`, `"faultline_timeline":1`), false),
+	}
+	for name, b := range v1 {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Render(dir, RenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	got := readAll(t, dir)
+	// The page embeds report.json as Render read it, with the index naming version 1.
+	for name, b := range map[string][]byte{FileTimelineText: want[FileTimelineText], FileHB: want[FileHB], FileTimelineHTML: index1(want[FileTimelineHTML], false), FileReport: v1[FileReport]} {
+		if !bytes.Equal(got[name], b) {
+			t.Errorf("%s after Render differs from the expected version 2 render", name)
+		}
+	}
+	a, err := Read(dir)
+	if err != nil {
+		t.Fatalf("Read of the version 1 artifact: %v", err)
+	}
+	if v := a.Report.Files[len(a.Report.Files)-1].Version; v != 1 {
+		t.Errorf("Read of the version 1 artifact: the timeline_html index entry has version %d, want 1", v)
+	}
+}
+
+// replaceOnce returns b with from, which b holds once, replaced by to.
+func replaceOnce(t *testing.T, b []byte, from, to string) []byte {
+	t.Helper()
+	if n := bytes.Count(b, []byte(from)); n != 1 {
+		t.Fatalf("%q found %d times, want once", from, n)
+	}
+	return bytes.Replace(b, []byte(from), []byte(to), 1)
+}
+
 // ART-090: a relative directory gives absolute paths.
 func TestRenderRelativeDir(t *testing.T) {
 	dir := renderWritten(t, fixtureArtifact())

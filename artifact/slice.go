@@ -31,17 +31,41 @@ type poKey struct {
 	inc  uint32
 }
 
+// seqIndex finds a record by Seq in records in ascending Seq.
+type seqIndex struct {
+	records    []kernel.Record
+	contiguous bool // Seqs without gaps: a record's position is its Seq minus the first Seq
+}
+
+// newSeqIndex returns the seqIndex of records. TimelineData needs only index, so it skips the
+// program order of hbIndex, which costs 8 bytes and a map lookup per record.
+func newSeqIndex(records []kernel.Record) seqIndex {
+	n := len(records)
+	return seqIndex{records: records, contiguous: n == 0 || records[n-1].Seq-records[0].Seq+1 == uint64(n)}
+}
+
+// index returns the position of seq in the record list.
+func (x *seqIndex) index(seq uint64) (int, bool) {
+	n := len(x.records)
+	if n == 0 || seq < x.records[0].Seq || seq > x.records[n-1].Seq {
+		return 0, false
+	}
+	if x.contiguous {
+		return int(seq - x.records[0].Seq), true //nolint:gosec // below len(records): seq is in range and the seqs are contiguous
+	}
+	i := sort.Search(n, func(i int) bool { return x.records[i].Seq >= seq })
+	return i, i < n && x.records[i].Seq == seq
+}
+
 // hbIndex answers happens-before predecessor queries over records in ascending Seq (ART-050).
 type hbIndex struct {
-	records    []kernel.Record
-	contiguous bool
-	po         []int // index of the program-order predecessor, or -1; an int, so any length fits
+	seqIndex
+	po []int // index of the program-order predecessor, or -1; an int, so any length fits
 }
 
 // newHBIndex indexes records for index and preds in one pass (ART-051).
 func newHBIndex(records []kernel.Record) *hbIndex {
-	x := newSeqIndex(records)
-	x.po = make([]int, len(records))
+	x := &hbIndex{seqIndex: newSeqIndex(records), po: make([]int, len(records))}
 	last := make(map[poKey]int) // lookups only; never iterated
 	for i, r := range records {
 		x.po[i] = -1
@@ -55,26 +79,6 @@ func newHBIndex(records []kernel.Record) *hbIndex {
 		last[k] = i
 	}
 	return x
-}
-
-// newSeqIndex returns an index for index only. It skips the program order that preds needs, which
-// costs newHBIndex 8 bytes and a map lookup per record.
-func newSeqIndex(records []kernel.Record) *hbIndex {
-	n := len(records)
-	return &hbIndex{records: records, contiguous: n == 0 || records[n-1].Seq-records[0].Seq+1 == uint64(n)}
-}
-
-// index returns the position of seq in the record list.
-func (x *hbIndex) index(seq uint64) (int, bool) {
-	n := len(x.records)
-	if n == 0 || seq < x.records[0].Seq || seq > x.records[n-1].Seq {
-		return 0, false
-	}
-	if x.contiguous {
-		return int(seq - x.records[0].Seq), true //nolint:gosec // below len(records): seq is in range and the seqs are contiguous
-	}
-	i := sort.Search(n, func(i int) bool { return x.records[i].Seq >= seq })
-	return i, i < n && x.records[i].Seq == seq
 }
 
 // preds returns the indexes of the happens-before predecessors of record i, in ART-050 order:

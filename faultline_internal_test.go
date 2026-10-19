@@ -5,9 +5,7 @@ package faultline
 
 import (
 	"flag"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -79,62 +77,6 @@ func TestDefaultArtifactRoot(t *testing.T) {
 	}
 	if got, want := defaultArtifactRoot(tmp, -1), filepath.Join(tmp, "faultline"); got != want {
 		t.Errorf("no user IDs: %q, want %q", got, want)
-	}
-}
-
-// API-073, API-083: readReportFile opens report.json only when it is a regular file, so a symbolic
-// link is not followed and gives a reason; a missing report.json, or one out of reach, gives nil
-// and no reason.
-func TestReadReportFile(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "a")
-	if err := artifact.Write(dir, minimalArtifact("T")); err != nil {
-		t.Fatal(err)
-	}
-	if rep, err := readReportFile(dir); rep == nil || err != nil {
-		t.Fatalf("regular report.json not read: %v", err)
-	}
-	link := t.TempDir()
-	if err := os.Symlink(filepath.Join(dir, artifact.FileReport), filepath.Join(link, artifact.FileReport)); err != nil {
-		t.Fatal(err)
-	}
-	if rep, err := readReportFile(link); rep != nil || err == nil || err.Error() != "not a regular file" {
-		t.Fatalf("symbolic link: %+v, %v", rep, err)
-	}
-	if rep, err := readReportFile(t.TempDir()); rep != nil || err != nil {
-		t.Fatalf("missing report.json: %+v, %v", rep, err)
-	}
-	file := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if rep, err := readReportFile(filepath.Join(file, "a")); rep != nil || err != nil {
-		t.Fatalf("a path through a file: %+v, %v", rep, err)
-	}
-	// A report.json that cannot be opened gives the open error.
-	if err := os.Chmod(filepath.Join(dir, artifact.FileReport), 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.ReadFile(filepath.Join(dir, artifact.FileReport)); err == nil {
-		t.Skip("report.json still opens without permissions (root, or a file system without them)")
-	}
-	if rep, err := readReportFile(dir); rep != nil || err == nil || !strings.HasPrefix(err.Error(), "open ") {
-		t.Fatalf("report.json without permissions: %+v, %v", rep, err)
-	}
-}
-
-// API-073, API-083: readReportFile does not open a FIFO report.json, so a FIFO cannot block the
-// run. The test sets no time limit: if readReportFile opened the FIFO, go test's -timeout would
-// stop the test binary and print the stack of every goroutine, this one blocked in the open.
-func TestReadReportFileFIFO(t *testing.T) {
-	dir := t.TempDir()
-	switch ok, err := mkfifo(filepath.Join(dir, artifact.FileReport)); {
-	case !ok:
-		t.Skip("this platform has no FIFOs")
-	case err != nil:
-		t.Skipf("cannot create a FIFO here: %v", err)
-	}
-	if rep, err := readReportFile(dir); rep != nil || err == nil || err.Error() != "not a regular file" {
-		t.Fatalf("FIFO report.json: %+v, %v", rep, err)
 	}
 }
 

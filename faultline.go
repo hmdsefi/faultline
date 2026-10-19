@@ -541,7 +541,10 @@ func (r *runner) ownReport(seed uint64) (dir string, rep *artifact.Report, err e
 	root := r.artifactRoot()
 	pkg, test := r.build.importPath, r.t.Name()
 	for _, dir = range []string{artifact.Dir(root, pkg, test, seed), artifact.AltDir(root, pkg, test, seed)} {
-		if rep, err = readReportFile(dir); rep == nil {
+		if rep, err = artifact.ReadReportFile(dir); rep == nil {
+			if err != nil { // the reason alone: API-073's line names report.json
+				err = errors.New(strings.TrimPrefix(err.Error(), "artifact: report.json: "))
+			}
 			return dir, nil, err
 		}
 		if rep.Package == pkg && rep.Test == test && rep.Seed == hex16(seed) {
@@ -549,31 +552,6 @@ func (r *runner) ownReport(seed uint64) (dir string, rep *artifact.Report, err e
 		}
 	}
 	return dir, nil, nil
-}
-
-// readReportFile reads report.json in dir. It returns nil and a nil error when report.json is
-// missing or out of reach (artifact.Write then says what it finds), and nil and the reason when it
-// cannot be read (API-073). Only a regular file is opened, so a link is not followed and a FIFO
-// does not block the run.
-func readReportFile(dir string) (*artifact.Report, error) {
-	path := filepath.Join(dir, artifact.FileReport)
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return nil, nil // nothing here to keep
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	rep, err := artifact.ReadReport(f)
-	if err != nil {
-		return nil, errors.New(strings.TrimPrefix(err.Error(), "artifact: report.json: "))
-	}
-	return rep, nil
 }
 
 // goexitMessage is the message of a seed that its primary attempt stopped through Goexit (API-101).
