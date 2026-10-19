@@ -251,7 +251,6 @@ func (inc *incarnation) sendMessages(rd raft.Ready) {
 		}
 		c.w.Net.Send(inc.n, to.node.ID(), raftPacket(m))
 		if m.GetType() == raftpb.MsgSnap {
-			c.stats.SnapshotsSent++
 			inc.trackSnap(m)
 		}
 		if cfg.ReportUnreachable && (to.node.State() == kernel.NodeDown || !c.w.Net.Connected(inc.n.ID(), to.node.ID())) {
@@ -285,7 +284,7 @@ func (inc *incarnation) apply(rd raft.Ready) bool {
 		c.o.SnapshotState(inc.now(), inc.n.Name(), "install", idx, h, inc.confState)
 		c.stats.SnapshotsInstalled++
 		c.emit(inc.n, "etcdraft.snapshot", fmt.Sprintf("snapshot install %d", idx),
-			attr("action", "install"), attr("index", u64(idx)), attr("data_hash", fmt.Sprintf("%016x", h)))
+			attr("action", "install"), attr("index", u64(idx)), attr("data_hash", hashHex(h)))
 	}
 	// ETC-067 step 2: BugApplyBeforeCommit applies the new normal entries before they commit.
 	if inc.cfg().Bugs&BugApplyBeforeCommit != 0 {

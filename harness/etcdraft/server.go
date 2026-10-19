@@ -76,6 +76,9 @@ type incarnation struct {
 
 func u64(v uint64) string { return strconv.FormatUint(v, 10) }
 
+// hashHex formats a state hash as the 16-digit lowercase hex of a data_hash attribute (§8).
+func hashHex(h uint64) string { return fmt.Sprintf("%016x", h) }
+
 func boolStr(b bool) string { return strconv.FormatBool(b) }
 
 // describeHS is raft.DescribeHardState, or "" for an empty HardState.

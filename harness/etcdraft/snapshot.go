@@ -77,11 +77,11 @@ func (inc *incarnation) takeSnapshot(i uint64) bool {
 	}
 	c.stats.SnapshotsCreated++
 	c.emit(inc.n, "etcdraft.snapshot", fmt.Sprintf("snapshot create %d", l),
-		attr("action", "create"), attr("index", u64(l)), attr("data_hash", fmt.Sprintf("%016x", h)))
+		attr("action", "create"), attr("index", u64(l)), attr("data_hash", hashHex(h)))
 	return true
 }
 
-// trackSnap records a sent MsgSnap (ETC-152).
+// trackSnap records and counts a sent MsgSnap (ETC-152).
 func (inc *incarnation) trackSnap(m *raftpb.Message) {
 	peer, idx := m.GetTo(), m.GetSnapshot().GetMetadata().GetIndex()
 	if old, ok := inc.pendingSnap[peer]; ok {
@@ -89,6 +89,7 @@ func (inc *incarnation) trackSnap(m *raftpb.Message) {
 	}
 	timer := inc.n.After(inc.cfg().SnapshotTimeout, "etcdraft/snap-timeout", func() { inc.onSnapTimeout(peer, idx) })
 	inc.pendingSnap[peer] = pendingSnap{index: idx, timer: timer}
+	inc.c.stats.SnapshotsSent++
 	inc.c.emit(inc.n, "etcdraft.snapshot", fmt.Sprintf("snapshot send %d to %d", idx, peer),
 		attr("action", "send"), attr("index", u64(idx)), attr("peer", u64(peer)))
 }

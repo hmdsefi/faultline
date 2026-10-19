@@ -70,12 +70,28 @@ func TestFaultPresets(t *testing.T) {
 	// Faults applies the Quiet default, and every call returns a new planner with its own rules.
 	cfg = DefaultConfig()
 	cfg.Quiet = 0
-	r1, _ := Faults(cfg).(*fault.Random)
-	r2, _ := Faults(cfg).(*fault.Random)
+	p1, p2 := Faults(cfg), Faults(cfg)
+	r1, ok1 := p1.(*fault.Random)
+	r2, ok2 := p2.(*fault.Random)
+	if !ok1 || !ok2 {
+		t.Fatalf("Quiet 0 gave planners %T and %T, want two *fault.Random", p1, p2)
+	}
 	if r1.Quiet != 10*s {
 		t.Fatalf("Quiet 0 gave a planner with Quiet %v, want the 10s default", r1.Quiet)
 	}
-	if r1 == r2 || &r1.Rules[0] == &r2.Rules[0] || r1.Rules[3].Link == r2.Rules[3].Link {
+	link := func(r *fault.Random) *simnet.Link {
+		for _, rule := range r.Rules {
+			if rule.Kind == fault.KindLink {
+				return rule.Link
+			}
+		}
+		return nil
+	}
+	l1, l2 := link(r1), link(r2)
+	if l1 == nil || l2 == nil {
+		t.Fatalf("the default preset has no %s rule with a Link; rules\n%+v", fault.KindLink, r1.Rules)
+	}
+	if r1 == r2 || &r1.Rules[0] == &r2.Rules[0] || l1 == l2 {
 		t.Fatal("two calls returned the same planner, rules or link")
 	}
 }
