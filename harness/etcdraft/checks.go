@@ -87,7 +87,7 @@ func (c *Cluster) checkAckedWrites() error {
 		}
 		var in KVInput
 		if err := op.DecodeInput(&in); err != nil {
-			return fmt.Errorf("write %s#%d: input decode: %v", op.Process, op.ID, err)
+			return fmt.Errorf("write %s#%d: input decode: %w", op.Process, op.ID, err)
 		}
 		cl := c.clientByName(op.Process)
 		if cl == nil {
@@ -136,20 +136,23 @@ func (c *Cluster) checkWAL() error {
 			continue
 		}
 		if err := s.inc.walAgrees(); err != nil {
-			return fmt.Errorf("%s WAL and memory disagree: %v", s.node.Name(), err)
+			return fmt.Errorf("%s WAL and memory disagree: %w", s.node.Name(), err)
 		}
 	}
 	return nil
 }
 
+// walAgrees compares the WAL's visible content with MemoryStorage plus the in-flight Ready
+// (ETC-133): the snapshot index, each entry's index, term, type and data, and the HardState after
+// the ETC-034 commit fix-up. It never writes into MemoryStorage.
 func (inc *incarnation) walAgrees() error {
 	data, err := inc.c.w.Disk.Volume(inc.n).ReadFile(walPath)
 	if err != nil {
-		return fmt.Errorf("read: %v", err)
+		return fmt.Errorf("read: %w", err)
 	}
 	st, err := wal.Read(data)
 	if err != nil {
-		return fmt.Errorf("parse: %v", err)
+		return fmt.Errorf("parse: %w", err)
 	}
 	// Memory view: MemoryStorage with the in-flight Ready applied on top as wal.Read would.
 	snap, _ := inc.ms.Snapshot()
@@ -160,7 +163,7 @@ func (inc *incarnation) walAgrees() error {
 	if last >= first {
 		ents, err = inc.ms.Entries(first, last+1, math.MaxUint64)
 		if err != nil {
-			return fmt.Errorf("memory entries: %v", err)
+			return fmt.Errorf("memory entries: %w", err)
 		}
 	}
 	hs, _, _ := inc.ms.InitialState()

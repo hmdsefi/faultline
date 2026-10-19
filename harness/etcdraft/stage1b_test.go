@@ -5,6 +5,7 @@ package etcdraft
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -276,7 +277,8 @@ func TestSnapshotTimeout(t *testing.T) {
 // (SnapshotEvery is 0): a second send to the same peer cancels the first send's timer, an ack
 // of another index is ignored, and the matching ack reports, clears the entry and cancels the
 // second timer: a third send right after the ack is still pending after the second timer's
-// due time (8 s), and only its own timer times it out later.
+// due time (8 s), and only its own timer times it out later. Stats.SnapshotsSent counts the
+// three tracked sends, as their records do.
 func TestSnapshotBookkeeping(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Faults = FaultsNone
@@ -316,8 +318,20 @@ func TestSnapshotBookkeeping(t *testing.T) {
 		t.Error(p)
 	}
 	want := []string{"snapshot send 1000 to 3", "snapshot send 1000 to 3", "snapshot ack 1000 from 3", "snapshot send 1000 to 3", "snapshot timeout 1000 to 3"}
-	if !slices.Equal(texts, want) || st.SnapshotReportsFinish != 1 || st.SnapshotReportsFailure != 1 {
-		t.Errorf("records %q, %d finish and %d failure reports; want %q, 1 and 1", texts, st.SnapshotReportsFinish, st.SnapshotReportsFailure, want)
+	if !slices.Equal(texts, want) || st.SnapshotsSent != 3 || st.SnapshotReportsFinish != 1 || st.SnapshotReportsFailure != 1 {
+		t.Errorf("records %q, SnapshotsSent %d, SnapshotReportsFinish %d, SnapshotReportsFailure %d; want %q, 3, 1 and 1", texts, st.SnapshotsSent, st.SnapshotReportsFinish, st.SnapshotReportsFailure, want)
+	}
+}
+
+// §8: a snapshot record's data_hash is the FNV hash as 16 lowercase hex digits, zero-padded.
+func TestHashHex(t *testing.T) {
+	for _, c := range []struct {
+		h    uint64
+		want string
+	}{{0, "0000000000000000"}, {0xab, "00000000000000ab"}, {math.MaxUint64, "ffffffffffffffff"}} {
+		if got := hashHex(c.h); got != c.want {
+			t.Errorf("hashHex(%#x) = %q, want %q", c.h, got, c.want)
+		}
 	}
 }
 

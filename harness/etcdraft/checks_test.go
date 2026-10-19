@@ -4,8 +4,10 @@
 package etcdraft
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"regexp"
@@ -217,6 +219,47 @@ func TestWALAgreesStage1b(t *testing.T) {
 				err = inc.ms.SetHardState(hs)
 			}
 			agrees("an install whose HardState record was lost", inc, err)
+			return nil
+		})
+	})
+	for _, p := range problems {
+		t.Error(p)
+	}
+}
+
+// ETC-131 and ETC-133: a final check's error wraps its cause, so errors.Is and errors.As reach
+// it: an entry gap in n1's WAL through checkWAL, a missing WAL file on n2, and the decode error
+// of a write whose input is not a KVInput.
+func TestFinalCheckErrorsWrap(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Faults = FaultsNone
+	opts := testOptions(t, &cfg, 15*time.Second, false)
+	var problems []string
+	runSeed(t, 1, opts, func(w *faultline.World) {
+		c := Setup(w, cfg)
+		w.Final("test: wrapped errors", func() error {
+			problems = nil
+			inc := c.server(1).inc
+			last, _ := inc.ms.LastIndex()
+			if !inc.append(wal.RecEntry, wal.Marshal(&raftpb.Entry{Index: new(last + 10), Term: new(uint64(1))})) {
+				problems = append(problems, "n1: WAL append failed")
+			}
+			if err := c.checkWAL(); !errors.Is(err, wal.ErrEntryGap) {
+				problems = append(problems, fmt.Sprintf("checkWAL with an entry gap in n1's WAL: err = %v, want one wrapping wal.ErrEntryGap", err))
+			}
+			inc = c.server(2).inc
+			if err := w.Disk.Volume(inc.n).Remove(walPath); err != nil {
+				problems = append(problems, "n2: remove WAL: "+err.Error())
+			}
+			if err := inc.walAgrees(); !errors.Is(err, fs.ErrNotExist) {
+				problems = append(problems, fmt.Sprintf("walAgrees without n2's WAL file: err = %v, want one wrapping fs.ErrNotExist", err))
+			}
+			hid := w.History.Invoke("test", "write", "not a KVInput")
+			w.History.Complete(hid, history.OK, nil)
+			var typeErr *json.UnmarshalTypeError
+			if err := c.checkAckedWrites(); !errors.As(err, &typeErr) {
+				problems = append(problems, fmt.Sprintf("checkAckedWrites with a string input: err = %v, want one wrapping a *json.UnmarshalTypeError", err))
+			}
 			return nil
 		})
 	})

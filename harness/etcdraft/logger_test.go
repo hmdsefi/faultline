@@ -159,6 +159,7 @@ func TestLoggerLevelsAndNodes(t *testing.T) {
 		{func() { l.Panic("p ", 1) }, "p 1", "panic", "p 1"},
 		{func() { l.Fatalf("f %d", 2) }, "raft fatal: f 2", "fatal", "f 2"},
 	} {
+		before := len(logRecords(sim))
 		func() {
 			defer func() {
 				if v := recover(); v != c.value {
@@ -168,6 +169,10 @@ func TestLoggerLevelsAndNodes(t *testing.T) {
 			c.call()
 		}()
 		recs := logRecords(sim)
+		if len(recs) != before+1 {
+			t.Errorf("the call panicking with %q emitted %d records, want 1 with level %s and text %q", c.value, len(recs)-before, c.level, c.txt)
+			continue
+		}
 		if r := recs[len(recs)-1]; attrOf(r, "level") != c.level || r.Text != c.txt {
 			t.Errorf("record %+v, want level %s and text %q", r, c.level, c.txt)
 		}
