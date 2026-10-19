@@ -36,7 +36,7 @@ func TestBuildReplay(t *testing.T) {
 		{"github.com/acme", "github.com/acme", "/src/acme", "TestKV/raft_3_nodes", 1, "",
 			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestKV$/^raft_3_nodes$' github.com/acme", ".", "/src/acme", "^TestKV$/^raft_3_nodes$"},
 		{"command-line-arguments", "", "/x", "TestA", 1, "/tmp/my sched.json",
-			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE='/tmp/my sched.json' go test -v -run '^TestA$' .", ".", "/x", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE='/tmp/my sched.json' go test -v -count=1 -run '^TestA$' .", ".", "/x", "^TestA$"},
 		{"github.com/acme", "github.com/acme", "/src/acme", "Test/a.b(c)", 1, "",
 			`FAULTLINE_SEED=0x0000000000000001 go test -v -run '^Test$/^a\.b\(c\)$' github.com/acme`, ".", "/src/acme", `^Test$/^a\.b\(c\)$`},
 		{"github.com/acme", "github.com/acme", "/src/acme", "Test/it's", 1, "",
@@ -57,7 +57,7 @@ func TestBuildReplay(t *testing.T) {
 			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestA$' .", ".", "/m/acmekv", "^TestA$"},
 		// A schedule path made of the safe set is not quoted.
 		{"github.com/acme", "github.com/acme", "/src/acme", "TestA", 1, "/tmp/a_b@c%d+e=f:g,h-1.json",
-			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/tmp/a_b@c%d+e=f:g,h-1.json go test -v -run '^TestA$' github.com/acme", ".", "/src/acme", "^TestA$"},
+			"FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/tmp/a_b@c%d+e=f:g,h-1.json go test -v -count=1 -run '^TestA$' github.com/acme", ".", "/src/acme", "^TestA$"},
 		// A package two directories below the module root.
 		{"github.com/acme/internal/raft", "github.com/acme", "/src/acme/internal/raft", "TestRaft", 1, "",
 			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "/src/acme", "^TestRaft$"},
@@ -97,10 +97,12 @@ func TestBuildReplay(t *testing.T) {
 		}
 	}
 	// A determinism failure that only FAULTLINE_CHECK_DETERMINISM looked for: the variable follows
-	// FAULTLINE_SCHEDULE in the command and is in env, so the replay runs the check attempt.
+	// FAULTLINE_SCHEDULE in the command and is in env, so the replay runs the check attempt. With
+	// FAULTLINE_SCHEDULE, -count=1 comes before the build flags: go test does not track a schedule
+	// file outside the module, so without it an edit there could leave a cached pass.
 	b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", race: true}
 	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true, false)
-	want := "FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/s.json FAULTLINE_CHECK_DETERMINISM=1 go test -v -race -run '^TestKV$' github.com/acme/kv"
+	want := "FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/s.json FAULTLINE_CHECK_DETERMINISM=1 go test -v -count=1 -race -run '^TestKV$' github.com/acme/kv"
 	env := map[string]string{"FAULTLINE_SEED": "0x0000000000000001", "FAULTLINE_SCHEDULE": "/s.json", "FAULTLINE_CHECK_DETERMINISM": "1"}
 	if got.Command != want || !maps.Equal(got.Env, env) {
 		t.Errorf("buildReplay(check) = %+v\nwant command %s and env %v", got, want, env)
@@ -128,7 +130,7 @@ func TestBuildReplayRunSeeds(t *testing.T) {
 			"go test -v -run '^TestKV$/^raft_3_nodes$/^seed=0x0000000000000001$' github.com/acme", "^TestKV$/^raft_3_nodes$/^seed=0x0000000000000001$", "/src/acme/kv",
 			map[string]string{}, ".", "/src/acme/kv"},
 		{kv, "TestKV", 1, "/tmp/my sched.json", true,
-			"FAULTLINE_SCHEDULE='/tmp/my sched.json' FAULTLINE_CHECK_DETERMINISM=1 go test -v -run '^TestKV$/^seed=0x0000000000000001$' github.com/acme/kv", "^TestKV$/^seed=0x0000000000000001$", "/src/acme",
+			"FAULTLINE_SCHEDULE='/tmp/my sched.json' FAULTLINE_CHECK_DETERMINISM=1 go test -v -count=1 -run '^TestKV$/^seed=0x0000000000000001$' github.com/acme/kv", "^TestKV$/^seed=0x0000000000000001$", "/src/acme",
 			map[string]string{"FAULTLINE_SCHEDULE": "/tmp/my sched.json", "FAULTLINE_CHECK_DETERMINISM": "1"}, "./kv", "/src/acme/kv"},
 		{buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", tags: "sim,x", race: true}, "TestKV", 1, "", false,
 			"go test -v -tags sim,x -race -run '^TestKV$/^seed=0x0000000000000001$' github.com/acme/kv", "^TestKV$/^seed=0x0000000000000001$", "/src/acme",

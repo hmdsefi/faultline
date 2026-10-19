@@ -173,7 +173,8 @@ const hbDefs = `    classDef violation fill:#fdd,stroke:#c00,stroke-width:2px
 // ART-050 and ART-055: program order is per node incarnation, and it is the latest record on that
 // incarnation, not the latest slice member; the classes go by the "fault." and "net." prefixes,
 // dots included, and the root is "violation" whatever its kind; gograph also escapes & and the
-// backquote, and a \r\n in a text is written as the two escapes.
+// backquote, and a \r\n in a text is written as the two escapes; a record with two successors pins
+// gograph's edge order.
 func TestWriteHBProgramOrderAndClasses(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -224,6 +225,25 @@ func TestWriteHBProgramOrderAndClasses(t *testing.T) {
     n0 --> n1
     n1 --> n2
 ` + hbDefs + `    class n2 violation
+`},
+		// gograph's edge order (ART §6): edges grouped by source in vertex order, each group in the
+		// order they were added. Record 4's edges were added cause first (n2), then program order (n1).
+		{"a record with two successors", []kernel.Record{
+			{Seq: 1, Kind: "k", Text: "a"},
+			{Seq: 2, Node: 1, Inc: 1, Kind: "k", Text: "b", Cause: 1},
+			{Seq: 3, Node: 2, Inc: 1, Kind: "k", Text: "c", Cause: 1},
+			{Seq: 4, Node: 1, Inc: 1, Kind: "k", Text: "r", Cause: 3},
+		}, 4, 200, `flowchart TD
+    %% faultline causal slice v1: root=4 records=4 cap=200 truncated=false
+    n0["1 0.000000000s global<br>k: a"]
+    n1["2 0.000000000s node1#35;1<br>k: b"]
+    n2["3 0.000000000s node2#35;1<br>k: c"]
+    n3["4 0.000000000s node1#35;1<br>k: r"]
+    n0 --> n1
+    n0 --> n2
+    n1 --> n3
+    n2 --> n3
+` + hbDefs + `    class n3 violation
 `},
 	} {
 		var buf bytes.Buffer

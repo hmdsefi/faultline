@@ -306,9 +306,9 @@ func TestWriteExtraFiles(t *testing.T) {
 		{Name: "0_x-y.txt", Type: "extra"},
 		{Name: "a.txt", Type: "extra"},
 		{Name: "b.json", Type: "extra"},
-		{Name: "timeline.txt", Type: "timeline_text", Version: 1},
+		{Name: "timeline.txt", Type: "timeline_text", Version: 2},
 		{Name: "hb.mmd", Type: "hb", Version: 1},
-		{Name: "timeline.html", Type: "timeline_html", Version: 1},
+		{Name: "timeline.html", Type: "timeline_html", Version: 2},
 	}
 	if !reflect.DeepEqual(a.Report.Files, want) {
 		t.Fatalf("files = %+v", a.Report.Files)
@@ -377,8 +377,9 @@ func TestWriteReplacesStallDir(t *testing.T) {
 	}
 }
 
-// ART-011: Version, the absolute cleaned Dir of a relative dir, and the header counts, which the
-// render files use too.
+// ART-011, AT-ART-14: Version, the absolute cleaned Dir of a relative dir, and the header counts,
+// which the render files use too: Render, which reads the header from trace.jsonl, writes the same
+// timeline.txt, hb.mmd and timeline.html.
 func TestWriteSetsFields(t *testing.T) {
 	t.Chdir(t.TempDir())
 	wd, err := os.Getwd()
@@ -405,6 +406,7 @@ func TestWriteSetsFields(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(a.Report.Dir, FileTimelineText)); err != nil || !bytes.Equal(got, want.Bytes()) {
 		t.Fatalf("timeline.txt was not rendered from the header Write set (%v):\n%s", err, got)
 	}
+	renderAgain(t, a.Report.Dir)
 }
 
 // ART-012, ART-014, ART-035: the render files use the default options, the failure record as root
@@ -702,6 +704,119 @@ func TestWriteRefusesFirst(t *testing.T) {
 	}
 }
 
+// ART-011: Write changes a only when it succeeds. A Write that fails, on each error path a test can
+// reach, leaves a as it was, and a retry with the same a writes what a fresh a writes, as Run's
+// retry with AltDir after ErrOtherTest does (API-074). The second check of ART-012 and the renames
+// fail only when another process changes dir during the Write, which a test cannot time.
+func TestWriteErrorKeepsArgument(t *testing.T) {
+	// unwritten returns an artifact whose report and trace header differ from the copies Write
+	// writes, so a change to either shows.
+	unwritten := func() *Artifact {
+		a := fixtureArtifact()
+		a.Report.Version, a.Report.Run.Planners, a.Report.Nodes[0].Tags = 0, nil, nil
+		a.Report.Subtest += "\xff"
+		a.Trace.Header.Version, a.Trace.Header.Records, a.Trace.Header.Dropped = 0, 0, 7
+		return a
+	}
+	root := t.TempDir()
+	other := filepath.Join(root, "other")
+	o := fixtureArtifact()
+	o.Report.Test = "TestA"
+	if err := Write(other, o); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(root, "empty")
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link, noLink := filepath.Join(root, "link"), ""
+	if err := os.Symlink(other, link); err != nil {
+		noLink = err.Error()
+	}
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(root, "locked")
+	if err := os.Mkdir(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	noPerm := ""
+	if os.WriteFile(filepath.Join(locked, "probe"), nil, 0o600) == nil {
+		noPerm = "directory permissions are not enforced here (root, Windows or a FAT file system)"
+	}
+	long := strings.Repeat("x", 300) // passes ART-010's pattern, but no file system takes it
+	cases := []struct {
+		name   string
+		dir    string
+		change func(a *Artifact)
+		want   string // the start of the error
+		skip   string // why the row cannot run here, or ""
+	}{
+		{"invalid status", filepath.Join(root, "a"), func(a *Artifact) { a.Report.Status = "ok" }, `artifact: invalid status "ok"`, ""},
+		{"pointer cycle", filepath.Join(root, "a"), func(a *Artifact) { a.Report.Failure.Determinism = &Determinism{Original: a.Report.Failure} },
+			"artifact: report has a pointer cycle", ""},
+		{"invalid schedule", filepath.Join(root, "a"), func(a *Artifact) { a.Schedule = &fault.Schedule{Version: 1, Events: []fault.Event{{At: 1}}} },
+			"artifact: write schedule.json: ", ""},
+		{"path through a file", filepath.Join(file, "a"), nil, "artifact: lstat " + filepath.Join(file, "a") + ": ", ""},
+		{"symbolic link", link, nil, "artifact: refusing to replace " + link + ": it is a symbolic link", noLink},
+		{"not an artifact directory", empty, nil, "artifact: refusing to replace " + empty + ": not a faultline artifact directory", ""},
+		{"another test", other, nil, otherTestErr(other), ""},
+		{"parent not created", filepath.Join(locked, "sub", "a"), nil, "artifact: mkdir " + filepath.Join(locked, "sub") + ": ", noPerm},
+		{"temporary directory not created", filepath.Join(locked, "a"), nil, "artifact: mkdir " + filepath.Join(locked, ".a.tmp-"), noPerm},
+		{"file not written", filepath.Join(root, "a"), func(a *Artifact) { a.Extra = map[string][]byte{long: []byte("x")} },
+			"artifact: write " + long + ": ", ""},
+	}
+	for _, c := range cases {
+		if c.skip != "" {
+			t.Logf("%s: skipped, %s", c.name, c.skip)
+			continue
+		}
+		a, want := unwritten(), unwritten()
+		if c.change != nil {
+			c.change(a)
+			c.change(want)
+		}
+		if err := Write(c.dir, a); err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%s: Write = %v, want %s...", c.name, err, c.want)
+		}
+		if !reflect.DeepEqual(a, want) {
+			t.Errorf("%s: the failed Write changed a: report %+v, trace header %+v", c.name, a.Report, a.Trace.Header)
+		}
+	}
+
+	// Run's retry: the same a, refused for another test's directory, then written to AltDir.
+	a := unwritten()
+	if err := Write(other, a); !errors.Is(err, ErrOtherTest) {
+		t.Fatalf("Write(another test's directory) = %v", err)
+	}
+	alt, fresh := filepath.Join(root, "alt"), filepath.Join(root, "fresh")
+	if err := Write(alt, a); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if err := Write(fresh, unwritten()); err != nil {
+		t.Fatal(err)
+	}
+	got, want := readAll(t, alt), readAll(t, fresh)
+	names := slices.Sorted(maps.Keys(want))
+	if g := slices.Sorted(maps.Keys(got)); !slices.Equal(g, names) {
+		t.Errorf("retry wrote %q, a fresh Write %q", g, names)
+	}
+	for _, name := range names {
+		b := got[name]
+		if name == FileReport || name == FileTimelineHTML { // they hold the directory
+			b = bytes.ReplaceAll(b, []byte(alt), []byte(fresh))
+		}
+		if !bytes.Equal(b, want[name]) {
+			t.Errorf("retry: %s differs from a fresh Write's", name)
+		}
+	}
+	if h := headerFor(unwritten().Trace); a.Report.Dir != alt || a.Report.Version != ReportVersion || !reflect.DeepEqual(a.Trace.Header, h) {
+		t.Errorf("after the retry, a holds report dir %q version %d and header %+v, want %q, %d and %+v", a.Report.Dir, a.Report.Version, a.Trace.Header, alt, ReportVersion, h)
+	}
+}
+
 // ART-012: a symbolic link at dir is refused before anything is written, whatever it points to,
 // and is not followed: the link and its target stay as they were.
 func TestWriteSymlinkDir(t *testing.T) {
@@ -830,6 +945,110 @@ func TestWriteOtherTest(t *testing.T) {
 		if err := Write(bad, a); err != nil {
 			t.Fatalf("Write(invalid UTF-8 test name) = %v", err)
 		}
+	}
+}
+
+// ART-088: ReadReportFile reads a regular report.json. When os.Lstat of report.json fails, for any
+// reason (no report.json, no dir, a dir without search permission, a path through a file), it gives
+// nil and no error: no report. A symbolic link or a FIFO is not opened and gives a reason; a FIFO
+// that ReadReportFile opened would block it until go test's -timeout stops the test binary with the
+// stack of every goroutine. The open error and ReadReport's error are returned with the report.json
+// prefix.
+func TestReadReportFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "a")
+	if err := Write(dir, fixtureArtifact()); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := ReadReportFile(dir); err != nil || rep == nil || rep.Test != "TestToy" {
+		t.Fatalf("regular report.json: %+v, %v", rep, err)
+	}
+	for _, none := range []string{t.TempDir(), filepath.Join(root, "missing")} {
+		if rep, err := ReadReportFile(none); rep != nil || err != nil {
+			t.Errorf("no report.json in %s: %+v, %v", none, rep, err)
+		}
+	}
+	must := func(t *testing.T, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	const notRegular = "artifact: report.json: not a regular file"
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T, d string) string // makes the case in the empty directory d; returns the directory to read
+		none  bool                                // os.Lstat fails: nil and no error
+		want  string                              // or the error, when ReadReportFile makes it itself
+		op    string                              // or the os call that failed: the error is "artifact: report.json: <op> <path>: <cause>"
+		cause error                               // the cause that op's error wraps (errors.Is)
+	}{
+		{name: "directory", setup: func(t *testing.T, d string) string {
+			must(t, os.Mkdir(filepath.Join(d, FileReport), 0o755))
+			return d
+		}, want: notRegular},
+		{name: "link", setup: func(t *testing.T, d string) string {
+			if err := os.Symlink(filepath.Join(dir, FileReport), filepath.Join(d, FileReport)); err != nil {
+				t.Skip(err)
+			}
+			return d
+		}, want: notRegular},
+		{name: "fifo", setup: func(t *testing.T, d string) string {
+			switch ok, err := mkfifo(filepath.Join(d, FileReport)); {
+			case !ok:
+				t.Skip("this platform has no FIFOs")
+			case err != nil:
+				t.Skip("cannot create a FIFO here: " + err.Error())
+			}
+			return d
+		}, want: notRegular},
+		{name: "not a report", setup: func(t *testing.T, d string) string {
+			must(t, os.WriteFile(filepath.Join(d, FileReport), []byte("{}"), 0o600))
+			return d
+		}, want: "artifact: report.json: not a faultline report"},
+		{name: "unreadable", setup: func(t *testing.T, d string) string {
+			p := filepath.Join(d, FileReport)
+			must(t, os.WriteFile(p, []byte("{}"), 0))
+			if _, err := os.ReadFile(p); err == nil {
+				t.Skip("file permissions are not enforced here (root, Windows or a FAT file system)")
+			}
+			return d
+		}, op: "open", cause: fs.ErrPermission},
+		{name: "no search permission", setup: func(t *testing.T, d string) string {
+			p := filepath.Join(d, FileReport)
+			must(t, os.WriteFile(p, []byte("{}"), 0o600))
+			must(t, os.Chmod(d, 0o600))
+			t.Cleanup(func() { _ = os.Chmod(d, 0o755) })
+			if _, err := os.Lstat(p); !errors.Is(err, fs.ErrPermission) {
+				t.Skip("directory permissions are not enforced here (root, Windows or a FAT file system)")
+			}
+			return d
+		}, none: true},
+		{name: "path through a file", setup: func(t *testing.T, d string) string {
+			file := filepath.Join(d, "file")
+			must(t, os.WriteFile(file, nil, 0o600))
+			return filepath.Join(file, "a")
+		}, none: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			read := c.setup(t, t.TempDir())
+			p := filepath.Join(read, FileReport)
+			rep, err := ReadReportFile(read)
+			if c.none {
+				if rep != nil || err != nil {
+					t.Fatalf("ReadReportFile = %+v, %v, want nil and no error: os.Lstat found no report.json", rep, err)
+				}
+				return
+			}
+			switch {
+			case rep != nil || err == nil:
+				t.Fatalf("ReadReportFile = %+v, %v", rep, err)
+			case c.op == "" && err.Error() != c.want:
+				t.Fatalf("ReadReportFile = %v, want %s", err, c.want)
+			case c.op != "" && (!strings.HasPrefix(err.Error(), "artifact: report.json: "+c.op+" "+p+": ") || !errors.Is(err, c.cause)):
+				t.Fatalf("ReadReportFile = %v, want artifact: report.json: %s %s: <error> wrapping %v", err, c.op, p, c.cause)
+			}
+		})
 	}
 }
 

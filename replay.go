@@ -180,7 +180,8 @@ func runPattern(name string) string {
 // schedulePath is the absolute FAULTLINE_SCHEDULE path, or ""; check adds
 // FAULTLINE_CHECK_DETERMINISM=1, so the replay runs the check attempt again. The command names a
 // package of the module by its import path, so it works from any directory in the module, and
-// passes -v, so go test prints the output of a seed that passes. For a seed of RunSeeds
+// passes -v, so go test prints the output of a seed that passes, and -count=1 with a schedule, so
+// go test runs the test again after the schedule file changed. For a seed of RunSeeds
 // (runSeeds), which ignores FAULTLINE_SEED, the -run pattern names the seed subtest instead
 // (API-114).
 func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check, runSeeds bool) artifact.Replay {
@@ -218,6 +219,11 @@ func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath st
 		vars = append(vars, envCheckDeterminism+"=1")
 	}
 	command := strings.Join(append(vars, "go test -v"), " ")
+	if schedulePath != "" {
+		// go test does not track a file outside the module, so after an edit to the schedule file
+		// there, the command without -count=1 could print the old cached pass.
+		command += " -count=1"
+	}
 	if b.tags != "" {
 		command += " -tags " + shellQuote(b.tags)
 	}

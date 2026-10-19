@@ -182,7 +182,8 @@ func TestRunSeedsEnv(t *testing.T) {
 	}
 	root := t.TempDir()
 	o, code = runScenario(t, "pinned", []string{"ROW=one", "FAULTLINE_SCHEDULE=" + schedule, "FAULTLINE_ARTIFACTS=" + root})
-	_, command := pinnedRun(0x2, "FAULTLINE_SCHEDULE="+schedule+" ")
+	run, _ := pinnedRun(0x2, "")
+	command := "FAULTLINE_SCHEDULE=" + schedule + " go test -v -count=1" + replayFlags() + " -run '" + run + "' " + pkgPath
 	rep := readReport(t, seedDir(root, 0x2))
 	if code != 1 {
 		t.Errorf("FAULTLINE_SCHEDULE: exit %d, want 1\n%s", code, o)

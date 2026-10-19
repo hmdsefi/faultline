@@ -14,7 +14,7 @@ import (
 )
 
 // timelineTextCap5 is the timeline.txt example of ART §5.6, byte for byte.
-const timelineTextCap5 = `faultline timeline v1
+const timelineTextCap5 = `faultline timeline v2
 test:     TestToy/seed=0x0000000000000001
 package:  example.com/toy
 seed:     0x0000000000000001
@@ -83,7 +83,7 @@ func TestWriteTimelineTextDroppedAndEscapes(t *testing.T) {
 // values, trailing spaces trimmed, and every string of the report and the trace escaped, control
 // characters included.
 func TestWriteTimelineTextLayout(t *testing.T) {
-	small := `faultline timeline v1
+	small := `faultline timeline v2
 test:     S
 package:  p
 seed:     0x01
@@ -97,7 +97,7 @@ legend:   ! failure record, * causal slice, <- cause
   SEQ         TIME NODE   KIND TEXT
     1 0.000000000s global k    t
 `
-	one := `faultline timeline v1
+	one := `faultline timeline v2
 test:
 package:  p
 seed:     0x01
@@ -111,7 +111,7 @@ legend:   ! failure record, * causal slice, <- cause
   SEQ         TIME NODE   KIND TEXT
 !   1 0.000000000s global k
 `
-	wide := `faultline timeline v1
+	wide := `faultline timeline v2
 test:     TestWide/seed=0x00000000000003e8
 package:  example.com/wide
 seed:     0x00000000000003e8
@@ -128,7 +128,7 @@ legend:   ! failure record, * causal slice, <- cause
 *  999 12.500000000s dé#1    net.send        send bare=a.b_c:d/e@f%g+h,i#j|k-l sp="a b" empty="" <-998
 ! 1000 12.500000000s global   check.violation boom <-999
 `
-	escaped := `faultline timeline v1
+	escaped := `faultline timeline v2
 test:     T\tx
 package:  p\\q
 seed:     s\tz
@@ -146,7 +146,7 @@ legend:   ! failure record, * causal slice, <- cause
 	// Every rune that strconv.IsPrint rejects is escaped like strconv.QuoteRune: NUL, ESC, DEL,
 	// U+009B (CSI), U+2028, U+202E (a bidi override), U+00A0 and U+E0001, also as a string's
 	// first rune.
-	controls := `faultline timeline v1
+	controls := `faultline timeline v2
 test:     \x00T\x1b[2J
 package:  p
 seed:     s
@@ -250,7 +250,7 @@ func TestWriteTimelineTextNodeIDsAndQuotes(t *testing.T) {
 // So the text written from the values Write holds equals the text that Render writes from the
 // files (AT-ART-14).
 func TestWriteTimelineTextInvalidUTF8(t *testing.T) {
-	const want = `faultline timeline v1
+	const want = `faultline timeline v2
 test:     T�
 package:  p�
 seed:     s�
@@ -325,5 +325,81 @@ func TestWriteTimelineTextErrors(t *testing.T) {
 	errDisk := errors.New("disk full")
 	if err := WriteTimelineText(errWriter{errDisk}, &rep, tr, Slice{}); !errors.Is(err, errDisk) {
 		t.Fatalf("WriteTimelineText to a failing writer = %v, want %v", err, errDisk)
+	}
+}
+
+// ART-040: the NODE and KIND widths count only values of at most 32 bytes. A 32-byte value widens
+// its column on every row; a 33-byte one is written whole, pushes the rest of its own row and pads
+// no other row.
+func TestWriteTimelineTextWidthLimit(t *testing.T) {
+	rep := Report{Status: "pass", Subtest: "T", Package: "p", Seed: "0x1", Run: RunInfo{TraceHash: "h"}}
+	head := func(name string) string {
+		return "faultline timeline v2\ntest:     T\npackage:  p\nseed:     0x1\nstatus:   pass\nfailure:  none\n" +
+			"records:  2 (dropped 0), trace hash h\nnodes:    1=" + name + " []\nslice:    none\n" +
+			"legend:   ! failure record, * causal slice, <- cause\n\n"
+	}
+	sp := func(n int) string { return strings.Repeat(" ", n) }
+	n32, k32 := strings.Repeat("a", 30), strings.Repeat("k", 32) // n32's label, "<name>#1", is 32 bytes
+	n33, k33 := strings.Repeat("b", 31), strings.Repeat("q", 33)
+	for _, c := range []struct {
+		name, node, kind, want string
+	}{
+		{"32 bytes", n32, k32, head(n32) +
+			"  SEQ         TIME NODE" + sp(28) + " KIND" + sp(28) + " TEXT\n" +
+			"    1 0.000000000s global" + sp(26) + " k" + sp(31) + " a\n" +
+			"    2 0.000000000s " + n32 + "#1 " + k32 + " b\n"},
+		{"33 bytes", n33, k33, head(n33) +
+			"  SEQ         TIME NODE   KIND TEXT\n" +
+			"    1 0.000000000s global k    a\n" +
+			"    2 0.000000000s " + n33 + "#1 " + k33 + " b\n"},
+	} {
+		tr := &Trace{
+			Header:  TraceHeader{Nodes: []Node{{ID: 1, Name: c.node}}},
+			Records: []kernel.Record{{Seq: 1, Kind: "k", Text: "a"}, {Seq: 2, Node: 1, Inc: 1, Kind: c.kind, Text: "b"}},
+		}
+		var buf bytes.Buffer
+		if err := WriteTimelineText(&buf, &rep, tr, Slice{}); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != c.want {
+			t.Errorf("%s: timeline.txt =\n%s\nwant\n%s", c.name, buf.String(), c.want)
+		}
+	}
+}
+
+// ART-040: one 1,000-byte kind among records shaped like the fixture's messages adds its own bytes
+// to its own row, and no other line changes, whatever the record count. Without the 32-byte limit
+// (version 1) the kind padded every row: 1,000 records then grow by about 1 MB, and 50,000 records
+// grew from 5.2 MB to 55 MB.
+func TestWriteTimelineTextLongKind(t *testing.T) {
+	rep := fixtureReport()
+	tr := messageTrace(1_000)
+	var short, long bytes.Buffer
+	if err := WriteTimelineText(&short, &rep, tr, Slice{}); err != nil {
+		t.Fatal(err)
+	}
+	if tr.Records[0].Kind != "kernel.event" {
+		t.Fatalf("record 1 has kind %q, want kernel.event, the longest kind of the trace", tr.Records[0].Kind)
+	}
+	tr.Records[0].Kind = strings.Repeat("k", 1000)
+	if err := WriteTimelineText(&long, &rep, tr, Slice{}); err != nil {
+		t.Fatal(err)
+	}
+	// Record 1's row grows by 1,000 bytes minus the 12 of kernel.event, which filled the KIND width.
+	if grew := long.Len() - short.Len(); grew != 1000-12 {
+		t.Errorf("timeline.txt grew from %d to %d bytes, by %d; want 988, the long kind's own row only", short.Len(), long.Len(), grew)
+	}
+	a, b := strings.Split(short.String(), "\n"), strings.Split(long.String(), "\n")
+	if len(a) != len(b) {
+		t.Fatalf("%d lines, then %d", len(a), len(b))
+	}
+	var changed []int
+	for i := range a {
+		if a[i] != b[i] {
+			changed = append(changed, i)
+		}
+	}
+	if len(changed) != 1 || !strings.Contains(b[changed[0]], " "+tr.Records[0].Kind+" ") {
+		t.Errorf("changed lines %v, want only record 1's", changed)
 	}
 }
