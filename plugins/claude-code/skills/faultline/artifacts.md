@@ -77,7 +77,8 @@ A failing run can apply many faults that the failure does not need. To keep only
 4. Replay with the edited schedule, with `-count=1`:
    `FAULTLINE_SEED=0x287372ab06f1482e FAULTLINE_SCHEDULE=/tmp/narrow.json go test -count=1 -run '^TestKV$' .`
    `go test` does not check files outside the module for changes, so without `-count=1` it can print
-   the cached pass of an earlier edit.
+   the cached pass of an earlier edit. From faultline v0.1.2, the replay command of a schedule
+   replay passes `-count=1` too.
 5. If the same check still fails, keep the deletion. Otherwise put the fault back.
 6. Repeat until no fault can be deleted.
 

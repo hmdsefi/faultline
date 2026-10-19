@@ -227,6 +227,8 @@ To narrow it down:
    FAULTLINE_SEED=0x50304c12f019f421 FAULTLINE_SCHEDULE=/tmp/narrow.json go test -count=1 -run '^TestKV$' .
    ```
 
+   The replay command that a schedule replay prints passes `-count=1` too.
+
 5. If the same check still fails, keep the deletion. If the run passes or fails another check, put
    the fault back.
 6. Repeat with the next fault until none can be deleted.
@@ -258,7 +260,7 @@ The replay of that schedule still fails the same invariant:
 === RUN   TestKV/seed=0x50304c12f019f421
     faultline: invariant "acked puts survive" violated at t=3.889260138s (event 1119)
       k137=v137 was acknowledged, but n1 holds ""
-    replay:    FAULTLINE_SEED=0x50304c12f019f421 FAULTLINE_SCHEDULE=/tmp/narrow.json go test -v -run '^TestKV$' example.com/kv
+    replay:    FAULTLINE_SEED=0x50304c12f019f421 FAULTLINE_SCHEDULE=/tmp/narrow.json go test -v -count=1 -run '^TestKV$' example.com/kv
     artifacts: /tmp/faultline-501/example.com_kv/TestKV/50304c12f019f421/
 --- FAIL: TestKV (0.03s)
     --- FAIL: TestKV/seed=0x50304c12f019f421 (0.03s)

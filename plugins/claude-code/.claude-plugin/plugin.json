@@ -1,6 +1,6 @@
 {
   "name": "faultline",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Debug, replay and pin failing seeds of faultline simulation tests, deterministic simulation testing for distributed Go code.",
   "author": {
     "name": "Hamed Yousefi"

@@ -2,7 +2,7 @@
 
 This guide shows how an AI coding agent finds a distributed-systems bug with faultline. The agent
 checks its fix against the seed that failed, and pins that seed as a regression test. The guide
-covers the loop, which artifact file answers which question, and what v0.1.1 cannot do. It ends
+covers the loop, which artifact file answers which question, and what v0.1.2 cannot do. It ends
 with a block to paste into your agent's instruction file, which also holds the rules for code
 inside the simulation. The agent needs only a shell that runs `go test`, so the guide applies to
 Claude Code, Codex, Cursor and other coding agents.
@@ -204,7 +204,8 @@ debugs, and the file that answers each one:
 - What led up to the failure? `timeline.txt`. It marks the failure record and the records that led
   to it.
 - Which faults ran, and when? `schedule.json`. Delete faults from a copy and replay it with
-  `FAULTLINE_SCHEDULE` to find the ones the failure needs.
+  `FAULTLINE_SCHEDULE` to find the ones the failure needs. Pass `-count=1`, so `go test` does not
+  print a cached pass.
 - What did each client ask for, and what did it get back? `history.jsonl`, when the test records
   operations with `w.History`.
 - Which record matches a pattern? `trace.jsonl` holds every record of the run as one JSON object
@@ -219,9 +220,9 @@ debugs, and the file that answers each one:
 The block in [Instructions for your agent](#instructions-for-your-agent) lists the rules, and [How
 faultline works](how-it-works.md#the-determinism-rules-your-code-follows) explains each one.
 
-## What v0.1.1 cannot do
+## What v0.1.2 cannot do
 
-v0.1.1 tests code written against faultline's node API: boot functions, `w.Net` for messages and
+v0.1.2 tests code written against faultline's node API: boot functions, `w.Net` for messages and
 the node's volume for files. Plan an agent's work around these limits:
 
 - It does not run existing code unchanged. Code that starts goroutines, uses `net` or opens files
