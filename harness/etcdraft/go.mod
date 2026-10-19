@@ -3,7 +3,7 @@ module github.com/hmdsefi/faultline/harness/etcdraft
 go 1.26.0
 
 require (
-	github.com/hmdsefi/faultline v0.1.0
+	github.com/hmdsefi/faultline v0.1.1
 	go.etcd.io/raft/v3 v3.7.0
 	google.golang.org/protobuf v1.36.11
 )
