@@ -2,7 +2,7 @@
 # workspace.sh PART...: writes eval fixtures into the current directory, the run's workspace.
 #
 #   kv        the key-value module from Get started (example.com/kv), with its bug, requiring
-#             faultline v0.1.1
+#             faultline v0.1.2
 #   artifact  the artifact directory of its failing seed 0x287372ab06f1482e, at
 #             artifacts/example.com_kv/TestKV/287372ab06f1482e
 #   repl      a replication module (example.com/repl) built on goroutines and net, with a
@@ -18,7 +18,7 @@ for part in "$@"; do
 	case $part in
 	kv)
 		cp "$src/kv/kv.go" "$src/kv/kv_test.go" .
-		printf 'module example.com/kv\n\ngo 1.26.0\n\nrequire github.com/hmdsefi/faultline v0.1.1\n' >go.mod
+		printf 'module example.com/kv\n\ngo 1.26.0\n\nrequire github.com/hmdsefi/faultline v0.1.2\n' >go.mod
 		;;
 	artifact)
 		dir=artifacts/example.com_kv/TestKV/287372ab06f1482e

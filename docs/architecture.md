@@ -2,7 +2,7 @@
 
 faultline is a Go library built around one single-threaded simulator, plus a command-line tool and a
 separate module for etcd/raft. This page shows what each package owns, how one seed moves through
-them, and why the design looks the way it does. It covers the packages in v0.1.1.
+them, and why the design looks the way it does. It covers the packages in v0.1.2.
 
 ## The node API
 
@@ -143,7 +143,7 @@ The kernel runs every callback on one goroutine, one at a time, in an order fixe
 and the seed. A simulator with real goroutines would need the Go scheduler to make the same choices
 in every run, and the Go scheduler takes no seed. With one thread and an event queue, the queue is
 the only source of ordering, and the queue is seeded. The cost is that code under test is written as
-callbacks. v0.1.1 does not run goroutine code.
+callbacks. v0.1.2 does not run goroutine code.
 
 ### Named streams and integer decisions
 
@@ -174,10 +174,12 @@ etcd/raft and protobuf, and a project that does not import the harness does not 
 faultline holds its own simulation packages to the rules it asks of your code, and its test suite
 checks them:
 
-- A lint test parses the simulation packages. It rejects `go` statements and `select`, ranging over
-  a map without sorting, wall-clock time, package-level random functions and `crypto/rand`. It also
-  rejects environment reads, floating point in decision code, and files limited to one operating
-  system or CPU.
+- A lint test parses the simulation packages. It rejects `go` statements, `select`, and functions
+  that run code on another goroutine, such as `runtime.SetFinalizer`. It rejects ranging over a map
+  without sorting, and functions that call code in map order, such as `maps.DeleteFunc`. It also
+  rejects wall-clock time, package-level random functions, `crypto/rand`, and environment reads such
+  as `os.TempDir`. Floating point in decision code and files limited to one operating system or CPU
+  fail it too.
 - CI runs the whole suite with `FAULTLINE_CHECK_DETERMINISM=1`, so every passing seed of every test
   runs twice and must give the same trace hash.
 - Golden trace hashes pin the exact runs of a set of small scenarios. CI computes them on Linux on

@@ -29,7 +29,7 @@ distributed Go system inside `go test`. It finds the bugs that make distributed 
 appear only when messages are delayed or dropped, the network partitions, nodes crash or an fsync
 fails. The system runs in virtual time on a simulated network and disk, where faultline injects
 those faults. Every random choice comes from one seed, so a failing seed is a reproducible bug
-report: it replays the identical run. In v0.1.1 the code under test is written against faultline's
+report: it replays the identical run. In v0.1.2 the code under test is written against faultline's
 [node API](docs/architecture.md#the-node-api), as Go callbacks with no goroutines, or is etcd/raft
 through the included harness.
 
@@ -78,7 +78,7 @@ harness ports one real system to that API. faultline is the wrong tool when:
   do. faultline simulates the machines, the network and the disks inside one test process.
 - You want performance numbers. A callback takes zero virtual time.
 
-[Limitations and FAQ](docs/faq.md) lists what v0.1.1 does not do, and how faultline relates to
+[Limitations and FAQ](docs/faq.md) lists what v0.1.2 does not do, and how faultline relates to
 FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
 
 ## Example
@@ -185,7 +185,7 @@ etcd/raft and protobuf stay out of your module unless you add it.
 
 ## Status
 
-v0.1.1, early: the API may change before v1.0; artifact formats are versioned. The
+v0.1.2, early: the API may change before v1.0; artifact formats are versioned. The
 [roadmap](https://github.com/hmdsefi/faultline/issues/167) lists what the later phases add.
 
 ## Documentation and help

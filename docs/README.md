@@ -52,7 +52,7 @@ These pages explain how faultline works and why:
   network and disk, faults, checks, seeds, replay, and the rules your code follows.
 - [Architecture](architecture.md): what the node API is, the packages, how one seed runs through
   them, and the design choices behind them.
-- [Limitations and FAQ](faq.md): what v0.1.1 does not do, the known issues, and how faultline
+- [Limitations and FAQ](faq.md): what v0.1.2 does not do, the known issues, and how faultline
   relates to other tools.
 
 ## Contributing

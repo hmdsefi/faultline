@@ -2,7 +2,7 @@
 
 The `FAULTLINE_*` environment variables change how `faultline.Run` runs a test, without a code
 change. They choose the seeds, the faults, the artifact root and the checks. This page lists every
-variable that v0.1.1 reads, its values, its default and how it combines with `Options`.
+variable that v0.1.2 reads, its values, its default and how it combines with `Options`.
 
 ## How Run reads them
 
@@ -123,7 +123,8 @@ outside the fixed list. `Run` logs the base and the variables that run the same 
 is meant for scripts and agents that run a known set, such as the failing seeds of a CI run. The
 value lists seeds separated by commas or white space, such as `0x1 0x2,0x3`. It can also be `@` and
 the path of a file that holds such a list. Lines may hold several seeds; there is no comment syntax.
-A seed listed twice runs once.
+A seed listed twice runs once. `go test` does not check a file outside the module for changes. After
+you edit such a list, add `-count=1`, or the same command can print the old list's cached pass.
 
 ## Replaying faults: FAULTLINE_SCHEDULE
 
@@ -135,7 +136,9 @@ and starts no planner. `Run` reads and checks the file before any seed runs, and
 ```
 
 A schedule's `end` and `recovery` fields, when set, replace the end of the run and the start of the
-recovery window. The replay command of a failure in such a run sets `FAULTLINE_SCHEDULE` too.
+recovery window. The replay command of a failure in such a run sets `FAULTLINE_SCHEDULE` too. It
+also passes `-count=1`, so `go test` runs the test again after the file changes. With faultline
+v0.1.1 or older, add `-count=1` to that command by hand.
 
 With the same seed, a schedule replay fails like the run that recorded it: the same check, at the
 same virtual time and event number. Its trace hash differs: the replay has no planner records, and
@@ -212,7 +215,7 @@ of `-1` and the error as its `message`.
 
 ## Reserved variables
 
-v0.1.1 checks four reserved variables and reports any use, so a command written for another version
+v0.1.2 checks four reserved variables and reports any use, so a command written for another version
 cannot run here unnoticed.
 
 `FAULTLINE_MINIMIZE` accepts `0`, `1`, or a comma-separated list of `runs=<n>`, `time=<duration>`

@@ -1,4 +1,4 @@
-faultline timeline v1
+faultline timeline v2
 test:     TestKV/seed=0x287372ab06f1482e
 package:  example.com/kv
 seed:     0x287372ab06f1482e

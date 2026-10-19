@@ -1,14 +1,14 @@
 # Limitations and FAQ
 
-This page lists what faultline v0.1.1 does not do, the issues known at release, and how faultline
+This page lists what faultline v0.1.2 does not do, the issues known at release, and how faultline
 relates to other tools that test distributed systems. Read it before you decide whether faultline
 fits your system.
 
-## What v0.1.1 tests
+## What v0.1.2 tests
 
-v0.1.1 tests Go code written against faultline's node API. That code runs as callbacks on one
+v0.1.2 tests Go code written against faultline's node API. That code runs as callbacks on one
 goroutine: boot functions, message handlers and timers. It sends messages with `w.Net` and keeps
-files on the node's simulated volume. v0.1.1 also runs etcd/raft v3.7.0 through `harness/etcdraft`,
+files on the node's simulated volume. v0.1.2 also runs etcd/raft v3.7.0 through `harness/etcdraft`,
 which does that port for one real system.
 
 Code that starts goroutines, uses package `net` or opens files with `os` does not run inside the
@@ -27,18 +27,18 @@ the wrong tool in these cases:
   in a parallel test. `Options.NoCryptoSeed` lifts the restriction, and `crypto/rand` is then no
   longer part of the replay.
 
-## What v0.1.1 does not include
+## What v0.1.2 does not include
 
 The [roadmap](https://github.com/hmdsefi/faultline/issues/167) plans these for later phases, with no
 dates:
 
 - Running existing goroutine code unchanged, without a port to the node API.
-- Shrinking a failing run to its smallest form. In v0.1.1 you delete faults from a copy of
+- Shrinking a failing run to its smallest form. In v0.1.2 you delete faults from a copy of
   `schedule.json` and replay it.
 - Linearizability and isolation checkers. Your invariants and final checks are the checks.
 - Running thousands of seeds in parallel with a `faultline sweep` command. `faultline.Run` runs one
   seed after another.
-- The `faultline view` web app. `timeline.html` is the run view of v0.1.1.
+- The `faultline view` web app. `timeline.html` is the run view of v0.1.2.
 - Harnesses for hashicorp/raft, CometBFT, Kubernetes controllers (controller-runtime), and NATS with
   JetStream.
 
@@ -77,10 +77,10 @@ These are the issues known at release:
   `replay` as their source.
 - Deleting a fault from a schedule changes the run from that point on. An edited replay is a
   different run, not a shorter copy of the original, so it can pass where you expected a failure.
-- `go test` caches a passing result and does not check files outside your module for changes. Edit
-  a `FAULTLINE_SCHEDULE` file or a `FAULTLINE_SEED_LIST` `@file` list outside the module, and the
-  same command can print the old file's cached pass. Add `-count=1` to run the test again; the
-  replay command faultline prints does not include it yet.
+- `go test` does not check files outside your module for changes. After you edit one, the same
+  command can print the old file's cached pass. This affects a `FAULTLINE_SEED_LIST` `@file` list,
+  and a `FAULTLINE_SCHEDULE` file in a command you type yourself. Add `-count=1` to such a command.
+  The replay command that faultline prints for a schedule replay includes it.
 - In the etcd/raft harness, every raft panic has the same signature,
   `panic:github.com/hmdsefi/faultline/harness/etcdraft.(*raftLogger).panic`. Raft raises its
   assertions through the harness's logger, so tell raft panics apart by their message.
@@ -131,7 +131,7 @@ regular, non-deterministic software inside a [deterministic
 hypervisor](https://antithesis.com/docs/resources/deterministic_simulation_testing/), so the
 software does not have to be built for simulation. Every problem it finds reproduces. faultline
 makes the other trade. It runs inside `go test` on your machine and needs no infrastructure, but in
-v0.1.1 your code uses its node API.
+v0.1.2 your code uses its node API.
 
 ### How does it relate to Jepsen?
 
@@ -150,7 +150,7 @@ faultline writes its history to `history.jsonl`.
 advances when every goroutine in it is durably blocked. It leaves the network to you: its
 documentation says to use a fake network implementation. faultline adds the rest a distributed test
 needs: a simulated network and disk, nodes that crash and restart, faults, and one seed for every
-choice. v0.1.1 does not use `testing/synctest`; the roadmap plans a goroutine mode for Phase 2 that
+choice. v0.1.2 does not use `testing/synctest`; the roadmap plans a goroutine mode for Phase 2 that
 runs your code inside a `testing/synctest` bubble.
 
 ### Can I use the kernel without faultline.Run?

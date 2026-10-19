@@ -79,7 +79,7 @@ the check. A check that names the key and the node, as this one does, tells you 
 `timeline.txt` starts with a header that sums up the run:
 
 ```text
-faultline timeline v1
+faultline timeline v2
 test:     TestKV/seed=0x287372ab06f1482e
 package:  example.com/kv
 seed:     0x287372ab06f1482e

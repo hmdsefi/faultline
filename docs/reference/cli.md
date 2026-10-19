@@ -20,7 +20,7 @@ faultline version
 ```
 
 ```text
-faultline v0.1.1 go1.27.1 darwin/arm64
+faultline v0.1.2 go1.27.1 darwin/arm64
 ```
 
 ## Usage

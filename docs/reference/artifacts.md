@@ -47,9 +47,9 @@ An artifact directory holds these files:
 | `trace.jsonl` | always | `faultline_trace` 1 | every record of the run, or the last 1,000,000 after a `limit` failure; one JSON object per line |
 | `schedule.json` | always | `faultline_schedule` 1 | the fault schedule: every fault that ran |
 | `history.jsonl` | when the test recorded client operations | `faultline_history` 1 | the client operations |
-| `timeline.txt` | always | `faultline timeline v1` | the trace as aligned text |
+| `timeline.txt` | always | `faultline timeline v2` | the trace as aligned text |
 | `hb.mmd` | always | `faultline causal slice v1` | the records that led to the failure, as a Mermaid flowchart |
-| `timeline.html` | always | `faultline_timeline` 1 | an interactive page of the run |
+| `timeline.html` | always | `faultline_timeline` 2 | an interactive page of the run |
 
 A check can add [extra files](#extra-files). The `files` field of `report.json` lists every file
 except `report.json` itself, with its type, and its format version where the index records one:
@@ -63,13 +63,15 @@ jq -c '.files[]' report.json
 {"name":"trace.jsonl","type":"trace","version":1}
 {"name":"schedule.json","type":"schedule","version":1}
 {"name":"history.jsonl","type":"history"}
-{"name":"timeline.txt","type":"timeline_text","version":1}
+{"name":"timeline.txt","type":"timeline_text","version":2}
 {"name":"hb.mmd","type":"hb","version":1}
-{"name":"timeline.html","type":"timeline_html","version":1}
+{"name":"timeline.html","type":"timeline_html","version":2}
 ```
 
 `timeline.txt`, `hb.mmd` and `timeline.html` are derived from `report.json` and `trace.jsonl`.
-[`faultline render`](cli.md#render) regenerates them.
+[`faultline render`](cli.md#render) regenerates them. After a render of an older artifact, the index
+keeps the versions that the run wrote; each file names the version it holds, as the next section
+says.
 
 ## Versions and compatibility
 
@@ -307,7 +309,7 @@ text. When `dropped` is 0, `kernel.HashRecords` recomputes it from the records t
 with `grep`. It starts with a header block:
 
 ```text
-faultline timeline v1
+faultline timeline v2
 test:     TestKV/seed=0x287372ab06f1482e
 package:  example.com/kv
 seed:     0x287372ab06f1482e
@@ -334,6 +336,10 @@ The columns are a mark, `SEQ`, `TIME`, `NODE` and `KIND`, then the text. `NODE` 
 node name and incarnation as `n1#7`. The text ends with each attribute as `key=value` and the cause
 as `<-seq`. An attribute value is quoted when it holds a character outside `A-Za-z0-9._:/@%+,#|-`,
 such as a space. Control characters are escaped, so each record stays on its line.
+
+`NODE` and `KIND` are as wide as their longest value of up to 32 bytes. A longer value is written
+whole and shifts the rest of its own row only, so one long kind does not pad every row. Version 1,
+which faultline v0.1.1 and older write, pads both columns to their longest value of any length.
 
 The mark `!` flags the failure record, and `*` the *causal slice*: the records that led to the
 failure. faultline finds them by following, from the failure record, each record's cause and the
@@ -464,7 +470,7 @@ loads nothing from the network.
 The data sits in a `<script type="application/json" id="faultline-data">` element, as one JSON
 object with these fields:
 
-- `faultline_timeline`: the format version, `1`.
+- `faultline_timeline`: the format version, `2`.
 - `title`: the page title.
 - `report`: the `report.json` object.
 - `trace`: the `trace.jsonl` text of the records the page holds.
