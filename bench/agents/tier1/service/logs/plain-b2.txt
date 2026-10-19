@@ -1,0 +1,5 @@
+--- FAIL: TestLeaseKV (6.55s)
+    leasekv_test.go:41: no duplicate appends: key k1 holds c1-71 twice
+FAIL
+FAIL	example.com/leasekv	6.752s
+FAIL

@@ -1,0 +1,114 @@
+{
+  "model": "claude-opus-5-5",
+  "claude": "claude",
+  "tier": 1,
+  "arms": [
+    "plain",
+    "docs",
+    "plugin"
+  ],
+  "bugs": [
+    "b1",
+    "b2",
+    "b3"
+  ],
+  "run_cap_usd": 4.0,
+  "run_wall_s": 1800,
+  "max_rounds": 3,
+  "set_cap_usd": {
+    "pilot": 36.0,
+    "full": 180.0
+  },
+  "regression_plain_runs": 5,
+  "go_test_timeout_s": 900,
+  "hidden_timeout_s": 1800,
+  "paths": {
+    "repo": "../../..",
+    "service": "service",
+    "arms": "../arms",
+    "prompts": "../prompts",
+    "runs": "runs",
+    "results": "results",
+    "plugin": "~/.cache/faultline-bench/plugin-v0.1.1",
+    "workspace_root": "/tmp/faultline-bench",
+    "claude_config_dir": "~/.claude"
+  },
+  "claude_flags": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-hook-events",
+    "--setting-sources",
+    "project,local",
+    "--strict-mcp-config",
+    "--permission-mode",
+    "bypassPermissions",
+    "--permission-prompts",
+    "none",
+    "--disallowedTools",
+    "WebFetch,WebSearch"
+  ],
+  "settings": {
+    "autoMemoryEnabled": false,
+    "permissions": {
+      "deny": []
+    }
+  },
+  "isolation_baseline": {
+    "skills": [
+      "deep-research",
+      "design",
+      "design-sync",
+      "dataviz",
+      "artifact-diagramming",
+      "update-config",
+      "verify",
+      "debug",
+      "code-review",
+      "simplify",
+      "batch",
+      "fewer-permission-prompts",
+      "doctor",
+      "loop",
+      "schedule",
+      "claude-api",
+      "workflow-authoring",
+      "run",
+      "run-skill-generator",
+      "plugin-authoring"
+    ],
+    "agents": [
+      "claude",
+      "claude-code-guide",
+      "Explore",
+      "general-purpose",
+      "Plan",
+      "statusline-setup"
+    ]
+  },
+  "env_keep": [
+    "HOME",
+    "PATH",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "GOPATH",
+    "GOPROXY",
+    "GOFLAGS",
+    "GOCACHE",
+    "GOMODCACHE",
+    "GOTOOLCHAIN",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "probe": {
+    "model": "haiku",
+    "call_cap_usd": 0.02,
+    "total_cap_usd": 0.05,
+    "tools": "Bash,Read",
+    "timeout_s": 180
+  }
+}

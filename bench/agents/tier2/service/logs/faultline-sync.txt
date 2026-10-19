@@ -1,0 +1,11 @@
+--- FAIL: TestLeaseKV (0.03s)
+    leasekv_test.go:39: faultline: running 100 seeds from base 0x576c1e295054f8c0 (test name)
+    --- FAIL: TestLeaseKV/seed=0x78eb4fa9f502ca7f (0.03s)
+        faultline: invariant "reads are fresh" violated at t=4.736803007s (event 1647)
+          get k2 by c1, started at 4.446784s, returned 16 values without c2-44, which c2 had acked at 4.409467s
+        replay:    FAULTLINE_SEED=0x78eb4fa9f502ca7f go test -v -run '^TestLeaseKV$' example.com/leasekv
+        artifacts: /tmp/faultline-1001/example.com_leasekv/TestLeaseKV/78eb4fa9f502ca7f/
+    leasekv_test.go:39: faultline: stopping after failing seed 0x78eb4fa9f502ca7f; 97 of 100 seeds not run (set Options.KeepGoing to run all)
+FAIL
+FAIL	example.com/leasekv	0.348s
+FAIL

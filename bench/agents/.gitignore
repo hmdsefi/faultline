@@ -1,0 +1,3 @@
+# What bench.py writes: run folders of each tier, and Python caches
+*/runs/
+__pycache__/

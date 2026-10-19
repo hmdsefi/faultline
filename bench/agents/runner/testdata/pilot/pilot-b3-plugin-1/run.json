@@ -1,0 +1,80 @@
+{
+ "api_ms": 152179,
+ "arm": "plugin",
+ "budget_out": false,
+ "bug": "b3",
+ "cli_version": "2.1.299 (Claude Code)",
+ "cost_notes": [],
+ "cost_usd": 0.812705,
+ "denials": 2,
+ "denied": [
+  {
+   "input": {
+    "command": "FAULTLINE_SEED=0x767ffa710151b30d go test -run '^TestLeaseKV$' . 2>&1 | tail -8; ls /tmp/faultline-*/example.com_leasekv/TestLeaseKV/767ffa710151b30d/ 2>/dev/null",
+    "description": "Replay failing seed"
+   },
+   "round": 1,
+   "tool": "Bash"
+  },
+  {
+   "input": {
+    "command": "grep -nE \"grant|busy|sync|s1|s2\" /private/tmp/w/66f7a17a/faultline-501/example.com_leasekv/TestLeaseKV/767ffa710151b30d/timeline.txt | awk -F: '$1>300 && $1<440'",
+    "description": "Inspect timeline around failure"
+   },
+   "round": 1,
+   "tool": "Bash"
+  }
+ ],
+ "faultline_source": "replace:local-export",
+ "finished": "2026-10-17T02:27:14",
+ "fixed": true,
+ "fixed_round": 1,
+ "forbidden_hits": [],
+ "forbidden_path": false,
+ "go_test_calls": 4,
+ "hidden_exit": [
+  0
+ ],
+ "initial_commit": "360b33b9834b0a0d5ff4c9d8cfcf3f49fea291b7",
+ "isolation": "pass",
+ "isolation_notes": [],
+ "model": "claude-opus-5-5",
+ "model_usage": {
+  "claude-opus-5-5": {
+   "cacheCreationInputTokens": 49810.0,
+   "cacheReadInputTokens": 714667.0,
+   "costUSD": 0.812705,
+   "inputTokens": 38.0,
+   "outputTokens": 13557.0
+  }
+ },
+ "new_tests": [],
+ "output_tokens": 13557,
+ "processed_tokens": 778072,
+ "regression_test": "none",
+ "round_cost_usd": [
+  0.812705
+ ],
+ "round_end": [
+  "success"
+ ],
+ "round_wall_s": [
+  158.6
+ ],
+ "rounds": 1,
+ "run": 1,
+ "run_id": "pilot-b3-plugin-1",
+ "session_ids": [
+  "78e67a8c-77a0-4e9a-87bc-b337725dfead"
+ ],
+ "set": "pilot",
+ "started": "2026-10-17T02:24:28",
+ "status": "done",
+ "timed_out": false,
+ "turns": 33,
+ "version": "faultline",
+ "visible_checks_changed": [],
+ "wall_s": 158.6,
+ "weighted_tokens": 201552,
+ "wrong_fixes": 0
+}

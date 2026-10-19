@@ -1,0 +1,60 @@
+diff -ru reference/store.go sync/store.go
+--- reference/store.go	2026-10-17 17:45:31
++++ sync/store.go	2026-10-17 17:45:31
+@@ -106,7 +106,7 @@
+ 	case Busy:
+ 		s.holder = m.Holder
+ 	case Sync:
+-		s.request(from, Entry{KV: m.Epoch})
++		s.sync(from, m)
+ 	case Write:
+ 		s.request(from, Entry{KV: m.Epoch, Client: m.Client, Seq: m.Seq, Key: m.Key, Value: m.Value})
+ 	case Replicate:
+@@ -163,6 +163,27 @@
+ 	clear(s.pending)
+ }
+ 
++// sync answers a Sync with the applied data. When the Sync raises the fence, the primary first
++// appends the fence entry, syncs it and sends it to the backup.
++func (s *Store) sync(from string, m Sync) {
++	switch {
++	case !s.leading():
++		s.Conn.Send(from, NotPrimary{Hint: s.hint()})
++		return
++	case m.Epoch < s.fence:
++		s.Conn.Send(from, Fenced{Epoch: m.Epoch})
++		return
++	case m.Epoch > s.fence:
++		e := Entry{Epoch: s.epoch, KV: m.Epoch}
++		if err := s.persist(record{Index: uint64(len(s.log)) + 1, Entry: e}); err != nil {
++			return
++		}
++		s.log = append(s.log, e)
++		s.replicate()
++	}
++	s.Conn.Send(from, SyncOK{Epoch: m.Epoch, Data: clone(s.data)})
++}
++
+ // request appends entry e, if the replica is the primary, and sends it to the backup.
+ func (s *Store) request(from string, e Entry) {
+ 	if !s.leading() {
+@@ -258,15 +279,12 @@
+ 			continue
+ 		}
+ 		delete(s.pending, s.commit)
+-		switch {
+-		case fenced:
++		if fenced {
+ 			s.Conn.Send(to, Fenced{Epoch: e.KV, Client: e.Client, Seq: e.Seq})
+-		case e.Key == "":
+-			s.Conn.Send(to, SyncOK{Epoch: e.KV, Data: clone(s.data)})
+-		default:
+-			// A write sent again is answered with the key's current list, which holds the value.
+-			s.Conn.Send(to, Written{Client: e.Client, Seq: e.Seq, Key: e.Key, List: slices.Clone(s.data[e.Key])})
++			continue
+ 		}
++		// A write sent again is answered with the key's current list, which holds the value.
++		s.Conn.Send(to, Written{Client: e.Client, Seq: e.Seq, Key: e.Key, List: slices.Clone(s.data[e.Key])})
+ 	}
+ }
+ 

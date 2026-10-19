@@ -1,0 +1,109 @@
+diff -ru reference/messages.go b1/messages.go
+--- reference/messages.go	2026-10-16 21:29:56
++++ b1/messages.go	2026-10-16 23:48:47
+@@ -42,13 +42,8 @@
+ 		Key    string
+ 		List   []string
+ 	}
+-	// Fenced rejects a request of Epoch, which is below the store's fence. Client and Seq name
+-	// the write it rejects, if any.
+-	Fenced struct {
+-		Epoch, Fence uint64
+-		Client       string
+-		Seq          uint64
+-	}
++	// Fenced rejects a request of Epoch, which is below the store's fence.
++	Fenced struct{ Epoch, Fence uint64 }
+ 	// Append asks a server to append Value to Key.
+ 	Append struct {
+ 		Seq        uint64
+diff -ru reference/server.go b1/server.go
+--- reference/server.go	2026-10-16 21:33:36
++++ b1/server.go	2026-10-16 22:10:18
+@@ -11,8 +11,8 @@
+ // Server serves clients while it holds the lease. It asks the lock for the lease every
+ // RenewEvery. A grant is valid until the time the server sent the request plus the TTL. On a new
+ // epoch the server loads the store's data into its cache before it serves. Appends go to the
+-// store, and the server acknowledges them when the store confirms them. Gets are answered from
+-// the cache.
++// store; the server adds the value to its cache and acknowledges the append as it sends it. Gets
++// are answered from the cache.
+ type Server struct {
+ 	Name       string
+ 	Conn       Conn
+@@ -20,13 +20,12 @@
+ 	Store      string
+ 	RenewEvery time.Duration
+ 
+-	mu      sync.Mutex
+-	epoch   uint64
+-	until   time.Time // the lease is valid before until
+-	ready   bool      // the cache holds the store's data for epoch
+-	holder  string    // the holder the lock named last
+-	cache   map[string][]string
+-	waiting map[string]uint64 // per client: Seq of the write sent to the store for it
++	mu     sync.Mutex
++	epoch  uint64
++	until  time.Time // the lease is valid before until
++	ready  bool      // the cache holds the store's data for epoch
++	holder string    // the holder the lock named last
++	cache  map[string][]string
+ }
+ 
+ // Start starts the server with an empty cache and no lease. It renews the lease until ctx is
+@@ -34,7 +33,7 @@
+ func (s *Server) Start(ctx context.Context) {
+ 	s.mu.Lock()
+ 	s.epoch, s.until, s.ready, s.holder = 0, time.Time{}, false, ""
+-	s.cache, s.waiting = map[string][]string{}, map[string]uint64{}
++	s.cache = map[string][]string{}
+ 	s.mu.Unlock()
+ 	go func() {
+ 		t := time.NewTimer(rand.N(s.RenewEvery + 1))
+@@ -114,10 +113,6 @@
+ 	if m.Epoch == s.epoch {
+ 		s.ready, s.until = false, time.Time{}
+ 	}
+-	if seq, ok := s.waiting[m.Client]; ok && seq == m.Seq {
+-		delete(s.waiting, m.Client)
+-		s.Conn.Send(m.Client, NotLeader{Seq: m.Seq})
+-	}
+ }
+ 
+ func (s *Server) append(from string, m Append) {
+@@ -125,20 +120,16 @@
+ 		s.Conn.Send(from, NotLeader{Seq: m.Seq, Hint: s.hint()})
+ 		return
+ 	}
+-	s.waiting[from] = m.Seq
+ 	s.Conn.Send(s.Store, Write{Epoch: s.epoch, Client: from, Seq: m.Seq, Key: m.Key, Value: m.Value})
++	s.cache[m.Key] = append(s.cache[m.Key], m.Value)
++	s.Conn.Send(from, AppendOK{Seq: m.Seq})
+ }
+ 
+-// written updates the cache with the store's list and acknowledges the append it confirms.
++// written updates the cache with the store's list.
+ func (s *Server) written(m Written) {
+ 	if len(m.List) > len(s.cache[m.Key]) {
+ 		s.cache[m.Key] = m.List
+ 	}
+-	if seq, ok := s.waiting[m.Client]; !ok || seq != m.Seq {
+-		return
+-	}
+-	delete(s.waiting, m.Client)
+-	s.Conn.Send(m.Client, AppendOK{Seq: m.Seq})
+ }
+ 
+ // hint names the holder the lock named last, if that is another server.
+diff -ru reference/store.go b1/store.go
+--- reference/store.go	2026-10-16 21:30:07
++++ b1/store.go	2026-10-16 23:48:47
+@@ -85,7 +85,7 @@
+ 
+ func (s *Store) write(from string, m Write) {
+ 	if m.Epoch < s.fence {
+-		s.Conn.Send(from, Fenced{Epoch: m.Epoch, Fence: s.fence, Client: m.Client, Seq: m.Seq})
++		s.Conn.Send(from, Fenced{Epoch: m.Epoch, Fence: s.fence})
+ 		return
+ 	}
+ 	if m.Seq > s.last[m.Client] {

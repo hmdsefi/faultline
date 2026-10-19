@@ -1,0 +1,79 @@
+diff -ru reference/lock.go b3/lock.go
+--- reference/lock.go	2026-10-16 21:28:39
++++ b3/lock.go	2026-10-16 23:48:32
+@@ -19,8 +19,7 @@
+ 
+ // Handle handles one message from the server named from.
+ func (l *Lock) Handle(from string, msg any) {
+-	req, ok := msg.(Acquire)
+-	if !ok {
++	if _, ok := msg.(Acquire); !ok {
+ 		return
+ 	}
+ 	l.mu.Lock()
+@@ -36,5 +35,5 @@
+ 		l.epoch++
+ 	}
+ 	l.expiry = now.Add(l.TTL)
+-	l.Conn.Send(from, Grant{Epoch: l.epoch, TTL: l.TTL, Sent: req.Sent})
++	l.Conn.Send(from, Grant{Epoch: l.epoch, TTL: l.TTL})
+ }
+diff -ru reference/messages.go b3/messages.go
+--- reference/messages.go	2026-10-16 21:29:56
++++ b3/messages.go	2026-10-16 23:48:32
+@@ -9,15 +9,13 @@
+ 
+ // The messages between the nodes.
+ type (
+-	// Acquire asks the lock for the lease, or renews it for the holder. Sent is the server's
+-	// clock when it sent the request.
+-	Acquire struct{ Sent time.Time }
+-	// Grant gives the lease to the server that sent the Acquire: epoch Epoch, valid for TTL from
+-	// the Acquire's Sent.
++	// Acquire asks the lock for the lease, or renews it for the holder.
++	Acquire struct{}
++	// Grant gives the lease to the server that sent the Acquire, with epoch Epoch. TTL is how long
++	// the lock keeps the lease after it handles the Acquire.
+ 	Grant struct {
+ 		Epoch uint64
+ 		TTL   time.Duration
+-		Sent  time.Time
+ 	}
+ 	// Busy tells a server that Holder has the lease.
+ 	Busy struct{ Holder string }
+diff -ru reference/server.go b3/server.go
+--- reference/server.go	2026-10-16 21:33:36
++++ b3/server.go	2026-10-16 23:48:32
+@@ -9,10 +9,10 @@
+ )
+ 
+ // Server serves clients while it holds the lease. It asks the lock for the lease every
+-// RenewEvery. A grant is valid until the time the server sent the request plus the TTL. On a new
+-// epoch the server loads the store's data into its cache before it serves. Appends go to the
+-// store, and the server acknowledges them when the store confirms them. Gets are answered from
+-// the cache.
++// RenewEvery, and a grant keeps the lease valid until three renewals in a row go unanswered.
++// On a new epoch the server loads the store's data into its cache before it serves. Appends go
++// to the store, and the server acknowledges them when the store confirms them. Gets are answered
++// from the cache.
+ type Server struct {
+ 	Name       string
+ 	Conn       Conn
+@@ -54,7 +54,7 @@
+ func (s *Server) renew() {
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
+-	s.Conn.Send(s.Lock, Acquire{Sent: time.Now()})
++	s.Conn.Send(s.Lock, Acquire{})
+ 	if s.epoch > 0 && !s.ready && time.Now().Before(s.until) {
+ 		s.Conn.Send(s.Store, Sync{Epoch: s.epoch})
+ 	}
+@@ -97,7 +97,7 @@
+ 	if m.Epoch < s.epoch {
+ 		return
+ 	}
+-	until := m.Sent.Add(m.TTL)
++	until := time.Now().Add(3 * s.RenewEvery)
+ 	if m.Epoch > s.epoch {
+ 		s.epoch, s.ready, s.until = m.Epoch, false, until
+ 		s.cache = map[string][]string{}
