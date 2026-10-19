@@ -196,9 +196,11 @@ command sets `FAULTLINE_SCHEDULE` or `FAULTLINE_CHECK_DETERMINISM`. To run the t
 `replay.package_dir` the test package's directory.
 
 `versions` holds `faultline` (the faultline module version in the test binary), `go`, `goos`,
-`goarch` and `test_binary_sha256`. A replay with `FAULTLINE_SEED` compares the current run with
-these fields and `options_hash`, and warns about each difference that can break [the
-replay](../how-it-works.md#seeds-and-replay).
+`goarch` and `test_binary_sha256`. `faultline` is `(devel)` when the test builds faultline from a
+local folder, through a `replace` directive or a `go.work` workspace. With `go test -trimpath`, a
+`replace` gives the version that `go.mod` requires. A replay with `FAULTLINE_SEED` compares the
+current run with these fields and `options_hash`, and warns about each difference that can break
+[the replay](../how-it-works.md#seeds-and-replay).
 
 `options` holds `seeds`, `duration_ns`, `duration`, `max_events`, `mode`, `trace` (`hash` or
 `full`), `trace_buffer`, `check_determinism`, `keep_going`, `no_crypto_seed`, `allow_limit`, `net`

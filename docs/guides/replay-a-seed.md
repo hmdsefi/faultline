@@ -219,10 +219,12 @@ To narrow it down:
 
 3. Delete one fault from `/tmp/narrow.json`, and the event whose `undoes` names it. Leave `id` and
    `undoes` as they are: faultline numbers the events again when it reads the file.
-4. Replay the seed with the edited schedule:
+4. Replay the seed with the edited schedule. `-count=1` makes `go test` run the test every time.
+   `go test` does not check files outside the module for changes, so without the flag it can
+   print the cached pass of an earlier edit:
 
    ```sh
-   FAULTLINE_SEED=0x50304c12f019f421 FAULTLINE_SCHEDULE=/tmp/narrow.json go test -run '^TestKV$' .
+   FAULTLINE_SEED=0x50304c12f019f421 FAULTLINE_SCHEDULE=/tmp/narrow.json go test -count=1 -run '^TestKV$' .
    ```
 
 5. If the same check still fails, keep the deletion. If the run passes or fails another check, put

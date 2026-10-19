@@ -2,7 +2,7 @@
 
 This guide shows how an AI coding agent finds a distributed-systems bug with faultline. The agent
 checks its fix against the seed that failed, and pins that seed as a regression test. The guide
-covers the loop, which artifact file answers which question, and what v0.1.0 cannot do. It ends
+covers the loop, which artifact file answers which question, and what v0.1.1 cannot do. It ends
 with a block to paste into your agent's instruction file, which also holds the rules for code
 inside the simulation. The agent needs only a shell that runs `go test`, so the guide applies to
 Claude Code, Codex, Cursor and other coding agents.
@@ -30,8 +30,8 @@ From a shell, run `claude plugin marketplace add hmdsefi/faultline`, then
 - `/faultline:replay <seed>`. It runs the seed's replay command and says whether the failure and the
   trace hash match the artifact.
 - `/faultline:pin <seed>`. It adds a regression test next to the test that failed. The test calls
-  `faultline.RunSeeds`, which needs faultline v0.1.1 or later, or `etcdraft.TestSeeds` for a test
-  that calls `etcdraft.Test`, which needs the harness module v0.1.1 or later.
+  `faultline.RunSeeds`, which needs faultline v0.1.1 or newer, or `etcdraft.TestSeeds` for a test
+  that calls `etcdraft.Test`, which needs the harness module v0.1.1 or newer.
 
 The plugin's version matches the faultline release it was written for. Claude Code leaves
 auto-update off for this marketplace by default. Run `claude plugin update faultline@faultline` to
@@ -144,7 +144,7 @@ These steps check every seed and keep the failing seed as a test.
    time is about twice as long, because every seed runs twice.
 
 8. Pin the seed in a regression test that uses the same options and world function (the function
-   passed to `faultline.Run`) as the failing test. `faultline.RunSeeds`, in faultline v0.1.1 and
+   passed to `faultline.Run`) as the failing test. `faultline.RunSeeds`, in faultline v0.1.1 or
    newer, runs only the seeds it lists. The following test pins `0x287372ab06f1482e`:
 
    ```go
@@ -219,9 +219,9 @@ debugs, and the file that answers each one:
 The block in [Instructions for your agent](#instructions-for-your-agent) lists the rules, and [How
 faultline works](how-it-works.md#the-determinism-rules-your-code-follows) explains each one.
 
-## What v0.1.0 cannot do
+## What v0.1.1 cannot do
 
-v0.1.0 tests code written against faultline's node API: boot functions, `w.Net` for messages and
+v0.1.1 tests code written against faultline's node API: boot functions, `w.Net` for messages and
 the node's volume for files. Plan an agent's work around these limits:
 
 - It does not run existing code unchanged. Code that starts goroutines, uses `net` or opens files

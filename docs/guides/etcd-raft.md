@@ -283,8 +283,8 @@ at the same time and event:
 
 To run only this seed from a test of its own, call `etcdraft.TestSeeds` with the configuration and
 options of the failing test, and the seed. That is how you keep a seed as a regression test once its
-bug is fixed. `TestSeeds` needs version v0.1.1 or newer of the harness module. Add the following
-test to `bugs_test.go`:
+bug is fixed. `TestSeeds` needs the harness module v0.1.1 or newer. Add the following test to
+`bugs_test.go`:
 
 ```go
 func TestSkipSyncSeed089cc95a(t *testing.T) {

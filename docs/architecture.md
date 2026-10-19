@@ -2,7 +2,7 @@
 
 faultline is a Go library built around one single-threaded simulator, plus a command-line tool and a
 separate module for etcd/raft. This page shows what each package owns, how one seed moves through
-them, and why the design looks the way it does. It covers the packages in v0.1.0.
+them, and why the design looks the way it does. It covers the packages in v0.1.1.
 
 ## The node API
 
@@ -83,10 +83,11 @@ flowchart TB
 
 The packages do these jobs:
 
-- `faultline`, the module root, is the test entry point: `Run`, `Options` and `World`. It reads the
-  `FAULTLINE_*` environment variables, derives the seed list and runs each seed as a subtest. It
-  runs the checks, classifies failures, runs failing seeds a second time and prints the report. It
-  and the etcd/raft harness are the only packages on this page that import `testing`.
+- `faultline`, the module root, is the test entry point: `Run`, `RunSeeds`, `Options` and
+  `World`. It reads the `FAULTLINE_*` environment variables, derives the seed list and runs each
+  seed as a subtest. It runs the checks, classifies failures, runs failing seeds a second time and
+  prints the report. It and the etcd/raft harness are the only packages on this page that import
+  `testing`.
 - `kernel` is the discrete-event simulator. It owns virtual time, the event queue and its seeded
   tie-break, the named random streams, and nodes with their incarnations, crashes, pauses and
   clocks. It also keeps the trace and its running hash. It starts no goroutines and imports only the
@@ -142,7 +143,7 @@ The kernel runs every callback on one goroutine, one at a time, in an order fixe
 and the seed. A simulator with real goroutines would need the Go scheduler to make the same choices
 in every run, and the Go scheduler takes no seed. With one thread and an event queue, the queue is
 the only source of ordering, and the queue is seeded. The cost is that code under test is written as
-callbacks. v0.1.0 does not run goroutine code.
+callbacks. v0.1.1 does not run goroutine code.
 
 ### Named streams and integer decisions
 
