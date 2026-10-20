@@ -16,7 +16,7 @@ type watchState struct {
 	phase    atomic.Int32           // watchBody … watchDrain
 	nowNS    atomic.Int64           // Sim.Now() after the last step
 	executed atomic.Uint64          // Sim.Executed() after the last step
-	label    atomic.Pointer[string] //nolint:unused // kernel label of the last driver request whose wrapper ran
+	label    atomic.Pointer[string] // kernel label of the last driver request whose wrapper ran
 }
 
 const (

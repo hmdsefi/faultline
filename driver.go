@@ -31,8 +31,14 @@ type driver struct {
 	wake chan struct{} // GOR-024 (ga.wake)
 
 	executed    bool     // set by the OnEvent observer (GOR-011)
-	ended       bool     //nolint:unused // E1 ran (GOR-065)
+	ended       bool     // E1 ran (GOR-065)
+	failNow     bool     // a process's main called t.FailNow or t.Fatal (GOR-047)
 	checkpoints []uint64 // GOR-075
+
+	queue []*request  // requests queued since the last drain (GOR-030)
+	seq   uint64      // arrival counter
+	reqN  uint64      // request IDs (GOR-031)
+	nodes []*nodeProc // indexed by kernel.NodeID; index 0 unused
 }
 
 // newDriver creates the driver after API-030 step 8 and takes the world lock (GOR-010 step 1).
@@ -121,13 +127,18 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 	for {
 		d.quiesce() // (1)
 		b := bubbleNow()
-		d.advance(b)    // GOR-021
+		d.advance(b) // GOR-021
+		if d.failNow {
+			d.ga.bt.FailNow() // a process's main called t.FailNow: stop as t.FailNow in body does (GOR-047)
+		}
 		if d.executed { // GOR-022
 			d.executed = false
 			d.unlockDriver()
 			d.w.runInvariants()
 			d.lockDriver()
 		}
+		d.drain()    // (2) GOR-031
+		d.advance(b) // defers paused-node requests at b
 		if s.Err() != nil {
 			return kernel.StopFailed
 		}

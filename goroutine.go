@@ -136,7 +136,13 @@ func (ga *goAttempt) begin() {
 // end runs on the driver goroutine after fn returned or unwound (GOR-065). It leaves the world
 // lock released.
 func (ga *goAttempt) end() {
-	if d := ga.drv; d != nil && d.holds.Load() {
-		d.unlockDriver()
+	d := ga.drv
+	if d == nil { // world construction failed before GOR-010
+		return
 	}
+	if !d.holds.Load() { // e.g. after a Goexit inside a check
+		d.lockDriver()
+	}
+	d.endRun() // E1
+	d.unlockDriver()
 }
