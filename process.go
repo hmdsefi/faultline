@@ -84,7 +84,8 @@ type nodeProc struct {
 	main    ProcessFunc   // nil: not a process node
 	procs   []*Process    // one per incarnation, ascending
 	pending []*request    // scheduled requests of the current incarnation, ascending req
-	waitCh  chan struct{} //nolint:unused // WaitUnpaused waiters (GOR-041)
+	posted  *request      // the pending request whose kernel event is live, or nil (GOR-031)
+	waitCh  chan struct{} // WaitUnpaused waiters (GOR-041)
 }
 
 // lockedSource makes a stream safe for concurrent use (GOR-046 step 4).
@@ -105,11 +106,129 @@ func (s *lockedSource) Uint64() uint64 {
 // callbacks included.
 func (p *Process) Rand() *rand.Rand { return p.rnd }
 
-// Context returns the context passed to main.
+// Context returns the context passed to main. It is cancelled when the node crashes, when main
+// ends, and when the run ends; context.Cause then returns ErrCrashed, ErrExited or ErrRunEnded.
 func (p *Process) Context() context.Context { return p.ctx }
 
 // Incarnation returns the incarnation this Process belongs to.
 func (p *Process) Incarnation() uint32 { return p.inc }
+
+// Do runs fn on the driver goroutine as one node-bound kernel event at the current virtual time,
+// and returns after fn returns. If the node is paused, fn runs when it resumes, and Do waits until
+// then. fn may call kernel, World, history and fault APIs; it must not block. Do returns
+// ErrCrashed, ErrExited or ErrRunEnded without running fn if this incarnation is no longer alive
+// when Do is called or before fn starts. A panic in fn fails the run, and Do returns nil. Calling
+// Do from body, a check or a kernel callback panics; call fn directly there. Concurrent Do calls
+// from one node run in byte order of their labels (equal labels: arrival order).
+func (p *Process) Do(label string, fn func()) error {
+	d := p.d
+	if d.OnDriver() {
+		panic(misuse{msg: "faultline: Process.Do called on the driver goroutine (body, a check or a kernel callback); call fn directly"})
+	}
+	d.Lock()
+	if !d.Alive(p.Node.ID(), p.inc) {
+		d.Unlock()
+		return context.Cause(p.ctx)
+	}
+	done := make(chan struct{})
+	var cause error
+	d.Post(p.Node.ID(), p.inc, "do", "do:"+label,
+		func() {
+			defer close(done)
+			fn()
+		},
+		func() {
+			cause = context.Cause(p.ctx)
+			close(done)
+		})
+	d.Unlock()
+	<-done
+	return cause
+}
+
+// Logf adds a kernel.log record for this node to the trace, as Node.Logf does. It does not block,
+// and it does nothing once this incarnation has stopped. Messages this node logs at the same
+// virtual instant can be recorded in byte order of their text instead of call order. Calling Logf
+// from body or a kernel callback panics; use Node.Logf there.
+func (p *Process) Logf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	d, n := p.d, p.Node
+	d.lockFor("Logf")
+	defer d.Unlock()
+	if !d.Alive(n.ID(), p.inc) {
+		return
+	}
+	d.Post(n.ID(), p.inc, "log", "log:"+msg, func() { n.Logf("%s", msg) }, func() {})
+}
+
+// gor016ProcMsg is GOR-016's message for the Process methods that take the world lock.
+const gor016ProcMsg = "faultline: Process.%s called on the driver goroutine while it holds the world lock (body, a kernel event, a boot function, a hook or a Process.Do function); use the node's kernel methods (Node.Logf, Node.Now, Node.LocalTime, Node.Drift)"
+
+// lockFor is Lock for Process.Logf and the LocalClock methods: on the driver goroutine while it
+// holds the lock it panics with a message naming method instead of the shims' message (GOR-016).
+func (d *driver) lockFor(method string) {
+	if d.holds.Load() && d.OnDriver() {
+		panicMisuse(gor016ProcMsg, method)
+	}
+	d.Lock()
+}
+
+// Go runs fn on a new goroutine of this incarnation. A panic in fn fails the run (kind "panic")
+// while the incarnation is alive; after that it is logged and ignored. t.FailNow and t.Fatal in fn
+// stop the run, as they do in main; a bare runtime.Goexit ends only fn's goroutine.
+func (p *Process) Go(fn func()) {
+	if fn == nil {
+		panic(misuse{msg: "faultline: Process.Go: nil function"})
+	}
+	go func() {
+		pprof.SetGoroutineLabels(p.ctx) // this incarnation's labels, whoever called Go
+		returned := false
+		defer func() { p.d.goEnded(p, returned, recover()) }() // also runs after runtime.Goexit
+		fn()
+		returned = true
+	}()
+}
+
+// goEnded handles the end of a Process.Go goroutine (GOR-058): v is the recovered panic value, and
+// returned is false after a panic or runtime.Goexit. A panic of a live incarnation fails the run
+// (GOR-050), a ghost's is logged (GOR-052). A Goexit of a live incarnation after the test failed
+// (t.FailNow, t.Fatal) makes the driver stop the run at once; the incarnation stays running.
+func (d *driver) goEnded(p *Process, returned bool, v any) {
+	if returned {
+		return
+	}
+	var stack []byte
+	if v != nil {
+		stack = debug.Stack()
+	}
+	d.Lock()
+	defer d.Unlock()
+	alive := d.Alive(p.Node.ID(), p.inc)
+	switch {
+	case v != nil && alive:
+		d.processPanic(p, v, stack, "process.Go")
+	case v != nil:
+		d.ghostPanic(p, v)
+	case alive && d.ga.bt.Failed():
+		d.SyncClock()
+		d.failNow = true
+		d.signal()
+	}
+}
+
+// onCrash is the driver's crash hook (GOR-051). It runs inside the crash procedure, lock held.
+func (d *driver) onCrash(n *kernel.Node) {
+	id := n.ID()
+	p := d.proc(id, n.Incarnation())
+	if p == nil || p.status != incRunning {
+		return // not a process node, or an exited incarnation, which keeps its status and end time
+	}
+	p.status = incCrashed
+	p.endAt = d.w.Sim.Now()
+	p.cancel(ErrCrashed)
+	d.cancelScheduled(id, "crashed")
+	d.wakeWaiters(id)
+}
 
 // AddProcess adds a process node tagged "server" and "process". It equals
 // w.Sim.AddNode(name, boot, append(opts, kernel.WithTags("server", "process"))...), where boot
@@ -307,10 +426,11 @@ func (d *driver) ghostPanic(p *Process, v any) {
 }
 
 // endIncarnation performs GOR-048's steps after its record: the status, the end time, the
-// context and the scheduled requests.
+// context, the scheduled requests and the WaitUnpaused waiters.
 func (d *driver) endIncarnation(p *Process, status incStatus, cause error, reason string) {
 	p.status = status
 	p.endAt = d.w.Sim.Now()
 	p.cancel(cause)
 	d.cancelScheduled(p.Node.ID(), reason)
+	d.wakeWaiters(p.Node.ID())
 }
