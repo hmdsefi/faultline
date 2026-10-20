@@ -95,7 +95,7 @@ func TestDeterminismMessage(t *testing.T) {
 	// Line 1 keeps the first run's message lines that hold a non-space character; line 2 names
 	// the record by its Seq and labels each side with its run.
 	orig := &failure{kind: "invariant", check: "i", context: "invariant", at: 0, message: "x=1\n \n  y=2\n"}
-	f := newDeterminismFailure("artifact_rerun", 0x5e, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, orig, a, b, attemptResult{now: 7})
+	f := newDeterminismFailure("artifact_rerun", 0x5e, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, orig, a, b, attemptResult{now: 7}, false)
 	want := strings.Join([]string{
 		`the first run failed: invariant "i" violated at t=0.000000000s`,
 		"  x=1",
@@ -129,28 +129,28 @@ func TestDeterminismMessage(t *testing.T) {
 		for _, h := range c.hashes {
 			attempts = append(attempts, attemptResult{hash: h})
 		}
-		if g := newDeterminismFailure(c.context, 1, attempts, nil, a, a, attemptResult{}); g.message != c.line+"\n"+causes {
+		if g := newDeterminismFailure(c.context, 1, attempts, nil, a, a, attemptResult{}, false); g.message != c.line+"\n"+causes {
 			t.Errorf("%s %x: message\n%s\nwant line 2\n%s", c.context, c.hashes, g.message, c.line)
 		}
 	}
 	// One kept record is "1 record".
-	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, a[:1], a[:1], attemptResult{}); !strings.HasPrefix(g.message, "the two full-trace runs differ before the last 1 record they kept (") {
+	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, a[:1], a[:1], attemptResult{}, false); !strings.HasPrefix(g.message, "the two full-trace runs differ before the last 1 record they kept (") {
 		t.Errorf("one kept record:\n%s", g.message)
 	}
 	// In the check the full-trace runs are runs 3 and 4. A run whose list ended names its last record.
-	h := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, a[:1], a, attemptResult{})
+	h := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, a[:1], a, attemptResult{}, false)
 	if want := "first difference at record #2:\n  run 3: (trace ended after record #1)\n  run 4: #2 t=0.000000005s node=1#1 net.send cause=0 \"x\" msg=\"1\"\n" + causes; h.message != want {
 		t.Fatalf("absent side:\n%s\nwant\n%s", h.message, want)
 	}
 	// Run 4 ended: run 3 shows its first extra record, run 4 the record it ended after.
-	if l := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, a, a[:1], attemptResult{}); !strings.HasPrefix(l.message, "first difference at record #2:\n  run 3: #2 t=0.000000005s node=1#1 net.send cause=0 \"x\" msg=\"1\"\n  run 4: (trace ended after record #1)\n") {
+	if l := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, a, a[:1], attemptResult{}, false); !strings.HasPrefix(l.message, "first difference at record #2:\n  run 3: #2 t=0.000000005s node=1#1 net.send cause=0 \"x\" msg=\"1\"\n  run 4: (trace ended after record #1)\n") {
 		t.Errorf("run 4 ended:\n%s", l.message)
 	}
 	// The line shows node, incarnation and cause, so a difference only in Cause is visible. Kept
 	// windows that start at the same record are compared as they are.
 	ca := []kernel.Record{{Seq: 5, At: 10, Node: 2, Inc: 5, Kind: "kernel.event", Cause: 3, Text: "tick"}}
 	cb := []kernel.Record{{Seq: 5, At: 10, Node: 2, Inc: 5, Kind: "kernel.event", Cause: 4, Text: "tick"}}
-	if c := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, ca, cb, attemptResult{}); !strings.HasPrefix(c.message, "first difference at record #5:\n  run 3: #5 t=0.000000010s node=2#5 kernel.event cause=3 \"tick\"\n  run 4: #5 t=0.000000010s node=2#5 kernel.event cause=4 \"tick\"\n") {
+	if c := newDeterminismFailure("check_determinism", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}, {hash: 4}}, nil, ca, cb, attemptResult{}, false); !strings.HasPrefix(c.message, "first difference at record #5:\n  run 3: #5 t=0.000000010s node=2#5 kernel.event cause=3 \"tick\"\n  run 4: #5 t=0.000000010s node=2#5 kernel.event cause=4 \"tick\"\n") {
 		t.Errorf("cause only:\n%s", c.message)
 	}
 	// A limit re-run whose two runs recorded different numbers of records kept windows that start
@@ -158,11 +158,11 @@ func TestDeterminismMessage(t *testing.T) {
 	// report keeps firstDiff's result.
 	wa := []kernel.Record{{Seq: 3, Text: "c"}, {Seq: 4, Text: "d"}, {Seq: 5, Text: "e"}}
 	wb := []kernel.Record{{Seq: 4, Text: "d"}, {Seq: 5, Text: "e"}, {Seq: 6, Text: "f"}}
-	o := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, orig, wa, wb, attemptResult{})
+	o := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, orig, wa, wb, attemptResult{}, false)
 	if want := "the two full-trace runs diverged before the records they kept: run 2 recorded 5 records and run 3 recorded 6 records (trace hashes 0x0000000000000002 and 0x0000000000000003)\n" + causes; !strings.HasSuffix(o.message, "\n"+want) {
 		t.Errorf("windows that do not line up:\n%s\nwant the suffix\n%s", o.message, want)
 	}
-	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, []kernel.Record{{Seq: 1, Text: "a"}}, []kernel.Record{{Seq: 2, Text: "b"}}, attemptResult{}); !strings.HasPrefix(g.message, "the two full-trace runs diverged before the records they kept: run 2 recorded 1 record and run 3 recorded 2 records (") {
+	if g := newDeterminismFailure("artifact_rerun", 1, []attemptResult{{hash: 1}, {hash: 2}, {hash: 3}}, nil, []kernel.Record{{Seq: 1, Text: "a"}}, []kernel.Record{{Seq: 2, Text: "b"}}, attemptResult{}, false); !strings.HasPrefix(g.message, "the two full-trace runs diverged before the records they kept: run 2 recorded 1 record and run 3 recorded 2 records (") {
 		t.Errorf("windows that do not line up, one record:\n%s", g.message)
 	}
 	if od := o.report().Determinism.Diff; od == nil || od.Index != 0 || od.A == nil || od.A.Seq != 3 || od.B == nil || od.B.Seq != 4 {
@@ -202,15 +202,15 @@ func TestConsoleLines(t *testing.T) {
 		stack = append(stack, fmt.Sprintf("frame%d", i))
 	}
 	f := &failure{kind: "panic", check: "x.f", context: "panic-body", message: "boom", panic: &artifact.Panic{Stack: strings.Join(stack, "\n") + "\n"}}
-	lines := consoleLines(f, "CMD", "/a/", []string{"w1"}, false, true)
+	lines := consoleLines(f, "CMD", "/a/", []string{"w1"}, false, true, false)
 	if lines[0] != "faultline: panic in body at t=0.000000000s" || lines[1] != "  boom" || lines[2] != "stack:" || lines[3] != "  frame0" || lines[42] != "  frame39" ||
 		lines[43] != "  ... 5 more lines (full stack in report.txt)" || lines[44] != "replay:    CMD" || lines[45] != "artifacts: /a/" || lines[46] != "warning: w1" || len(lines) != 47 {
 		t.Fatalf("lines %q", lines)
 	}
-	if l := consoleLines(f, "CMD", "off", nil, false, false); l[43] != "  ... 5 more lines" {
+	if l := consoleLines(f, "CMD", "off", nil, false, false, false); l[43] != "  ... 5 more lines" {
 		t.Fatalf("not written: %q", l[43])
 	}
-	if l := consoleLines(f, "CMD", "/a/", nil, true, true); len(l) != 50 || l[47] != "  frame44" {
+	if l := consoleLines(f, "CMD", "/a/", nil, true, true, false); len(l) != 50 || l[47] != "  frame44" {
 		t.Fatalf("full: %q", l)
 	}
 	if got := joinLines([]string{"a", "b"}, "    "); got != "    a\n    b\n" {
@@ -219,18 +219,18 @@ func TestConsoleLines(t *testing.T) {
 	// No stack for other kinds; every message line is indented.
 	inv := &failure{kind: "invariant", check: "i", context: "invariant", message: "a\nb"}
 	want := []string{`faultline: invariant "i" violated at t=0.000000000s`, "  a", "  b", "replay:    FAULTLINE_SEED=0x0000000000000001 go test -run '^TestA$' .", "artifacts: off"}
-	if got := consoleLines(inv, "FAULTLINE_SEED=0x0000000000000001 go test -run '^TestA$' .", "off", nil, false, false); !slices.Equal(got, want) {
+	if got := consoleLines(inv, "FAULTLINE_SEED=0x0000000000000001 go test -run '^TestA$' .", "off", nil, false, false, false); !slices.Equal(got, want) {
 		t.Errorf("invariant lines %q", got)
 	}
 	// A stack of exactly 40 lines is shown whole, with no "more lines" line.
 	short := &failure{kind: "panic", context: "panic-body", message: "m", panic: &artifact.Panic{Stack: strings.Join(stack[:40], "\n") + "\n"}}
-	if got := consoleLines(short, "CMD", "off", nil, false, true); len(got) != 2+1+40+2 || got[42] != "  frame39" {
+	if got := consoleLines(short, "CMD", "off", nil, false, true, false); len(got) != 2+1+40+2 || got[42] != "  frame39" {
 		t.Errorf("40-line stack: %q", got)
 	}
 	// Tabs in stack lines and leading spaces in message lines are kept.
 	ws := &failure{kind: "panic", context: "panic-body", message: "diff:\n  -a\n  +b", panic: &artifact.Panic{Stack: "goroutine 1 [running]:\nmain.f()\n\t/x/main.go:3 +0x1d\n"}}
 	want = []string{"faultline: panic in body at t=0.000000000s", "  diff:", "    -a", "    +b", "stack:", "  goroutine 1 [running]:", "  main.f()", "  \t/x/main.go:3 +0x1d", "replay:    CMD", "artifacts: off"}
-	if got := consoleLines(ws, "CMD", "off", nil, false, false); !slices.Equal(got, want) {
+	if got := consoleLines(ws, "CMD", "off", nil, false, false, false); !slices.Equal(got, want) {
 		t.Errorf("whitespace lines %q", got)
 	}
 }
@@ -248,7 +248,7 @@ func TestConsoleMessageLines(t *testing.T) {
 	} {
 		f := &failure{kind: "fail", context: "fail-body", message: c.message}
 		want := append(append([]string{"faultline: simulation failed in body at t=0.000000000s"}, c.lines...), "replay:    CMD", "artifacts: off")
-		if got := consoleLines(f, "CMD", "off", nil, false, false); !slices.Equal(got, want) {
+		if got := consoleLines(f, "CMD", "off", nil, false, false, false); !slices.Equal(got, want) {
 			t.Errorf("message %q: lines %q, want %q", c.message, got, want)
 		}
 	}
@@ -326,7 +326,7 @@ func TestStackWindow(t *testing.T) {
 	}
 	for _, c := range cases {
 		f := &failure{kind: "panic", context: "panic-callback", message: "m", panic: &artifact.Panic{Stack: c.stack}}
-		got := stackOf(consoleLines(f, "CMD", "off", nil, false, c.written))
+		got := stackOf(consoleLines(f, "CMD", "off", nil, false, c.written, false))
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%s:\n%s\nwant\n%s", c.name, strings.Join(got, "\n"), strings.Join(c.want, "\n"))
 		}
@@ -334,7 +334,7 @@ func TestStackWindow(t *testing.T) {
 		for _, l := range stackLines(c.stack) {
 			full = append(full, "  "+l)
 		}
-		if got := stackOf(consoleLines(f, "CMD", "off", nil, true, true)); !slices.Equal(got, append([]string{"stack:"}, full...)) {
+		if got := stackOf(consoleLines(f, "CMD", "off", nil, true, true, false)); !slices.Equal(got, append([]string{"stack:"}, full...)) {
 			t.Errorf("%s, full: %q", c.name, got)
 		}
 	}
@@ -345,7 +345,7 @@ func TestStackWindow(t *testing.T) {
 	for _, l := range stackLines(inner) {
 		want = append(want, "  "+l)
 	}
-	if got := stackOf(consoleLines(f, "CMD", "off", nil, false, true)); !slices.Equal(got, want) {
+	if got := stackOf(consoleLines(f, "CMD", "off", nil, false, true, false)); !slices.Equal(got, want) {
 		t.Errorf("no user frame: %q", got)
 	}
 	// A stack without a goroutine line or a panic line keeps its first 40 lines (TestConsoleLines).

@@ -77,6 +77,34 @@ const (
 	nextStep     = "next step: fix the cause; until the seed gives the same run every time, the replay command may not reproduce this failure"
 )
 
+// gorLevel3Line is GOR-077's determinism-message line; gorConsoleLine its console line.
+const (
+	gorLevel3Line  = "determinism level 3 (goroutine mode): replay is best-effort; divergence comes from goroutines woken together, global math/rand, map iteration, select, or state shared between runs"
+	gorConsoleLine = "  determinism: level 3 (goroutine mode, best-effort replay)"
+)
+
+// divergenceLine is GOR-076's localization line, or "" when it does not apply: a2records must
+// start at Seq 1 and contain the i-th kernel.event record.
+func divergenceLine(a1, a2 []uint64, a2records []kernel.Record) string {
+	if len(a2records) == 0 || a2records[0].Seq != 1 {
+		return ""
+	}
+	i := 1
+	for i <= len(a1) && i <= len(a2) && a1[i-1] == a2[i-1] {
+		i++
+	}
+	n := 0
+	for _, r := range a2records {
+		if r.Kind != "kernel.event" {
+			continue
+		}
+		if n++; n == i {
+			return fmt.Sprintf("the first run diverged before or during event %d: %s", i, recordLine(r))
+		}
+	}
+	return ""
+}
+
 // firstRunLines returns line 1 of a determinism message whose first run failed with f (API-071):
 // its headline, then each of its message lines that holds a non-space character, indented.
 func firstRunLines(f *failure) []string {
@@ -141,13 +169,20 @@ func determinismMessage(d *determinism) string {
 		}
 		lines = append(lines, fmt.Sprintf("the two full-trace runs were identical (trace hash 0x%016x); %s", d.same, odd))
 	}
+	if d.divergence != "" {
+		lines = append(lines, d.divergence)
+	}
+	if d.goroutine {
+		lines = append(lines, gorLevel3Line)
+	}
 	lines = append(lines, commonCauses, nextStep)
 	return strings.Join(lines, "\n")
 }
 
-// newDeterminismFailure builds the determinism failure of API-070.
-func newDeterminismFailure(context string, seed uint64, attempts []attemptResult, original *failure, diffA, diffB []kernel.Record, art attemptResult) *failure {
-	d := &determinism{context: context, seed: seed, original: original, diff: firstDiff(diffA, diffB)}
+// newDeterminismFailure builds the determinism failure of API-070. goroutine says the seed ran in
+// goroutine mode, which adds GOR-076's localization line and GOR-077's level-3 line.
+func newDeterminismFailure(context string, seed uint64, attempts []attemptResult, original *failure, diffA, diffB []kernel.Record, art attemptResult, goroutine bool) *failure {
+	d := &determinism{context: context, seed: seed, original: original, diff: firstDiff(diffA, diffB), goroutine: goroutine}
 	for _, a := range attempts {
 		d.hashes = append(d.hashes, a.hash)
 	}
@@ -159,6 +194,10 @@ func newDeterminismFailure(context string, seed uint64, attempts []attemptResult
 		// Kept windows that start at different records: index 0 differs, but the runs diverged
 		// before the records they kept (API-071).
 		d.recorded = [2]uint64{lastSeq(diffA), lastSeq(diffB)}
+	}
+	if goroutine && context == "artifact_rerun" && attempts[2].hash == attempts[1].hash {
+		// Only the first run differed: its checkpoints locate the divergence (GOR-076).
+		d.divergence = divergenceLine(attempts[0].checkpoints, attempts[1].checkpoints, attempts[1].records)
 	}
 	f := &failure{kind: "determinism", context: "determinism-artifact", at: art.now, determinism: d}
 	if context == "check_determinism" {
@@ -214,9 +253,13 @@ func stackLines(stack string) []string {
 }
 
 // consoleLines returns the failure report lines of API-075: failureLines, then the replay and
-// artifacts lines and the warnings.
-func consoleLines(f *failure, replayCommand, artifactsLine string, warnings []string, full, written bool) []string {
+// artifacts lines, GOR-077's determinism line when goroutine says the seed ran in goroutine mode,
+// and the warnings.
+func consoleLines(f *failure, replayCommand, artifactsLine string, warnings []string, full, written, goroutine bool) []string {
 	lines := append(failureLines(f, full, written), "replay:    "+replayCommand, "artifacts: "+artifactsLine)
+	if goroutine {
+		lines = append(lines, gorConsoleLine)
+	}
 	for _, w := range warnings {
 		lines = append(lines, "warning: "+w)
 	}
