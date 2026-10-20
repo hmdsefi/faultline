@@ -32,7 +32,7 @@ type driver struct {
 
 	executed    bool     // set by the OnEvent observer (GOR-011)
 	ended       bool     // E1 ran (GOR-065)
-	failNow     bool     // a process's main called t.FailNow or t.Fatal (GOR-047)
+	failNow     bool     // a process goroutine called t.FailNow or t.Fatal (GOR-047, GOR-058)
 	checkpoints []uint64 // GOR-075
 
 	queue []*request  // requests queued since the last drain (GOR-030)
@@ -46,6 +46,7 @@ func newDriver(w *World, ga *goAttempt) *driver {
 	d := &driver{w: w, ga: ga, wake: ga.wake}
 	ga.drv = d
 	d.lockDriver()
+	w.Sim.OnCrash(d.onCrash) // after simnet's and simdisk's hooks (API-030 created them first)
 	ga.watch.phase.Store(watchBody)
 	return d
 }
@@ -129,7 +130,7 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 		b := bubbleNow()
 		d.advance(b) // GOR-021
 		if d.failNow {
-			d.ga.bt.FailNow() // a process's main called t.FailNow: stop as t.FailNow in body does (GOR-047)
+			d.ga.bt.FailNow() // a process goroutine called t.FailNow: stop as t.FailNow in body does (GOR-047, GOR-058)
 		}
 		if d.executed { // GOR-022
 			d.executed = false
@@ -137,8 +138,9 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 			d.w.runInvariants()
 			d.lockDriver()
 		}
-		d.drain()    // (2) GOR-031
-		d.advance(b) // defers paused-node requests at b
+		d.wakePausedWaiters() // GOR-041
+		d.drain()             // (2) GOR-031
+		d.advance(b)          // defers paused-node requests at b
 		if s.Err() != nil {
 			return kernel.StopFailed
 		}
@@ -153,6 +155,7 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 				d.checkpoint()
 				d.ga.watch.stepped(s)
 			}
+			d.wakePausedWaiters() // GOR-041
 			continue
 		}
 		if b >= horizon {

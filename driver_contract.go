@@ -105,7 +105,8 @@ func (d *driver) signal() {
 	}
 }
 
-// drain turns the queued requests into node-bound kernel events (GOR-031). Lock held.
+// drain numbers the queued requests in (node, key, arrival) order and schedules them on their
+// nodes (GOR-031). Lock held.
 func (d *driver) drain() {
 	q := d.queue
 	d.queue = nil
@@ -135,34 +136,53 @@ func (d *driver) drain() {
 			r.cancel()
 			continue
 		}
-		d.emitRequest(r)
-		req := r
-		d.w.Sim.Node(r.node).Post("req "+r.kind, func() { d.runRequest(req) })
 		np := d.node(r.node)
 		np.pending = append(np.pending, r)
+		d.postNext(r.node, np)
 	}
 }
 
-// runRequest is the wrapper of a scheduled request (GOR-032).
+// postNext records and schedules the kernel event of node id's first scheduled request, unless
+// the node has a live request event already. With one live request event per node, a node's
+// requests run in req order; the seeded tie-break orders them only against other events. The
+// driver.request record comes right before the Post, so it is the cause of the event (GOR-031).
+func (d *driver) postNext(id kernel.NodeID, np *nodeProc) {
+	if np.posted != nil || len(np.pending) == 0 {
+		return
+	}
+	r := np.pending[0]
+	np.posted = r
+	d.emitRequest(r)
+	if d.w.Sim.Node(id).Post("req "+r.kind, func() { d.runRequest(r) }) == 0 {
+		panic("faultline: internal error: request event for a down node") // a live incarnation's node is up
+	}
+}
+
+// runRequest is the wrapper of a scheduled request (GOR-032). After run it schedules the event of
+// the node's next request.
 func (d *driver) runRequest(r *request) {
+	np := d.node(r.node)
+	if np.posted == r {
+		np.posted = nil
+	}
 	if r.cancelled {
 		return
 	}
 	r.started = true
-	np := d.node(r.node)
 	if i := slices.Index(np.pending, r); i >= 0 {
 		np.pending = slices.Delete(np.pending, i, i+1)
 	}
 	label := "req " + r.kind
 	d.ga.watch.label.Store(&label)
 	r.run()
+	d.postNext(r.node, np)
 }
 
 // cancelScheduled cancels the scheduled requests of node id's current incarnation (GOR-033).
 func (d *driver) cancelScheduled(id kernel.NodeID, reason string) {
 	np := d.node(id)
 	pending := np.pending
-	np.pending = nil
+	np.pending, np.posted = nil, nil
 	for _, r := range pending {
 		d.emitCancel(r, reason)
 		r.cancelled = true
@@ -178,7 +198,7 @@ func (d *driver) cancelAllRequests() {
 	for _, np := range d.nodes {
 		if np != nil {
 			all = append(all, np.pending...)
-			np.pending = nil
+			np.pending, np.posted = nil, nil
 		}
 	}
 	slices.SortFunc(all, func(a, b *request) int {
@@ -213,7 +233,8 @@ func (d *driver) emitCancel(r *request, reason string) {
 		}})
 }
 
-// endRun is E1 of GOR-065: no live incarnations, cancelled contexts and requests. Lock held.
+// endRun is E1 of GOR-065: no live incarnations, cancelled contexts and requests, woken
+// WaitUnpaused waiters. Lock held.
 func (d *driver) endRun() {
 	d.ended = true
 	for _, np := range d.nodes {
@@ -225,4 +246,66 @@ func (d *driver) endRun() {
 		}
 	}
 	d.cancelAllRequests()
+	d.wakeAllWaiters()
+}
+
+// WaitUnpaused blocks a process goroutine while node is paused (GOR-040). It reports whether
+// incarnation inc is still alive. The lock is held on entry and on return, except on the driver
+// goroutine: there it releases the lock and panics, so callers must not defer Unlock.
+func (d *driver) WaitUnpaused(node kernel.NodeID, inc uint32) bool {
+	for {
+		if !d.Alive(node, inc) {
+			return false
+		}
+		n := d.w.Sim.Node(node)
+		if n.State() != kernel.NodePaused {
+			return true
+		}
+		if d.OnDriver() {
+			d.Unlock()
+			panicMisuse("faultline: fsx call on paused node %s from the driver goroutine; read its files with w.Disk.Volume(n) instead", n.Name())
+		}
+		np := d.node(node)
+		if np.waitCh == nil {
+			np.waitCh = make(chan struct{})
+		}
+		ch := np.waitCh
+		d.Unlock()
+		<-ch
+		d.Lock()
+	}
+}
+
+// wakePausedWaiters closes the wait channel of every node that is no longer paused or whose
+// incarnation is no longer alive, in ascending node ID (GOR-041).
+func (d *driver) wakePausedWaiters() {
+	for id, np := range d.nodes {
+		if np == nil || np.waitCh == nil {
+			continue
+		}
+		n := d.w.Sim.Node(kernel.NodeID(id))
+		if n.State() != kernel.NodePaused || !d.Alive(n.ID(), n.Incarnation()) {
+			close(np.waitCh)
+			np.waitCh = nil
+		}
+	}
+}
+
+// wakeWaiters wakes the WaitUnpaused waiters of node id (GOR-051, GOR-048).
+func (d *driver) wakeWaiters(id kernel.NodeID) {
+	np := d.node(id)
+	if np.waitCh != nil {
+		close(np.waitCh)
+		np.waitCh = nil
+	}
+}
+
+// wakeAllWaiters wakes every WaitUnpaused waiter (E1).
+func (d *driver) wakeAllWaiters() {
+	for _, np := range d.nodes {
+		if np != nil && np.waitCh != nil {
+			close(np.waitCh)
+			np.waitCh = nil
+		}
+	}
 }

@@ -125,7 +125,7 @@ func indexWhere(rs []kernel.Record, pred func(kernel.Record) bool) int {
 }
 
 // errBox lets tests keep errors of different types in an atomic.Value.
-type errBox struct{ err error } //nolint:unused // used by the tests that store a Process.Do error
+type errBox struct{ err error }
 
 // gorScenarios holds the child-process scenarios of plans 2.1–2.3, registered from init functions.
 var gorScenarios = map[string]func(t *testing.T){}

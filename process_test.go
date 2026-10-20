@@ -598,6 +598,9 @@ func TestGoroutineRequestQueue(t *testing.T) {
 	if events != 6 { // the five requests that ran and p1d, whose event does nothing
 		t.Fatalf("%d kernel.event records labelled \"req test\", want 6", events)
 	}
+	if len(got) > 5 { // window 1: drain records each node's first request, its wrapper the next (GOR-031, GOR-032)
+		slices.Sort(got[:5])
+	}
 	want := []string{
 		"driver.request 1/1 req=1 test a",
 		"driver.request 1/1 req=2 test a",
