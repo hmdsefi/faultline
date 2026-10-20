@@ -39,6 +39,7 @@ type driver struct {
 	seq   uint64      // arrival counter
 	reqN  uint64      // request IDs (GOR-031)
 	nodes []*nodeProc // indexed by kernel.NodeID; index 0 unused
+	snaps []clockSnap // snapshotLocal's buffer, reused by every Step (GOR-055)
 }
 
 // newDriver creates the driver after API-030 step 8 and takes the world lock (GOR-010 step 1).
@@ -138,6 +139,7 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 			d.w.runInvariants()
 			d.lockDriver()
 		}
+		d.refreshClocks(b)    // GOR-055
 		d.wakePausedWaiters() // GOR-041
 		d.drain()             // (2) GOR-031
 		d.advance(b)          // defers paused-node requests at b
@@ -149,8 +151,10 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 			if mx := s.Config().MaxEvents; mx != 0 && s.Executed() >= mx {
 				return kernel.StopMaxEvents
 			}
+			snap := d.snapshotLocal()
 			before := s.Executed()
 			s.Step() // (4)
+			d.clocksAfter(snap)
 			if s.Executed() > before {
 				d.checkpoint()
 				d.ga.watch.stepped(s)
