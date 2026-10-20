@@ -387,16 +387,23 @@ func (w *World) classify(bodyPanic *artifact.Panic, finalFail *failure, failedAt
 // arguments and the resolved options. A runtime.Goexit inside it unwinds to runSeed; r.cur holds
 // the World for API-101.
 func (r *runner) attempt(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool) (res attemptResult) {
-	r.runAttempt(st, func(st *testing.T) { res = r.attemptBody(st, seed, traceCfg, sched, primary) })
+	r.runAttempt(st, seed, &res, func(st *testing.T, ga *goAttempt) { res = r.attemptBody(st, seed, traceCfg, sched, primary, ga) })
 	return res
 }
 
-// runAttempt is the goroutine-mode seam of API-090: in event mode it calls fn directly; GOR
-// (Phase 2) runs fn inside a synctest bubble.
-func (r *runner) runAttempt(st *testing.T, fn func(st *testing.T)) { fn(st) }
+// runAttempt is the goroutine-mode seam of API-090. In event mode it calls fn(st, nil). In
+// goroutine mode it runs fn inside a synctest bubble, with the bubble's T as st (GOR-006).
+func (r *runner) runAttempt(st *testing.T, seed uint64, res *attemptResult, fn func(st *testing.T, ga *goAttempt)) {
+	if r.plan.opts.Mode == ModeGoroutine {
+		r.runAttemptGoroutine(st, seed, res, fn)
+		return
+	}
+	fn(st, nil)
+}
 
-// attemptBody is one attempt in event mode: build, body, drive, check, classify.
-func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool) attemptResult {
+// attemptBody is one attempt: build, body, drive, check, classify. Its *goAttempt parameter is
+// the goroutine-mode attempt, nil in event mode.
+func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool, _ *goAttempt) attemptResult {
 	failedAtStart := st.Failed()
 	w, setupErr := r.newWorld(st, seed, traceCfg, sched, primary)
 	if setupErr != "" {

@@ -25,7 +25,7 @@ import (
 )
 
 // epoch is the instant every synctest bubble starts at (GOR §3).
-var epoch = kernel.Epoch //nolint:unused // used by the tests that run in a bubble
+var epoch = kernel.Epoch
 
 // gw runs body in goroutine mode with the GOR §10 fixture: Seeds 1, Duration 10 s, 1 ms links,
 // unless opts sets them.

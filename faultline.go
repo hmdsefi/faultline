@@ -327,6 +327,11 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	r.cur = nil
 	defer func() {
 		if !completed {
+			if v := recover(); v != nil {
+				// A panic, not a Goexit: GOR-008 re-panicked a bubble panic. The binary ends,
+				// so the seed gets no API-101 note and no results line.
+				panic(v)
+			}
 			r.handleGoexit(st, res)
 		}
 		r.writeResult(st, res)
@@ -334,6 +339,11 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	seed := res.seed
 	prev, prevDir := r.previousReport(seed)
 	res.attempts = 1
+	if r.plan.opts.Mode == ModeGoroutine {
+		preNotifySignals()
+		fmt.Fprintf(os.Stderr, "faultline: %s/seed=0x%016x: goroutine mode; replay: %s\n",
+			r.t.Name(), seed, r.replay(seed, nil).Command)
+	}
 	a1 := r.attempt(st, seed, r.plan.opts.Trace, r.plan.env.schedule, true)
 	if a1.setupErr != "" {
 		res.status = "fail"
