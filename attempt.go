@@ -169,9 +169,12 @@ func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfi
 	defer func() {
 		if v := recover(); v != nil {
 			w = nil
-			if stage == "crypto" {
+			switch {
+			case stage == "crypto" && r.plan.opts.Mode == ModeGoroutine: // API §7.1's goroutine-mode row, for Run and RunSeeds (API-104)
+				setupErr = fmt.Sprintf("faultline: crypto seeding: %v (goroutine mode cannot be used in a parallel test; remove t.Parallel)", v)
+			case stage == "crypto":
 				setupErr = fmt.Sprintf("faultline: crypto seeding: %v (%s cannot be used in a parallel test; remove t.Parallel or set Options.NoCryptoSeed)", v, r.caller())
-			} else {
+			default:
 				setupErr = fmt.Sprintf("faultline: world construction for seed 0x%016x: %v", seed, v)
 			}
 		}

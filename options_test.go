@@ -35,6 +35,11 @@ func TestApplyDefaults(t *testing.T) {
 	if d := optionsDiff(applyDefaults(Options{}), want); d != "" {
 		t.Errorf("applyDefaults(Options{}): %s", d)
 	}
+	// GOR-002: ModeGoroutine also defaults Procs, Drain and StallTimeout.
+	want.Mode, want.Procs, want.Drain, want.StallTimeout = ModeGoroutine, 1, DefaultDrain, DefaultStallTimeout
+	if d := optionsDiff(applyDefaults(Options{Mode: ModeGoroutine}), want); d != "" {
+		t.Errorf("applyDefaults(Options{Mode: ModeGoroutine}): %s", d)
+	}
 	// Only zero fields change: set values, negative and largest ones included, reach validation
 	// (API-001), and a Net with any field set is kept whole.
 	for _, c := range []struct {
@@ -70,6 +75,8 @@ func TestDefaultConstants(t *testing.T) {
 		{"DefaultMaxEvents", DefaultMaxEvents, 10_000_000},
 		{"ShortSeeds", ShortSeeds, 5},
 		{"MaxSeeds", MaxSeeds, 1_000_000},
+		{"DefaultDrain", DefaultDrain, 60 * time.Second},
+		{"DefaultStallTimeout", DefaultStallTimeout, 60 * time.Second},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
@@ -94,22 +101,19 @@ func TestModeString(t *testing.T) {
 	}
 }
 
-// API-003, API-005 (options), API-091
+// API-003, API-005 (options), GOR-002
 func TestValidateOptions(t *testing.T) {
 	const roadmap = ", and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"
 	const (
-		seedsNegative   = "faultline: Options.Seeds is -1; want 0 (default 20) or more"
-		seedsTooMany    = "faultline: Options.Seeds is 1000001; want at most 1000000"
-		durationNs      = "faultline: Options.Duration is -1ns; want 0 (default 1m0s) or more"
-		traceLevel      = "faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull"
-		traceBuffer     = "faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more"
-		modeGoroutine   = "faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent" + roadmap
-		modeUnknown     = "faultline: unknown Options.Mode 9; want ModeEvent (the zero value)"
-		procsSet        = "faultline: Options.Procs is set, but goroutine mode is not in this release yet; set it to 0" + roadmap
-		drainSet        = "faultline: Options.Drain is set, but goroutine mode is not in this release yet; set it to 0" + roadmap
-		stallTimeoutSet = "faultline: Options.StallTimeout is set, but goroutine mode is not in this release yet; set it to 0" + roadmap
-		failOnLeakSet   = "faultline: Options.FailOnLeak is set, but goroutine mode is not in this release yet; set it to false" + roadmap
-		swarmSet        = "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false" + roadmap
+		seedsNegative = "faultline: Options.Seeds is -1; want 0 (default 20) or more"
+		seedsTooMany  = "faultline: Options.Seeds is 1000001; want at most 1000000"
+		durationNs    = "faultline: Options.Duration is -1ns; want 0 (default 1m0s) or more"
+		traceLevel    = "faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull"
+		traceBuffer   = "faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more"
+		modeUnknown   = "faultline: unknown Options.Mode 9; want ModeEvent (the zero value) or ModeGoroutine"
+		procsNegative = "faultline: Options.Procs is negative: -1"
+		drainNegative = "faultline: Options.Drain is negative: -1ns"
+		swarmSet      = "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false" + roadmap
 	)
 	cases := []struct {
 		name string
@@ -127,7 +131,7 @@ func TestValidateOptions(t *testing.T) {
 		{"negative Duration in ns", Options{Duration: -1}, durationNs},
 		{"unknown Trace.Level", Options{Trace: kernel.TraceConfig{Level: 7}}, traceLevel},
 		{"negative Trace.Buffer", Options{Trace: kernel.TraceConfig{Buffer: -1}}, traceBuffer},
-		{"ModeGoroutine", Options{Mode: ModeGoroutine}, modeGoroutine},
+		{"ModeGoroutine", Options{Mode: ModeGoroutine}, ""},
 		{"unknown Mode", Options{Mode: 9}, modeUnknown},
 		// API-003's order: Seeds, Duration, Trace.Level, Trace.Buffer, then Mode.
 		{"order: Seeds first", Options{Seeds: -1, Duration: -1, Trace: kernel.TraceConfig{Level: 7, Buffer: -1}, Mode: 9}, seedsNegative},
@@ -135,24 +139,29 @@ func TestValidateOptions(t *testing.T) {
 		{"order: Trace.Level before Trace.Buffer", Options{Trace: kernel.TraceConfig{Level: 7, Buffer: -1}, Mode: 9}, traceLevel},
 		{"order: Trace.Buffer before an unknown Mode", Options{Trace: kernel.TraceConfig{Buffer: -1}, Mode: 9}, traceBuffer},
 		{"order: Trace.Buffer before ModeGoroutine", Options{Trace: kernel.TraceConfig{Buffer: -1}, Mode: ModeGoroutine}, traceBuffer},
-		// An unknown Mode and ModeGoroutine come before the later-phase options.
-		{"order: unknown Mode before Procs", Options{Mode: 9, Procs: 1}, modeUnknown},
-		{"order: ModeGoroutine before Procs", Options{Mode: ModeGoroutine, Procs: 2}, modeGoroutine},
-		// API-005: every non-zero value, negative and largest ones included.
-		{"Procs", Options{Procs: 2}, procsSet},
-		{"negative Procs", Options{Procs: -1}, procsSet},
-		{"Drain", Options{Drain: time.Second}, drainSet},
-		{"negative Drain", Options{Drain: -1}, drainSet},
-		{"largest Drain", Options{Drain: math.MaxInt64}, drainSet},
-		{"negative StallTimeout", Options{StallTimeout: -1}, stallTimeoutSet},
-		{"StallTimeout", Options{StallTimeout: time.Second}, stallTimeoutSet},
-		{"FailOnLeak", Options{FailOnLeak: true}, failOnLeakSet},
+		// An unknown Mode comes before the goroutine-mode and later-phase options.
+		{"order: unknown Mode before Procs", Options{Mode: 9, Procs: -1}, modeUnknown},
+		{"order: ModeGoroutine before Procs", Options{Mode: ModeGoroutine, Procs: 2}, ""},
+		// GOR-002: ModeEvent neither resolves nor validates the goroutine-mode fields.
+		{"Procs", Options{Procs: 2}, ""},
+		{"negative Procs", Options{Procs: -1}, ""},
+		{"Drain", Options{Drain: time.Second}, ""},
+		{"negative Drain", Options{Drain: -1}, ""},
+		{"largest Drain", Options{Drain: math.MaxInt64}, ""},
+		{"negative StallTimeout", Options{StallTimeout: -1}, ""},
+		{"StallTimeout", Options{StallTimeout: time.Second}, ""},
+		{"FailOnLeak", Options{FailOnLeak: true}, ""},
+		// GOR-002 in ModeGoroutine: negative Procs, then negative Drain; any StallTimeout is valid.
+		{"goroutine mode: Procs and Drain set", Options{Mode: ModeGoroutine, Procs: 3, Drain: math.MaxInt64, StallTimeout: time.Second, FailOnLeak: true}, ""},
+		{"goroutine mode: negative StallTimeout", Options{Mode: ModeGoroutine, StallTimeout: -1}, ""},
+		{"goroutine mode: negative Procs", Options{Mode: ModeGoroutine, Procs: -1}, procsNegative},
+		{"goroutine mode: negative Drain", Options{Mode: ModeGoroutine, Drain: -1}, drainNegative},
+		{"goroutine mode: order: Procs before Drain", Options{Mode: ModeGoroutine, Procs: -1, Drain: -1, Swarm: true}, procsNegative},
+		{"goroutine mode: order: Drain before Swarm", Options{Mode: ModeGoroutine, Drain: -1, Swarm: true}, drainNegative},
+		// API-005: Swarm is the last option check.
 		{"Swarm", Options{Swarm: true}, swarmSet},
-		// API-005's table order: Procs, Drain, StallTimeout, FailOnLeak, Swarm.
-		{"order: Procs first", Options{Procs: 1, Drain: 1, StallTimeout: 1, FailOnLeak: true, Swarm: true}, procsSet},
-		{"order: Drain before StallTimeout", Options{Drain: 1, StallTimeout: 1, FailOnLeak: true, Swarm: true}, drainSet},
-		{"order: StallTimeout before FailOnLeak", Options{StallTimeout: 1, FailOnLeak: true, Swarm: true}, stallTimeoutSet},
-		{"order: FailOnLeak before Swarm", Options{FailOnLeak: true, Swarm: true}, failOnLeakSet},
+		{"order: event-mode goroutine fields do not hide Swarm", Options{Procs: -1, Drain: -1, StallTimeout: 1, FailOnLeak: true, Swarm: true}, swarmSet},
+		{"goroutine mode: valid fields before Swarm", Options{Mode: ModeGoroutine, Procs: 1, Drain: 1, StallTimeout: -1, FailOnLeak: true, Swarm: true}, swarmSet},
 	}
 	for _, c := range cases {
 		got := ""

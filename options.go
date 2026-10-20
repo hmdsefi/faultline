@@ -20,8 +20,9 @@ const (
 	// ModeEvent runs code written as kernel callbacks (boot functions, timers, network handlers)
 	// on the kernel's event loop. A run is exactly reproducible from its seed.
 	ModeEvent Mode = iota
-	// ModeGoroutine is reserved for running goroutine code inside a testing/synctest bubble. Run
-	// rejects it with a setup error.
+	// ModeGoroutine runs goroutine code as processes inside a testing/synctest bubble, one bubble
+	// per run. A run is reproducible from its seed only on a best-effort basis, and report.json
+	// says so with determinism_level "best-effort".
 	ModeGoroutine
 )
 
@@ -47,6 +48,12 @@ const (
 	MaxSeeds = 1_000_000
 )
 
+// Defaults for the goroutine-mode fields of Options.
+const (
+	DefaultDrain        = 60 * time.Second // Options.Drain == 0
+	DefaultStallTimeout = 60 * time.Second // Options.StallTimeout == 0
+)
+
 // Options configures Run and RunSeeds. The zero value is valid: 20 seeds of 60 s virtual time
 // each, default network, default disks, hash-only tracing.
 type Options struct {
@@ -67,8 +74,9 @@ type Options struct {
 	// 0 means DefaultMaxEvents. math.MaxUint64 means no practical limit.
 	MaxEvents uint64
 
-	// Mode selects how code under test runs. ModeEvent, the zero value, is the only mode Run
-	// accepts.
+	// Mode selects how code under test runs: ModeEvent, the zero value, or ModeGoroutine.
+	// Procs, Drain, StallTimeout and FailOnLeak apply to ModeGoroutine only; ModeEvent ignores
+	// them.
 	Mode Mode
 
 	// Net configures the simulated network. The zero value means simnet.DefaultConfig(), so a
@@ -93,29 +101,29 @@ type Options struct {
 	KeepGoing bool
 
 	// NoCryptoSeed stops Run from seeding crypto/rand with cryptotest.SetGlobalRandom. crypto/rand
-	// in code under test is then not deterministic. In exchange, the test may call t.Parallel,
-	// which cryptotest.SetGlobalRandom forbids.
+	// in code under test is then not deterministic. In exchange, a ModeEvent test may call
+	// t.Parallel, which cryptotest.SetGlobalRandom forbids. A ModeGoroutine test must not call
+	// t.Parallel, with or without NoCryptoSeed (see Run).
 	NoCryptoSeed bool
 
 	// AllowLimit makes hitting MaxEvents (or the kernel's MaxTime) a normal end of the run
 	// instead of a failure. Final checks are skipped for such a run.
 	AllowLimit bool
 
-	// Procs is reserved for goroutine mode: GOMAXPROCS during its runs. Run rejects a non-zero
-	// value with a setup error.
+	// Procs is GOMAXPROCS during each goroutine-mode run. 0 means 1. Negative is a setup error.
 	Procs int
 
-	// Drain is reserved for goroutine mode: the virtual time processes get after the run ends to
-	// exit on their own. Run rejects a non-zero value with a setup error.
+	// Drain is the virtual time processes get after the run ends (contexts cancelled, shims
+	// closed) to exit on their own. 0 means DefaultDrain. Negative is a setup error.
 	Drain time.Duration
 
-	// StallTimeout is reserved for goroutine mode: the wall-clock time without progress after
-	// which a watchdog ends the test binary with a report. Run rejects a non-zero value with a
-	// setup error.
+	// StallTimeout is the wall-clock time without driver progress after which the stall
+	// watchdog reports and terminates the test binary. 0 means DefaultStallTimeout.
+	// Negative disables the watchdog.
 	StallTimeout time.Duration
 
-	// FailOnLeak is reserved for goroutine mode: it makes goroutines still alive after the drain
-	// a failure. Run rejects true with a setup error.
+	// FailOnLeak makes goroutines still alive after the drain a failure of kind "leak".
+	// Without it they are reported as a warning.
 	FailOnLeak bool
 
 	// Swarm is reserved for swarm testing, where each seed also picks which fault kinds are on.
@@ -135,10 +143,22 @@ func applyDefaults(o Options) Options {
 	if reflect.ValueOf(o.Net).IsZero() {
 		o.Net = simnet.DefaultConfig()
 	}
+	if o.Mode == ModeGoroutine { // GOR-002
+		if o.Procs == 0 {
+			o.Procs = 1
+		}
+		if o.Drain == 0 {
+			o.Drain = DefaultDrain
+		}
+		if o.StallTimeout == 0 {
+			o.StallTimeout = DefaultStallTimeout
+		}
+	}
 	return o
 }
 
-// validateOptions implements API-003 and the option part of API-005, in that order.
+// validateOptions implements API-003, GOR-002's checks and the option part of API-005, in that
+// order. ModeEvent ignores the goroutine-mode fields (GOR-002).
 func validateOptions(o Options) error {
 	switch {
 	case o.Seeds < 0:
@@ -151,10 +171,16 @@ func validateOptions(o Options) error {
 		return fmt.Errorf("faultline: Options.Trace.Level is %d; want kernel.TraceHash or kernel.TraceFull", o.Trace.Level)
 	case o.Trace.Buffer < 0:
 		return fmt.Errorf("faultline: Options.Trace.Buffer is %d; want 0 (unbounded) or more", o.Trace.Buffer)
-	case o.Mode == ModeGoroutine:
-		return fmt.Errorf("faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at %s", roadmapURL)
-	case o.Mode != ModeEvent:
-		return fmt.Errorf("faultline: unknown Options.Mode %d; want ModeEvent (the zero value)", o.Mode)
+	case o.Mode != ModeEvent && o.Mode != ModeGoroutine:
+		return fmt.Errorf("faultline: unknown Options.Mode %d; want ModeEvent (the zero value) or ModeGoroutine", o.Mode)
+	}
+	if o.Mode == ModeGoroutine {
+		if o.Procs < 0 {
+			return fmt.Errorf("faultline: Options.Procs is negative: %d", o.Procs)
+		}
+		if o.Drain < 0 {
+			return fmt.Errorf("faultline: Options.Drain is negative: %v", o.Drain)
+		}
 	}
 	later := []struct {
 		name    string
@@ -162,10 +188,6 @@ func validateOptions(o Options) error {
 		feature string // the later feature the option belongs to, in the words of the roadmap
 		zero    string // the value to use until the feature ships
 	}{
-		{"Options.Procs", o.Procs != 0, featureGoroutine, "0"},
-		{"Options.Drain", o.Drain != 0, featureGoroutine, "0"},
-		{"Options.StallTimeout", o.StallTimeout != 0, featureGoroutine, "0"},
-		{"Options.FailOnLeak", o.FailOnLeak, featureGoroutine, "false"},
 		{"Options.Swarm", o.Swarm, featureSwarm, "false"},
 	}
 	for _, l := range later {
@@ -181,9 +203,8 @@ const roadmapURL = "https://github.com/hmdsefi/faultline/issues/167"
 
 // The later features of API-005's table, as its messages name them.
 const (
-	featureGoroutine = "goroutine mode"
-	featureExact     = "exact replay in goroutine mode"
-	featureSwarm     = "swarm testing"
+	featureExact = "exact replay in goroutine mode"
+	featureSwarm = "swarm testing"
 )
 
 // notInRelease is API-005's setup error for an option or variable of a later feature: name is

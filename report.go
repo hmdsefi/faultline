@@ -514,3 +514,12 @@ func artifactFilesOf(af artifactFiler) (files map[string][]byte, panicked bool, 
 	}()
 	return af.ArtifactFiles(), false, ""
 }
+
+// determinismLevel is report.json's and the results line's determinism_level (GOR-078):
+// "best-effort" in goroutine mode, "exact" in event mode. An exact backend overrides it (EXB-015).
+func determinismLevel(mode Mode) string {
+	if mode == ModeGoroutine {
+		return "best-effort"
+	}
+	return "exact"
+}

@@ -722,18 +722,6 @@ func TestRunSkip(t *testing.T) {
 	}
 }
 
-var _ = scenario("goroutine-mode", func(t *testing.T) {
-	faultline.Run(t, faultline.Options{Mode: faultline.ModeGoroutine}, func(w *faultline.World) {})
-})
-
-// AT-API-28 (Phase 1 only; GOR-001 removes API-091)
-func TestRunGoroutineModeRejected(t *testing.T) {
-	o, code := runScenario(t, "goroutine-mode", nil)
-	if code != 1 || !strings.Contains(o, "faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167") {
-		t.Fatalf("exit %d\n%s", code, o)
-	}
-}
-
 var _ = scenario("fails-for-0x2", func(t *testing.T) {
 	faultline.Run(t, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
 		addTicker(w)
@@ -985,12 +973,7 @@ func TestRunStopLineFlags(t *testing.T) {
 
 var _ = scenario("later-phase", func(t *testing.T) {
 	var o faultline.Options
-	switch os.Getenv("ROW") {
-	case "procs":
-		o.Procs = 2
-	case "leak":
-		o.FailOnLeak = true
-	case "swarm":
+	if os.Getenv("ROW") == "swarm" {
 		o.Swarm = true
 	}
 	faultline.Run(t, o, func(w *faultline.World) { addTicker(w) })
@@ -1002,8 +985,6 @@ func TestRunLaterPhase(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{[]string{"ROW=procs"}, "faultline: Options.Procs is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
-		{[]string{"ROW=leak"}, "faultline: Options.FailOnLeak is set, but goroutine mode is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
@@ -1092,7 +1073,7 @@ func TestRunFatalInRerun(t *testing.T) {
 		t.Fatal("artifact directory exists")
 	}
 	want := `{"faultline_result":1,"package":"github.com/hmdsefi/faultline","test":"TestScenario","seed":"0x0000000000000001","index":0,"status":"fail","kind":"invariant","check":"tick 5",` +
-		`"signature":"invariant:tick 5","message":"five","at_ns":50000000,"at":"0.050000000s","events":6,"trace_hash":?,"wall_ns":?}`
+		`"signature":"invariant:tick 5","message":"five","at_ns":50000000,"at":"0.050000000s","events":6,"trace_hash":?,"wall_ns":?,"determinism_level":"exact"}`
 	if raw := readLines(t, results); len(raw) != 1 || normResult(raw[0]) != want {
 		t.Fatalf("results:\n%s\nwant\n%s", strings.Join(raw, "\n"), want)
 	}
