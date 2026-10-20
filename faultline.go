@@ -340,7 +340,8 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 	seed := res.seed
 	prev, prevDir := r.previousReport(seed)
 	res.attempts = 1
-	if r.plan.opts.Mode == ModeGoroutine {
+	goroutine := r.plan.opts.Mode == ModeGoroutine
+	if goroutine {
 		preNotifySignals()
 		fmt.Fprintf(os.Stderr, "faultline: %s/seed=0x%016x: goroutine mode; replay: %s\n",
 			r.t.Name(), seed, r.replay(seed, nil).Command)
@@ -376,7 +377,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			}
 		} else {
 			a3 := r.rerun(st, res, cfg)
-			outcome = newDeterminismFailure("artifact_rerun", seed, []attemptResult{a1, a2, a3}, a1.fail, a2.records, a3.records, a2)
+			outcome = newDeterminismFailure("artifact_rerun", seed, []attemptResult{a1, a2, a3}, a1.fail, a2.records, a3.records, a2, goroutine)
 		}
 	} else if r.plan.opts.CheckDeterminism {
 		a2 := r.rerun(st, res, r.plan.opts.Trace)
@@ -385,12 +386,12 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			full := kernel.TraceConfig{Level: kernel.TraceFull}
 			a3 := r.rerun(st, res, full)
 			a4 := r.rerun(st, res, full)
-			outcome = newDeterminismFailure("check_determinism", seed, []attemptResult{a1, a2, a3, a4}, nil, a3.records, a4.records, a3)
+			outcome = newDeterminismFailure("check_determinism", seed, []attemptResult{a1, a2, a3, a4}, nil, a3.records, a4.records, a3, goroutine)
 			art = a3
 		case st.Failed(): // t.Error, t.Errorf or t.Fail in the check attempt: API-061 row 8 caught any earlier one (API-072)
 			// Run sees the mark only when the attempt ends, so the time is a bound: by t=<end> (API-072).
 			stop := "marked the test failed (t.Error, t.Errorf or t.Fail) by t=" + a2.now.String()
-			res.status, res.fail = "fail", laterDeterminism(res, "determinism check", stop, a2.now)
+			res.status, res.fail = "fail", laterDeterminism(res, "determinism check", stop, a2.now, goroutine)
 			r.laterNote(st, res, "determinism check", stop)
 			completed = true
 			return
@@ -413,7 +414,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		warnings = append(warnings, art.warnings...) // about extra files, so only with artifacts on (API-077)
 		a := r.buildArtifact(st, res, outcome, art, warnings)
 		d, err := r.writeArtifact(seed, a, func(dir string) string {
-			return "--- FAIL: " + st.Name() + "\n" + joinLines(consoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true), "    ")
+			return "--- FAIL: " + st.Name() + "\n" + joinLines(consoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true, goroutine), "    ")
 		})
 		if err != nil {
 			artifactsLine = "not written: " + err.Error()
@@ -423,7 +424,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			res.artifactDir = d
 		}
 	}
-	fmt.Fprint(st.Output(), joinLines(consoleLines(outcome, rep.Command, artifactsLine, warnings, false, written), ""))
+	fmt.Fprint(st.Output(), joinLines(consoleLines(outcome, rep.Command, artifactsLine, warnings, false, written, goroutine), ""))
 	st.Fail()
 	completed = true
 }
@@ -639,16 +640,17 @@ func (r *runner) handleGoexit(st *testing.T, res *seedResult) {
 	}
 	st.Fail() // also after a skip: the seed fails (API-072)
 	res.status = "fail"
+	goroutine := r.plan.opts.Mode == ModeGoroutine
 	var name string
 	switch {
 	case res.attempts == 2 && res.primary != nil:
 		name, res.fail = "artifact re-run", res.primary
 	case res.attempts == 2:
 		name = "determinism check"
-		res.fail = laterDeterminism(res, name, s.text(), s.at)
+		res.fail = laterDeterminism(res, name, s.text(), s.at, goroutine)
 	default:
 		name = "diagnostic re-run"
-		res.fail = laterDeterminism(res, name, s.text(), s.at)
+		res.fail = laterDeterminism(res, name, s.text(), s.at, goroutine)
 	}
 	r.laterNote(st, res, name, s.text())
 }
@@ -727,9 +729,9 @@ func (s goexitStop) text() string {
 // laterDeterminism returns the determinism failure of a seed whose check attempt or diagnostic
 // attempt, called name, ended with stop at virtual time at (API-072): it stopped through Goexit,
 // or the check attempt marked the test failed. It holds the trace hashes of the attempts that
-// completed.
-func laterDeterminism(res *seedResult, name, stop string, at kernel.Time) *failure {
-	d := &determinism{context: "check_determinism", seed: res.seed, hashes: res.hashes, original: res.primary}
+// completed. goroutine says the seed ran in goroutine mode, which adds GOR-077's level-3 line.
+func laterDeterminism(res *seedResult, name, stop string, at kernel.Time, goroutine bool) *failure {
+	d := &determinism{context: "check_determinism", seed: res.seed, hashes: res.hashes, original: res.primary, goroutine: goroutine}
 	f := &failure{kind: "determinism", context: "determinism-check", at: at, determinism: d}
 	stop = "the " + name + " " + stop
 	var lines []string
@@ -742,6 +744,9 @@ func laterDeterminism(res *seedResult, name, stop string, at kernel.Time) *failu
 	default: // the check attempt: no second hash, or an equal one, so the headline is "determinism failure at t=<at>"
 		f.context = ""
 		lines = []string{stop + "; the first run passed with trace hash " + hex16(res.hashes[0])}
+	}
+	if goroutine {
+		lines = append(lines, gorLevel3Line)
 	}
 	f.message = strings.Join(append(lines, commonCauses, nextStep), "\n")
 	return f

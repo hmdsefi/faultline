@@ -84,6 +84,10 @@ type determinism struct {
 	// start at different records (a limit re-run whose runs recorded different numbers of
 	// records), else zeros (API-071).
 	recorded [2]uint64
+	// goroutine says the seed ran in goroutine mode: the message gets GOR-077's level-3 line.
+	goroutine bool
+	// divergence is GOR-076's localization line, or "" when it does not apply.
+	divergence string
 }
 
 // attemptResult is the outcome and data of one attempt (API-093).
@@ -107,6 +111,7 @@ type attemptResult struct {
 	extra       []extraFile
 	warnings    []string
 	leaks       *leakReport // goroutine mode: goroutines still blocked after the drain (GOR-069)
+	checkpoints []uint64    // goroutine mode: the trace hash after each executed event (GOR-075)
 }
 
 // isPass reports whether the attempt passed, also as a limited pass (API-061 rows 9 and 10).
@@ -547,6 +552,9 @@ func (w *World) result(f *failure, limited bool, stop string) attemptResult {
 		fail: f, limited: limited, stop: stop, end: w.End(),
 		hash: w.Sim.TraceHash(), executed: w.Sim.Executed(), now: w.Sim.Now(), lastSeq: w.Sim.Cause(),
 		records: w.Sim.Records(),
+	}
+	if w.drv != nil {
+		res.checkpoints = w.drv.checkpoints
 	}
 	res.recovery, res.hasRecovery = w.recovery()
 	res.schedule = w.Faults.Applied()
