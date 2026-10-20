@@ -123,7 +123,7 @@ type Options struct {
 	StallTimeout time.Duration
 
 	// FailOnLeak makes goroutines still alive after the drain a failure of kind "leak".
-	// Without it they are reported as a warning.
+	// Without it, Run logs the leak report and the seed's outcome does not change.
 	FailOnLeak bool
 
 	// Swarm is reserved for swarm testing, where each seed also picks which fault kinds are on.

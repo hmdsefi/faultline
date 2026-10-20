@@ -448,8 +448,9 @@ func printable(s string) string {
 
 // extraFile is one file of Artifact.Extra (API-077).
 type extraFile struct {
-	name string
-	data []byte
+	name   string
+	data   []byte
+	source string // the source that added it, as API-077's warnings name it
 }
 
 // artifactFiler is the optional interface of check errors that add artifact files (API-077).
@@ -497,10 +498,24 @@ func extraFiles(f *failure) ([]extraFile, []string) {
 				continue
 			}
 			addedBy[name] = s.name
-			files = append(files, extraFile{name: name, data: m[name]})
+			files = append(files, extraFile{name: name, data: m[name], source: s.name})
 		}
 	}
 	return files, warnings
+}
+
+// addLeakFile adds goroutines.txt, the leak report's stacks, to the attempt's extra files after
+// the failure's files (API-077 item 2). When one of those already has the name, it adds API-077's
+// warning instead.
+func addLeakFile(res *attemptResult, rep *leakReport) {
+	const name, source = "goroutines.txt", "the leak report"
+	for _, e := range res.extra {
+		if e.name == name {
+			res.warnings = append(res.warnings, fmt.Sprintf("extra artifact file %q from %s dropped: %s already added it", name, source, e.source))
+			return
+		}
+	}
+	res.extra = append(res.extra, extraFile{name: name, data: []byte(rep.stacks), source: source})
 }
 
 // artifactFilesOf calls af.ArtifactFiles, which is user code, and recovers its panic instead of

@@ -44,7 +44,7 @@ func (r *runner) caller() string {
 
 // failure is the classified failure of one attempt (API-061, API-066).
 type failure struct {
-	kind        string // invariant, final, panic, fail, limit, determinism, setup
+	kind        string // invariant, final, panic, fail, limit, determinism, leak, setup
 	check       string
 	context     string // headline variant (API-067), see headline
 	name        string // invariant or final name of a panic in a check
@@ -59,7 +59,8 @@ type failure struct {
 	limit       *artifact.Limit
 	finals      []finalResult
 	determinism *determinism
-	err         error // error whose ArtifactFiles are collected (API-077); nil for none
+	leak        *leakReport // kind leak (GOR-069)
+	err         error       // error whose ArtifactFiles are collected (API-077); nil for none
 }
 
 // finalResult is one failing final check (API-057).
@@ -105,6 +106,17 @@ type attemptResult struct {
 	end         kernel.Time
 	extra       []extraFile
 	warnings    []string
+	leaks       *leakReport // goroutine mode: goroutines still blocked after the drain (GOR-069)
+}
+
+// isPass reports whether the attempt passed, also as a limited pass (API-061 rows 9 and 10).
+func (res *attemptResult) isPass() bool { return res.setupErr == "" && res.fail == nil }
+
+// setLeakFailure turns a passing attempt into a failure of kind leak (API-061 row 8a, GOR-069).
+// Row 8a comes before row 9, so the attempt is no longer a limited pass.
+func (res *attemptResult) setLeakFailure(rep *leakReport) {
+	res.fail = &failure{kind: "leak", context: "leak", message: rep.text, at: res.now, leak: rep}
+	res.limited = false
 }
 
 // checkFailure is the error an invariant failure passes to Sim.Fail (API-056).
@@ -508,6 +520,8 @@ func (f *failure) headline() string {
 	case "determinism-check":
 		d := f.determinism
 		return fmt.Sprintf("determinism failure: two runs of seed 0x%016x gave trace hashes 0x%016x and 0x%016x", d.seed, d.hashes[0], d.hashes[1])
+	case "leak":
+		return f.leak.headline()
 	}
 	return f.kind + " failure at t=" + at
 }
