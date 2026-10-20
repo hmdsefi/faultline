@@ -27,6 +27,37 @@ var (
 	writeMu   sync.Mutex              // serializes artifact writes of parallel subtests (API-074)
 )
 
+// overlapMsg is API-104's parent-level setup error.
+const overlapMsg = "faultline: a goroutine-mode Run cannot overlap other faultline.Run calls (goroutine mode changes GOMAXPROCS and signal handling for the whole process); remove t.Parallel from goroutine-mode tests and their parents"
+
+var runGuard struct {
+	mu        sync.Mutex
+	active    int // active Run calls
+	goroutine int // active goroutine-mode Run calls
+}
+
+// enterRun registers a Run call. It returns ok == false, and registers nothing, when API-104
+// forbids the overlap.
+func enterRun(goroutine bool) (leave func(), ok bool) {
+	runGuard.mu.Lock()
+	defer runGuard.mu.Unlock()
+	if runGuard.goroutine > 0 || (goroutine && runGuard.active > 0) {
+		return nil, false
+	}
+	runGuard.active++
+	if goroutine {
+		runGuard.goroutine++
+	}
+	return func() {
+		runGuard.mu.Lock()
+		runGuard.active--
+		if goroutine {
+			runGuard.goroutine--
+		}
+		runGuard.mu.Unlock()
+	}, true
+}
+
 // seedResult is the outcome of one seed subtest (API-087).
 type seedResult struct {
 	index       int
@@ -55,6 +86,10 @@ type seedResult struct {
 // directory, which holds report.json, report.txt, trace.jsonl, timeline.html and the other files
 // of package artifact. The first failing seed stops the loop unless Options.KeepGoing is set or
 // FAULTLINE_SEED_LIST names the seeds.
+//
+// A goroutine-mode Run never overlaps another Run or RunSeeds call in the test binary. It fails
+// t before any seed runs if another call is active, and any call that starts while it runs fails
+// the same way. So goroutine-mode tests and their parents must not call t.Parallel.
 //
 // These environment variables change a run without code changes:
 //   - FAULTLINE_SEED runs one seed. FAULTLINE_SEEDS, FAULTLINE_BASE_SEED and FAULTLINE_EXPLORE
@@ -91,7 +126,8 @@ func Run(t *testing.T, opts Options, body func(w *World)) {
 //	go test -v -run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' example.com/kv
 //
 // Like Run, RunSeeds seeds crypto/rand for every run, which Go does not allow in a parallel
-// test. A test that calls RunSeeds can call t.Parallel only with Options.NoCryptoSeed set.
+// test. A test that calls RunSeeds can call t.Parallel only in ModeEvent with
+// Options.NoCryptoSeed set (see Run for ModeGoroutine).
 func RunSeeds(t *testing.T, opts Options, body func(w *World), seeds ...uint64) {
 	t.Helper()
 	run(t, opts, body, true, seeds)
@@ -126,6 +162,13 @@ func run(t *testing.T, opts Options, body func(w *World), runSeeds bool, seeds [
 		return
 	}
 	r.plan = p
+	// API-104 runs after resolve, so a RunSeeds seed-list error (API-113) comes first.
+	leave, ok := enterRun(p.opts.Mode == ModeGoroutine)
+	if !ok {
+		r.parentSetupError(overlapMsg)
+		return
+	}
+	defer leave()
 	if r.cwd, err = os.Getwd(); err != nil {
 		t.Logf("faultline: os.Getwd: %v; report.json's replay.dir and replay.package_dir are empty", err)
 	}
@@ -409,6 +452,7 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 		Seed: seedText, SeedSource: p.seedSource, SeedIndex: res.index, Failure: rf, Warnings: warnings,
 		Replay: r.replay(res.seed, f), Versions: vers, Options: runOptions(p.opts, p.env),
 		OptionsHash: optionsHash(p.opts, p.env.scheduleHash), Nodes: art.nodes,
+		DeterminismLevel: determinismLevel(p.opts.Mode),
 		Run: artifact.RunInfo{
 			TraceHash: hex16(art.hash), Events: art.executed, Records: art.lastSeq,
 			EndNS: int64(art.now), End: art.now.String(), Stop: art.stop, Planners: art.planners, Attempts: res.attempts,
@@ -700,6 +744,9 @@ type resultLine struct {
 	Artifact      string  `json:"artifact,omitempty"`
 	ArtifactError string  `json:"artifact_error,omitempty"`
 	WallNS        int64   `json:"wall_ns"`
+
+	DeterminismLevel string `json:"determinism_level,omitempty"` // when the primary attempt completed (GOR-078)
+	ExactBackend     string `json:"exact_backend,omitempty"`     // set only by an exact backend
 }
 
 // appendResult appends one JSON line with a single Write (API-087).
@@ -730,6 +777,9 @@ func (r *runner) writeResult(st *testing.T, res *seedResult) {
 		Version: 1, Package: r.build.importPath, Test: r.t.Name(), Seed: hex16(res.seed),
 		Index: res.index, Status: res.status, Events: res.events, TraceHash: res.traceHash,
 		Artifact: res.artifactDir, ArtifactError: res.artifactErr, WallNS: int64(time.Since(res.start)),
+	}
+	if res.events != nil {
+		line.DeterminismLevel = determinismLevel(r.plan.opts.Mode)
 	}
 	if res.status == "fail" && res.fail != nil {
 		f := res.fail

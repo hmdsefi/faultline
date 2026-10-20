@@ -431,12 +431,7 @@ func TestResolveErrors(t *testing.T) {
 		{Options{Duration: -time.Second}, nil, `faultline: Options.Duration is -1s; want 0 (default 1m0s) or more`},
 		{Options{Trace: kernel.TraceConfig{Level: 7}}, nil, `faultline: Options.Trace.Level is 7; want kernel.TraceHash or kernel.TraceFull`},
 		{Options{Trace: kernel.TraceConfig{Buffer: -1}}, nil, `faultline: Options.Trace.Buffer is -1; want 0 (unbounded) or more`},
-		{Options{Mode: ModeGoroutine}, nil, `faultline: Options.Mode is ModeGoroutine, but goroutine mode is not in this release yet; set it to ModeEvent, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
-		{Options{Mode: 9}, nil, `faultline: unknown Options.Mode 9; want ModeEvent (the zero value)`},
-		{Options{Procs: 2}, nil, `faultline: Options.Procs is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
-		{Options{Drain: time.Second}, nil, `faultline: Options.Drain is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
-		{Options{StallTimeout: -1}, nil, `faultline: Options.StallTimeout is set, but goroutine mode is not in this release yet; set it to 0, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
-		{Options{FailOnLeak: true}, nil, `faultline: Options.FailOnLeak is set, but goroutine mode is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{Mode: 9}, nil, `faultline: unknown Options.Mode 9; want ModeEvent (the zero value) or ModeGoroutine`},
 		{Options{Swarm: true}, nil, `faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
 		// table order: FAULTLINE_SEED is checked before FAULTLINE_TRACE, env before options
 		{Options{Seeds: -1}, map[string]string{"FAULTLINE_TRACE": "x", "FAULTLINE_SEED": "y"}, `faultline: invalid FAULTLINE_SEED value "y": want a decimal or 0x-prefixed hexadecimal uint64`},

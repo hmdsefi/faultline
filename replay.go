@@ -254,13 +254,11 @@ type hashedOptions struct {
 }
 
 // hashOptions returns NameBase of the JSON of h, formatted 0x%016x (API-082).
-func hashOptions(h hashedOptions) string {
-	b, err := json.Marshal(h)
-	if err != nil {
-		panic(fmt.Sprintf("faultline: options hash: %v", err))
-	}
-	return fmt.Sprintf("0x%016x", NameBase(string(b)))
-}
+func hashOptions(h hashedOptions) string { return formatOptionsHash(mustJSON(h)) }
+
+// formatOptionsHash returns options_hash of the hashed bytes b: NameBase(b) formatted 0x%016x
+// (API-082). optionsHash and hashOptions share it.
+func formatOptionsHash(b []byte) string { return fmt.Sprintf("0x%016x", NameBase(string(b))) }
 
 // mustJSON returns the encoding/json encoding of v.
 func mustJSON(v any) json.RawMessage {
@@ -271,9 +269,10 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-// optionsHash returns options_hash for the effective options o (API-082).
-func optionsHash(o Options, scheduleHash string) string {
-	return hashOptions(hashedOptions{
+// hashedOptionsJSON returns the bytes that options_hash hashes for the effective options o
+// (API-082). Procs, Drain and FailOnLeak are hashed in goroutine mode only; StallTimeout never is.
+func hashedOptionsJSON(o Options, scheduleHash string) []byte {
+	h := hashedOptions{
 		DurationNS:   int64(o.Duration),
 		MaxEvents:    o.MaxEvents,
 		Mode:         o.Mode.String(),
@@ -282,7 +281,16 @@ func optionsHash(o Options, scheduleHash string) string {
 		NoCryptoSeed: o.NoCryptoSeed,
 		AllowLimit:   o.AllowLimit,
 		ScheduleHash: scheduleHash,
-	})
+	}
+	if o.Mode == ModeGoroutine {
+		h.Procs, h.DrainNS, h.FailOnLeak = o.Procs, int64(o.Drain), o.FailOnLeak
+	}
+	return mustJSON(h)
+}
+
+// optionsHash returns options_hash for the effective options o (API-082).
+func optionsHash(o Options, scheduleHash string) string {
+	return formatOptionsHash(hashedOptionsJSON(o, scheduleHash))
 }
 
 // runOptions returns report.options for the effective options o (ART-021).
@@ -291,7 +299,7 @@ func runOptions(o Options, env *environment) artifact.RunOptions {
 	if o.Trace.Level == kernel.TraceFull {
 		trace = "full"
 	}
-	return artifact.RunOptions{
+	ro := artifact.RunOptions{
 		Seeds:            o.Seeds,
 		DurationNS:       int64(o.Duration),
 		Duration:         o.Duration.String(),
@@ -308,4 +316,8 @@ func runOptions(o Options, env *environment) artifact.RunOptions {
 		Net:              mustJSON(o.Net),
 		Disk:             mustJSON(o.Disk),
 	}
+	if o.Mode == ModeGoroutine { // zero in event mode, so omitted
+		ro.Procs, ro.DrainNS, ro.StallTimeoutNS, ro.FailOnLeak = o.Procs, int64(o.Drain), int64(o.StallTimeout), o.FailOnLeak
+	}
+	return ro
 }

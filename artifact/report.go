@@ -34,8 +34,9 @@ type Report struct {
 	Run         RunInfo    `json:"run"`
 	Nodes       []Node     `json:"nodes"`
 
-	// Reserved for goroutine mode, coverage points and swarm testing. faultline.Run does not set
-	// them, and they are omitted when empty.
+	// faultline.Run sets DeterminismLevel; a report without it is "exact". The fields after it
+	// are reserved for exact replay in goroutine mode, leak reports, coverage points and swarm
+	// testing. faultline.Run does not set them, and they are omitted when empty.
 	DeterminismLevel string          `json:"determinism_level,omitempty"` // "exact" or "best-effort"
 	ExactBackend     string          `json:"exact_backend,omitempty"`     // "wasip1" or "toolexec"; absent: none
 	Leaks            *Leaks          `json:"leaks,omitempty"`             // goroutines alive after the run
