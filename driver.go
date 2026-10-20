@@ -32,6 +32,7 @@ type driver struct {
 
 	executed    bool     // set by the OnEvent observer (GOR-011)
 	ended       bool     // E1 ran (GOR-065)
+	stackCap    int      // goroutine dump cap; 0 is GOR-067's 64 MiB, tests set less
 	failNow     bool     // a process goroutine called t.FailNow or t.Fatal (GOR-047, GOR-058)
 	checkpoints []uint64 // GOR-075
 

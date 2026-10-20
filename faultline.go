@@ -71,8 +71,9 @@ type seedResult struct {
 	artifactErr string
 	primary     *failure // the primary attempt's failure, for Goexit in later attempts (API-072)
 	attempts    int
-	hashes      []uint64 // trace hashes of the attempts that completed, for Goexit in later attempts
-	setupStop   bool     // a later attempt stopped with a setup error (API-072)
+	hashes      []uint64        // trace hashes of the attempts that completed, for Goexit in later attempts
+	setupStop   bool            // a later attempt stopped with a setup error (API-072)
+	leaks       *artifact.Leaks // the primary attempt's leaks, nil when none were found (API-087, GOR-069)
 }
 
 // Run runs body for each seed of the seed list, one seed after another, each seed in its own
@@ -351,6 +352,9 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		seedSetupError(st, a1.setupErr)
 	}
 	res.events, res.traceHash, res.hashes = &a1.executed, hex16(a1.hash), []uint64{a1.hash}
+	if a1.leaks != nil {
+		res.leaks = a1.leaks.leaks()
+	}
 	res.primary = a1.fail
 	if a1.limited {
 		st.Logf("faultline: seed 0x%016x stopped at MaxEvents (%d) at t=%s; Options.AllowLimit is set, so this is not a failure; final checks were skipped", seed, r.plan.opts.MaxEvents, a1.now)
@@ -470,6 +474,14 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 	}
 	if p.seedSource == "derived" {
 		rep.BaseSeed, rep.BaseSource = hex16(p.base), p.baseSource
+	}
+	leak := art.leaks
+	if leak == nil && f != nil && f.leak != nil { // the artifact attempt found no leak: keep the failure's
+		leak = f.leak
+		addLeakFile(&art, leak)
+	}
+	if leak != nil {
+		rep.Leaks = leak.leaks()
 	}
 	if len(art.records) > 0 {
 		rep.Run.Dropped = art.records[0].Seq - 1
@@ -755,8 +767,9 @@ type resultLine struct {
 	ArtifactError string  `json:"artifact_error,omitempty"`
 	WallNS        int64   `json:"wall_ns"`
 
-	DeterminismLevel string `json:"determinism_level,omitempty"` // when the primary attempt completed (GOR-078)
-	ExactBackend     string `json:"exact_backend,omitempty"`     // set only by an exact backend
+	DeterminismLevel string          `json:"determinism_level,omitempty"` // when the primary attempt completed (GOR-078)
+	ExactBackend     string          `json:"exact_backend,omitempty"`     // set only by an exact backend
+	Leaks            *artifact.Leaks `json:"leaks,omitempty"`             // the primary attempt's, when leaks were found (GOR-069)
 }
 
 // appendResult appends one JSON line with a single Write (API-087).
@@ -787,6 +800,7 @@ func (r *runner) writeResult(st *testing.T, res *seedResult) {
 		Version: 1, Package: r.build.importPath, Test: r.t.Name(), Seed: hex16(res.seed),
 		Index: res.index, Status: res.status, Events: res.events, TraceHash: res.traceHash,
 		Artifact: res.artifactDir, ArtifactError: res.artifactErr, WallNS: int64(time.Since(res.start)),
+		Leaks: res.leaks,
 	}
 	if res.events != nil {
 		line.DeterminismLevel = determinismLevel(r.plan.opts.Mode)

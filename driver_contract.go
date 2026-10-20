@@ -58,8 +58,13 @@ func (d *driver) OnDriver() bool {
 }
 
 // SyncClock makes kernel time equal bubble time (GOR-040). Lock held; never inside a kernel event.
+// After the run ended it does nothing: kernel time stays at the end of the run while bubble time
+// moves on through the drain, past events that will never run (GOR-066).
 func (d *driver) SyncClock() {
 	d.assertHeld("SyncClock")
+	if d.ended {
+		return
+	}
 	if b := bubbleNow(); d.w.Sim.Now() < b {
 		d.advance(b)
 	}

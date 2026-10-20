@@ -145,4 +145,22 @@ func (ga *goAttempt) end() {
 	}
 	d.endRun() // E1
 	d.unlockDriver()
+	blocks, cut := d.drainProcesses() // E2
+	if cut {                          // GOR-067: the count may be too low
+		ga.res.warnings = append(ga.res.warnings, dumpCutWarning)
+		ga.bt.Logf("faultline: %s", dumpCutWarning)
+	}
+	if len(blocks) > 0 { // E3: the drain's last count (GOR-067)
+		rep := d.collectLeaks(blocks)
+		ga.res.leaks = rep
+		addLeakFile(ga.res, rep) // goroutines.txt (API-077 item 2)
+		// After a Goexit (t.FailNow, t.Skip) the outcome is not a pass, whatever res says.
+		if ga.r.plan.opts.FailOnLeak && ga.returned && ga.res.isPass() {
+			ga.res.setLeakFailure(rep) // GOR-069
+		} else {
+			ga.bt.Logf("%s", rep.text)
+		}
+	}
+	// E4: return. synctest.Test panics if goroutines are still blocked, and runAttemptGoroutine
+	// swallows that panic (GOR-008, GOR-070).
 }

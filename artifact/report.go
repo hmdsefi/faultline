@@ -34,8 +34,9 @@ type Report struct {
 	Run         RunInfo    `json:"run"`
 	Nodes       []Node     `json:"nodes"`
 
-	// faultline.Run sets DeterminismLevel; a report without it is "exact". The fields after it
-	// are reserved for exact replay in goroutine mode, leak reports, coverage points and swarm
+	// faultline.Run sets DeterminismLevel, and Leaks when goroutines of a goroutine-mode run were
+	// still blocked after the drain; a report without DeterminismLevel is "exact". ExactBackend, Asserts
+	// and Swarm are reserved for exact replay in goroutine mode, coverage points and swarm
 	// testing. faultline.Run does not set them, and they are omitted when empty.
 	DeterminismLevel string          `json:"determinism_level,omitempty"` // "exact" or "best-effort"
 	ExactBackend     string          `json:"exact_backend,omitempty"`     // "wasip1" or "toolexec"; absent: none
@@ -48,7 +49,8 @@ type Report struct {
 }
 
 // Failure describes why a seed failed. Kind says how: invariant or final for a check that
-// returned an error, panic, fail for a call to Sim.Fail, limit, or determinism.
+// returned an error, panic, fail for a call to Sim.Fail, limit, determinism, or leak for
+// goroutines still blocked after a goroutine-mode run with FailOnLeak set.
 type Failure struct {
 	Kind        string         `json:"kind"`  // invariant, final, panic, fail, limit, determinism, leak
 	Check       string         `json:"check"` // may be ""
