@@ -23,14 +23,15 @@ import (
 
 // runner is the state of one Run call.
 type runner struct {
-	t        *testing.T
-	body     func(w *World)
-	plan     *runPlan
-	build    buildInfo
-	cwd      string
-	results  string
-	cur      *World // World of the attempt in progress, for Goexit handling (API-101)
-	runSeeds bool   // the test called RunSeeds, not Run (API-113)
+	t         *testing.T
+	body      func(w *World)
+	plan      *runPlan
+	build     buildInfo
+	cwd       string
+	results   string
+	cur       *World // World of the attempt in progress, for Goexit handling (API-101)
+	runSeeds  bool   // the test called RunSeeds, not Run (API-113)
+	attemptNo int    // number of the attempt in progress within its seed, 1 for the primary (GOR-081)
 }
 
 // caller returns the name of the function the test called, Run or RunSeeds, for the setup errors

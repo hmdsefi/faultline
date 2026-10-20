@@ -346,6 +346,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		fmt.Fprintf(os.Stderr, "faultline: %s/seed=0x%016x: goroutine mode; replay: %s\n",
 			r.t.Name(), seed, r.replay(seed, nil).Command)
 	}
+	r.attemptNo = res.attempts
 	a1 := r.attempt(st, seed, r.plan.opts.Trace, r.plan.env.schedule, true)
 	if a1.setupErr != "" {
 		res.status = "fail"
@@ -443,6 +444,7 @@ func (r *runner) compare(prev *artifact.Report) []string {
 func (r *runner) rerun(st *testing.T, res *seedResult, cfg kernel.TraceConfig) attemptResult {
 	res.attempts++
 	r.cur = nil
+	r.attemptNo = res.attempts
 	a := r.attempt(st, res.seed, cfg, r.plan.env.schedule, false)
 	if a.setupErr != "" {
 		res.setupStop = true

@@ -90,6 +90,10 @@ func (r *runner) runAttemptGoroutine(st *testing.T, seed uint64, res *attemptRes
 	ga := &goAttempt{r: r, seed: seed, res: res, watch: &watchState{}}
 	prev := runtime.GOMAXPROCS(r.plan.opts.Procs) // step 1
 	defer runtime.GOMAXPROCS(prev)
+	if r.plan.opts.StallTimeout > 0 { // resolved: 0 became DefaultStallTimeout; negative disables
+		stop := r.startWatchdog(st, ga, r.attemptNo)
+		defer stop()
+	}
 	func() {
 		defer func() { // GOR-008
 			if v := recover(); v != nil && !isSynctestLeakPanic(v) {
