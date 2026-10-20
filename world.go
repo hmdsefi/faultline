@@ -81,7 +81,8 @@ type World struct {
 	drove             bool
 	lastStop          kernel.StopReason
 	failedOutsideLoop bool
-	violationSeq      uint64 // Seq of the check.violation emitted by afterEvent
+	violationSeq      uint64  // Seq of the check.violation emitted by runInvariant (API-056)
+	drv               *driver // goroutine-mode driver (GOR-010); nil in event mode
 }
 
 // T returns the seed subtest. Use it for t.Fatalf on setup errors; prefer Invariant, Final
@@ -306,11 +307,16 @@ func (w *World) Logf(format string, args ...any) {
 }
 
 // drive advances virtual time to until (API-046). It is the only place where Run and World
-// advance time; goroutine mode replaces its body (API-090).
+// advance time. In goroutine mode the driver's loop replaces RunUntil (GOR-020).
 func (w *World) drive(until kernel.Time) kernel.StopReason {
 	w.driving = true
 	defer func() { w.driving = false }()
-	stop := w.Sim.RunUntil(until)
+	var stop kernel.StopReason
+	if w.drv != nil {
+		stop = w.drv.drive(until)
+	} else {
+		stop = w.Sim.RunUntil(until)
+	}
 	w.drove, w.lastStop = true, stop
 	return stop
 }

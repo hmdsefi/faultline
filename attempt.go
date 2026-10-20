@@ -164,7 +164,7 @@ func (w *World) emit(kind, text string, kv ...string) uint64 {
 func itoa(v uint64) string { return strconv.FormatUint(v, 10) }
 
 // newWorld builds the World of one attempt in the order of API-030.
-func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool) (w *World, setupErr string) {
+func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool, ga *goAttempt) (w *World, setupErr string) {
 	stage := "construction"
 	defer func() {
 		if v := recover(); v != nil {
@@ -199,6 +199,9 @@ func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfi
 	}
 	w.History = history.NewRecorder(sim)
 	sim.OnEvent(w.afterEvent)
+	if ga != nil {
+		w.drv = newDriver(w, ga) // GOR-010
+	}
 	kv := []string{"phase", "setup", "seed", fmt.Sprintf("0x%016x", seed), "duration_ns", strconv.FormatInt(int64(o.Duration), 10), "max_events", itoa(o.MaxEvents), "mode", o.Mode.String()}
 	if sched != nil {
 		kv = append(kv, "schedule", r.plan.env.scheduleHash)
@@ -245,8 +248,20 @@ func (w *World) callBody(body func(*World)) (out bodyOutcome) {
 	return bodyOutcome{}
 }
 
-// afterEvent is the OnEvent observer that runs the invariants (API-056).
+// afterEvent is the OnEvent observer that runs the invariants (API-056). In goroutine mode it only
+// tells the driver that an event ran; the driver runs the invariants after the next quiescence
+// (GOR-011).
 func (w *World) afterEvent() {
+	if w.drv != nil {
+		w.drv.executed = true
+		return
+	}
+	w.runInvariants()
+}
+
+// runInvariants runs steps 1-2 of API-056: nothing after a failure, else each invariant in
+// registration order until one fails.
+func (w *World) runInvariants() {
 	if w.Sim.Err() != nil {
 		return
 	}
@@ -282,6 +297,9 @@ func (w *World) runInvariant(c namedCheck) (failed bool) {
 func (w *World) runFinals() *failure {
 	w.phase = phaseFinal
 	w.emit("run.phase", "final", "phase", "final", "checks", strconv.Itoa(len(w.finals)))
+	if w.drv != nil { // the checks run without the world lock (GOR-015)
+		w.drv.unlockDriver()
+	}
 	var results []finalResult
 	var first *failure
 	for _, c := range w.finals {
@@ -296,6 +314,9 @@ func (w *World) runFinals() *failure {
 				first.kind, first.check, first.context, first.name, first.panic = "panic", res.panic.Site, "panic-final", c.name, res.panic
 			}
 		}
+	}
+	if w.drv != nil {
+		w.drv.lockDriver()
 	}
 	if first == nil {
 		return nil
@@ -403,9 +424,9 @@ func (r *runner) runAttempt(st *testing.T, seed uint64, res *attemptResult, fn f
 
 // attemptBody is one attempt: build, body, drive, check, classify. Its *goAttempt parameter is
 // the goroutine-mode attempt, nil in event mode.
-func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool, _ *goAttempt) attemptResult {
+func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceConfig, sched *fault.Schedule, primary bool, ga *goAttempt) attemptResult {
 	failedAtStart := st.Failed()
-	w, setupErr := r.newWorld(st, seed, traceCfg, sched, primary)
+	w, setupErr := r.newWorld(st, seed, traceCfg, sched, primary, ga)
 	if setupErr != "" {
 		return attemptResult{setupErr: setupErr}
 	}
@@ -418,6 +439,9 @@ func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceCo
 		return attemptResult{setupErr: out.setupErr}
 	}
 	w.phase = phaseRun
+	if w.drv != nil {
+		w.drv.ga.watch.phase.Store(watchRun)
+	}
 	if !out.aborted && out.panic == nil {
 		if msg := w.startFaultsAfterBody(); msg != "" {
 			return attemptResult{setupErr: msg}
@@ -431,6 +455,9 @@ func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceCo
 	}
 	var finalFail *failure
 	if out.panic == nil && w.Sim.Err() == nil && w.drove && (w.lastStop == kernel.StopIdle || w.lastStop == kernel.StopDeadline) {
+		if w.drv != nil {
+			w.drv.ga.watch.phase.Store(watchFinal)
+		}
 		finalFail = w.runFinals()
 	}
 	f, limited := w.classify(out.panic, finalFail, failedAtStart)

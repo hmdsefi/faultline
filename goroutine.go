@@ -80,12 +80,14 @@ type goAttempt struct {
 	wake     chan struct{} // capacity 1 (GOR-024)
 	bt       *testing.T    // the bubble's T
 	returned bool          // fn returned normally
+	watch    *watchState   // published for the stall watchdog (GOR-080)
+	drv      *driver       // created by newWorld (GOR-010 step 1)
 }
 
 // runAttemptGoroutine is runAttempt (API-090) in goroutine mode (GOR-006).
 func (r *runner) runAttemptGoroutine(st *testing.T, seed uint64, res *attemptResult, fn func(st *testing.T, ga *goAttempt)) {
 	preNotifySignals() // GOR-004 (idempotent; also called before the first seed)
-	ga := &goAttempt{r: r, seed: seed, res: res}
+	ga := &goAttempt{r: r, seed: seed, res: res, watch: &watchState{}}
 	prev := runtime.GOMAXPROCS(r.plan.opts.Procs) // step 1
 	defer runtime.GOMAXPROCS(prev)
 	func() {
@@ -97,6 +99,7 @@ func (r *runner) runAttemptGoroutine(st *testing.T, seed uint64, res *attemptRes
 		synctest.Test(st, func(bt *testing.T) { // step 3
 			ga.bt = bt
 			ga.begin()
+			defer ga.end() // GOR-065; runs also when fn calls runtime.Goexit
 			fn(bt, ga)
 			ga.returned = true
 		})
@@ -128,4 +131,12 @@ func (ga *goAttempt) begin() {
 	ga.gid = gid
 	ga.bubble.Store(bubble)
 	ga.wake = make(chan struct{}, 1)
+}
+
+// end runs on the driver goroutine after fn returned or unwound (GOR-065). It leaves the world
+// lock released.
+func (ga *goAttempt) end() {
+	if d := ga.drv; d != nil && d.holds.Load() {
+		d.unlockDriver()
+	}
 }
