@@ -239,7 +239,7 @@ func (d *driver) emitCancel(r *request, reason string) {
 }
 
 // endRun is E1 of GOR-065: no live incarnations, cancelled contexts and requests, woken
-// WaitUnpaused waiters. Lock held.
+// WaitUnpaused waiters and an empty assert queue. Lock held.
 func (d *driver) endRun() {
 	d.ended = true
 	for _, np := range d.nodes {
@@ -252,6 +252,7 @@ func (d *driver) endRun() {
 	}
 	d.cancelAllRequests()
 	d.wakeAllWaiters()
+	d.ga.asserts.take() // discard the queue (GOR-085)
 }
 
 // WaitUnpaused blocks a process goroutine while node is paused (GOR-040). It reports whether

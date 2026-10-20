@@ -134,7 +134,8 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 		if d.failNow {
 			d.ga.bt.FailNow() // a process goroutine called t.FailNow: stop as t.FailNow in body does (GOR-047, GOR-058)
 		}
-		if d.executed { // GOR-022
+		d.drainAsserts() // GOR-085 point 2
+		if d.executed {  // GOR-022
 			d.executed = false
 			d.unlockDriver()
 			d.w.runInvariants()
@@ -156,6 +157,7 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 			before := s.Executed()
 			s.Step() // (4)
 			d.clocksAfter(snap)
+			d.drainAsserts() // GOR-085 point 1
 			if s.Executed() > before {
 				d.checkpoint()
 				d.ga.watch.stepped(s)
@@ -173,6 +175,73 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 		if ok && next < horizon {
 			target = next
 		}
+		if d.ga.asserts.pending() { // GOR-085: drain at the instant of the call
+			continue
+		}
 		d.sleepFor(time.Duration(target - b)) // (3)
+	}
+}
+
+// assertQueue is the per-attempt FIFO of assert recording functions (GOR-085). It has its own
+// mutex; assertRun never takes the world lock. It has no size limit and empties only at the drain
+// points, so a goroutine that queues calls without ever blocking grows it until the stall watchdog
+// ends the binary (GOR-080), or without end when the watchdog is off.
+type assertQueue struct {
+	mu sync.Mutex
+	fs []func()
+}
+
+// push appends f to the queue.
+func (q *assertQueue) push(f func()) {
+	q.mu.Lock()
+	q.fs = append(q.fs, f)
+	q.mu.Unlock()
+}
+
+// take returns the queued functions and empties the queue. The caller owns the returned slice:
+// pushes made while it runs the functions go to a new one.
+func (q *assertQueue) take() []func() {
+	q.mu.Lock()
+	fs := q.fs
+	q.fs = nil
+	q.mu.Unlock()
+	return fs
+}
+
+// pending reports whether the queue holds a function.
+func (q *assertQueue) pending() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.fs) > 0
+}
+
+// assertRun queues f and wakes the driver; it never runs f, takes the world lock or blocks. It is
+// the run function of assert.Attach in goroutine mode (GOR-085, EXP-009), and drainAsserts runs f
+// later. Only goroutines of the attempt's bubble may call it: the wake channel belongs to the
+// bubble, and a send on it from outside the bubble is a fatal runtime error that recover cannot
+// catch.
+func (ga *goAttempt) assertRun(f func()) {
+	// Push before the send: if drain takes the token first, the wait rule in drive sees f.
+	ga.asserts.push(f)
+	select {
+	case ga.wake <- struct{}{}:
+	default:
+	}
+}
+
+// drainAsserts executes queued functions in FIFO order until the queue is empty, so a call that
+// f queues runs in the same drain. Driver goroutine, world lock held (GOR-085). f is EXP-001's
+// recording step: it may update counters, emit records and call Sim.Fail; it must not block, call
+// shims (GOR-016) or drive the World (World.RunFor).
+func (d *driver) drainAsserts() {
+	d.assertHeld("drainAsserts")
+	for {
+		fs := d.ga.asserts.take()
+		if len(fs) == 0 {
+			return
+		}
+		for _, f := range fs {
+			f()
+		}
 	}
 }
