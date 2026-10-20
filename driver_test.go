@@ -404,7 +404,7 @@ func TestGoroutineDriverMaxTime(t *testing.T) {
 	gw(t, Options{Duration: time.Second}, func(w *World) {
 		s := kernel.New(kernel.Config{Seed: 1, MaxTime: kernel.Time(300 * time.Millisecond)})
 		s.At(kernel.Time(500*time.Millisecond), "late", func() {})
-		ga := &goAttempt{watch: &watchState{}, gid: w.drv.ga.gid} // not the attempt's own
+		ga := &goAttempt{watch: &watchState{}, gid: w.drv.ga.gid, asserts: &assertQueue{}} // not the attempt's own
 		d := &driver{w: &World{Sim: s}, ga: ga, wake: make(chan struct{}, 1)}
 		d.lockDriver()
 		stop = d.drive(kernel.Time(time.Second))

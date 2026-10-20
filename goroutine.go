@@ -82,6 +82,7 @@ type goAttempt struct {
 	returned bool          // fn returned normally
 	watch    *watchState   // published for the stall watchdog (GOR-080)
 	drv      *driver       // created by newWorld (GOR-010 step 1)
+	asserts  *assertQueue  // created by begin, before assert.Attach (GOR-085)
 }
 
 // runAttemptGoroutine is runAttempt (API-090) in goroutine mode (GOR-006).
@@ -135,6 +136,7 @@ func (ga *goAttempt) begin() {
 	ga.gid = gid
 	ga.bubble.Store(bubble)
 	ga.wake = make(chan struct{}, 1)
+	ga.asserts = &assertQueue{}
 }
 
 // end runs on the driver goroutine after fn returned or unwound (GOR-065). It leaves the world

@@ -471,12 +471,21 @@ func (r *runner) attemptBody(st *testing.T, seed uint64, traceCfg kernel.TraceCo
 			w.drive(w.End())
 		}
 	}
+	if w.drv != nil {
+		w.drv.drainAsserts() // GOR-085 point 3: calls made by body
+	}
 	var finalFail *failure
 	if out.panic == nil && w.Sim.Err() == nil && w.drove && (w.lastStop == kernel.StopIdle || w.lastStop == kernel.StopDeadline) {
 		if w.drv != nil {
 			w.drv.ga.watch.phase.Store(watchFinal)
 		}
 		finalFail = w.runFinals()
+	}
+	if w.drv != nil { // GOR-085 point 4: calls made by final checks
+		if !w.drv.holds.Load() {
+			w.drv.lockDriver()
+		}
+		w.drv.drainAsserts()
 	}
 	f, limited := w.classify(out.panic, finalFail, failedAtStart)
 	stop := "none"
