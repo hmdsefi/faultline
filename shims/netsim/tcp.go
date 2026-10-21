@@ -4,6 +4,7 @@
 package netsim
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"slices"
@@ -90,8 +91,9 @@ type direction struct {
 	queued       []byte
 	inflight     int
 	nextSeq      uint64
-	finPending   bool //nolint:unused // close state, not wired up yet
+	finPending   bool
 	finSent      bool
+	windowFull   bool // the last pump stopped at the receiver window with bytes queued (NSM-036)
 	unacked      []*segment
 	checkPending bool
 	// receiver
@@ -267,7 +269,7 @@ func (st *Stack) ack(d *direction, s *segment) {
 // discard drops ep's buffers and unacknowledged segments.
 func (st *Stack) discard(ep *Conn) {
 	d, r := ep.c.dirs[ep.side], ep.c.dirs[1-ep.side]
-	d.queued, d.unacked, d.inflight = nil, nil, 0
+	d.queued, d.unacked, d.inflight, d.windowFull = nil, nil, 0, false
 	r.buf, r.oooBytes = nil, 0
 	r.ooo = map[uint64]*segment{}
 }
@@ -459,6 +461,9 @@ func (st *Stack) arriveData(id kernel.NodeID, s *segment) {
 	}
 	ep.wake()
 	st.emitArrive(id, s, "in-order")
+	if ep.rdShut && len(d.queued) > 0 {
+		st.schedulePump(d) // the discarded bytes opened the window, and no Read will (NSM-037)
+	}
 }
 
 // deliver hands one in-order segment to the receiving endpoint (NSM-037).
@@ -486,4 +491,45 @@ func (st *Stack) arriveRst(id kernel.NodeID, s *segment) {
 	default:
 		st.emitArrive(id, s, "ignored")
 	}
+}
+
+// pump segments queued bytes within the receiver window and transmits a pending fin (NSM-036).
+// Driver side; the sender's node is up.
+func (st *Stack) pump(d *direction) {
+	if !st.live(d.sender()) {
+		return
+	}
+	d.windowFull = false
+	for len(d.queued) > 0 {
+		n := min(st.cfg.MSS, len(d.queued))
+		if d.inflight+len(d.buf)+d.oooBytes+n > st.cfg.RecvBuffer { // receiver window
+			d.windowFull = true // a Read that opens it pumps again (NSM-040)
+			break
+		}
+		s := &segment{c: d.c, dir: d.dir, kind: kData, seq: d.nextSeq, data: bytes.Clone(d.queued[:n])}
+		d.nextSeq++
+		d.queued = d.queued[n:]
+		d.inflight += n
+		st.transmit(s)
+	}
+	if d.finPending && !d.finSent && len(d.queued) == 0 {
+		d.finSent = true
+		s := &segment{c: d.c, dir: d.dir, kind: kFin, seq: d.nextSeq}
+		d.nextSeq++
+		st.transmit(s)
+	}
+}
+
+// schedulePump is a cross-node pump trigger (NSM-034): nothing for a sender that is not live, a
+// net.pump request on the sender's node while it is paused, otherwise pump at once. Driver side.
+func (st *Stack) schedulePump(d *direction) {
+	snd := d.sender()
+	if !st.live(snd) {
+		return
+	}
+	if n := st.s.Node(snd.h.id); n.State() == kernel.NodePaused {
+		n.Post("net.pump", func() { st.pump(d) })
+		return
+	}
+	st.pump(d)
 }

@@ -3,19 +3,11 @@
 
 package netsim
 
-import (
-	"errors"
-	"time"
-)
+import "errors"
 
 // errPending is returned by the temporary methods below. They let *Conn and *Listener satisfy
-// net.Conn and net.Listener until the byte stream, deadline and close code replaces them.
+// net.Conn and net.Listener until the close code replaces both Close methods and deletes this file.
 var errPending = errors.New("netsim: not implemented yet")
 
-func (c *Conn) Read(b []byte) (int, error)         { return 0, errPending }
-func (c *Conn) Write(b []byte) (int, error)        { return 0, errPending }
-func (c *Conn) SetDeadline(t time.Time) error      { return errPending }
-func (c *Conn) SetReadDeadline(t time.Time) error  { return errPending }
-func (c *Conn) SetWriteDeadline(t time.Time) error { return errPending }
-func (c *Conn) Close() error                       { return errPending }
-func (l *Listener) Close() error                   { return errPending }
+func (c *Conn) Close() error     { return errPending }
+func (l *Listener) Close() error { return errPending }

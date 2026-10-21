@@ -778,7 +778,7 @@ func TestReset(t *testing.T) {
 	hb.addEndpoint(srv)
 	seg := &segment{c: c, dir: s2c, kind: kSynAck}
 	out, in := c.dirs[s2c], c.dirs[c2s]
-	out.queued, out.unacked, out.inflight = []byte("q"), []*segment{seg}, 1
+	out.queued, out.unacked, out.inflight, out.windowFull = []byte("q"), []*segment{seg}, 1, true
 	in.buf, in.ooo[5], in.oooBytes = []byte("b"), seg, 1
 	old := srv.notify
 	t0 := s.Now()
@@ -786,7 +786,7 @@ func TestReset(t *testing.T) {
 	if srv.errno != syscall.ECONNRESET || srv.state != stRemoved || hb.holds(srv) || len(hb.eks) != 0 || l.synrcvd != 1 || !closed(old) {
 		t.Fatalf("half-open endpoint after reset: errno %v, state %d, synrcvd %d", srv.errno, srv.state, l.synrcvd)
 	}
-	if out.queued != nil || out.unacked != nil || out.inflight != 0 || in.buf != nil || in.oooBytes != 0 || len(in.ooo) != 0 || in.ooo == nil {
+	if out.queued != nil || out.unacked != nil || out.inflight != 0 || out.windowFull || in.buf != nil || in.oooBytes != 0 || len(in.ooo) != 0 || in.ooo == nil {
 		t.Fatal("reset kept buffers")
 	}
 	sameLines(t, "records", recLines(s, t0, "net.conn.reset"), []string{"0s n2 reset c1: rst | conn=c1 reason=rst"})
