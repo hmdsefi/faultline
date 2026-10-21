@@ -126,8 +126,9 @@ type Stack struct {
 	s     *kernel.Sim
 	nw    *simnet.Network
 	d     Driver
-	cfg   Config     // defaults applied
-	nodes []*nodeNet // indexed by kernel.NodeID
+	cfg   Config        // defaults applied
+	nodes []*nodeNet    // indexed by kernel.NodeID
+	conns []*connection // conns[k-1] is c<k>
 }
 
 // nodeNet is per-node state that outlives incarnations.
@@ -185,14 +186,19 @@ type Host struct {
 	addr netip.Addr
 	gone bool // released, crashed or shut down
 
-	udps   map[uint16]*UDPConn // bound UDP sockets by port; lookups only (NSM-011)
-	uports []uint16            // the ports of udps, ascending
+	listeners map[uint16]*Listener // bound TCP listeners by port; lookups only (NSM-011)
+	lports    []uint16             // the ports of listeners, ascending
+	eps       map[int]*Conn        // TCP endpoints by epKey (connection number and side); lookups only
+	eks       []int                // the keys of eps, ascending
+	udps      map[uint16]*UDPConn  // bound UDP sockets by port; lookups only (NSM-011)
+	uports    []uint16             // the ports of udps, ascending
 }
 
 // Host creates the Host of n's current incarnation and installs n's simnet handler. It runs on
 // the driver goroutine with the lock held.
 func (st *Stack) Host(n *kernel.Node) *Host {
-	h := &Host{st: st, n: n, id: n.ID(), inc: n.Incarnation(), addr: NodeAddr(n.ID()), udps: map[uint16]*UDPConn{}}
+	h := &Host{st: st, n: n, id: n.ID(), inc: n.Incarnation(), addr: NodeAddr(n.ID()),
+		listeners: map[uint16]*Listener{}, eps: map[int]*Conn{}, udps: map[uint16]*UDPConn{}}
 	nn := st.node(n.ID())
 	nn.host, nn.ever = h, true
 	st.nw.Handle(n, st.handler(n.ID()))
@@ -231,6 +237,9 @@ func (st *Stack) Release(h *Host) {
 		st.emitUDPClose(h.id, port, "exit")
 	}
 	h.gone = true
+	for _, port := range h.lports { // a blocked Accept sees the host gone and returns net.ErrClosed
+		h.listeners[port].wake()
+	}
 }
 
 // Shutdown ends all network activity at the end of the run. It runs on the driver goroutine with
@@ -245,6 +254,9 @@ func (st *Stack) Shutdown() {
 		for _, port := range slices.Clone(h.uports) {
 			st.closeUDP(h.udps[port])
 		}
+		for _, port := range h.lports {
+			h.listeners[port].wake()
+		}
 	}
 }
 
@@ -255,6 +267,9 @@ func (st *Stack) onCrash(n *kernel.Node) {
 		return
 	}
 	h.gone = true
+	for _, port := range h.lports {
+		h.listeners[port].wake()
+	}
 	for _, port := range slices.Clone(h.uports) { // step 3
 		st.closeUDP(h.udps[port])
 		st.emitUDPClose(h.id, port, "crash")
