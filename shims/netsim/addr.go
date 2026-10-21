@@ -4,9 +4,11 @@
 package netsim
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 
 	"github.com/hmdsefi/faultline/kernel"
@@ -48,6 +50,13 @@ func isLoopback(a netip.Addr) bool {
 // Resolve returns the address of host: a node name, an IPv4 literal, "localhost", "" or "::1".
 // The loopback names and every 127.0.0.0/8 literal resolve to 127.0.0.1.
 func (h *Host) Resolve(host string) (netip.Addr, error) {
+	h.st.d.Lock()
+	defer h.st.d.Unlock()
+	return h.resolveLocked(host)
+}
+
+// resolveLocked is Resolve for callers that hold the lock (NSM-015).
+func (h *Host) resolveLocked(host string) (netip.Addr, error) {
 	switch host {
 	case "", "localhost", "::1":
 		return loopback, nil
@@ -61,10 +70,7 @@ func (h *Host) Resolve(host string) (netip.Addr, error) {
 		}
 		return netip.Addr{}, &net.AddrError{Err: "IPv6 is not supported by netsim", Addr: host}
 	}
-	h.st.d.Lock()
-	n := h.st.s.Lookup(host)
-	h.st.d.Unlock()
-	if n != nil {
+	if n := h.st.s.Lookup(host); n != nil {
 		return NodeAddr(n.ID()), nil
 	}
 	return netip.Addr{}, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
@@ -79,4 +85,68 @@ func (st *Stack) render(a netip.AddrPort) string {
 		}
 	}
 	return a.String()
+}
+
+// splitAddr splits address into a host and a decimal port (NSM-017).
+func splitAddr(network, address string) (string, uint16, error) {
+	host, ps, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", 0, err
+	}
+	p, err := strconv.ParseUint(ps, 10, 16)
+	if err != nil {
+		return "", 0, &net.AddrError{Err: "unknown port", Addr: network + "/" + ps}
+	}
+	return host, uint16(p), nil
+}
+
+// bindKind checks a Listen/ListenPacket host (NSM-017): "", 0.0.0.0, ::, the node's address or
+// name, or a loopback form. It reports whether the bind is a loopback bind.
+func (h *Host) bindKind(host string) (loop, ok bool) {
+	switch host {
+	case "", "0.0.0.0", "::":
+		return false, true
+	case "localhost", "::1":
+		return true, true
+	}
+	if host == h.n.Name() {
+		return false, true
+	}
+	if a, err := netip.ParseAddr(host); err == nil {
+		if isLoopback(a) {
+			return true, true
+		}
+		if a.Unmap() == h.addr {
+			return false, true
+		}
+	}
+	return false, false
+}
+
+// ephemeral allocates an ephemeral port: 49152 + counter % 16384, skipping used ports, at most
+// 16384 tries (NSM-016). Lock held.
+func ephemeral(ctr *uint64, used func(uint16) bool) (uint16, bool) {
+	for range 16384 {
+		p := uint16(49152 + *ctr%16384)
+		*ctr++
+		if !used(p) {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func insertSorted[T cmp.Ordered](s []T, v T) []T {
+	i, found := slices.BinarySearch(s, v)
+	if found {
+		return s
+	}
+	return slices.Insert(s, i, v)
+}
+
+func removeSorted[T cmp.Ordered](s []T, v T) []T {
+	if i, found := slices.BinarySearch(s, v); found {
+		return slices.Delete(s, i, i+1)
+	}
+	return s
 }

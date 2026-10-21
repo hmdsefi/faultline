@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
@@ -183,12 +184,15 @@ type Host struct {
 	inc  uint32
 	addr netip.Addr
 	gone bool // released, crashed or shut down
+
+	udps   map[uint16]*UDPConn // bound UDP sockets by port; lookups only (NSM-011)
+	uports []uint16            // the ports of udps, ascending
 }
 
 // Host creates the Host of n's current incarnation and installs n's simnet handler. It runs on
 // the driver goroutine with the lock held.
 func (st *Stack) Host(n *kernel.Node) *Host {
-	h := &Host{st: st, n: n, id: n.ID(), inc: n.Incarnation(), addr: NodeAddr(n.ID())}
+	h := &Host{st: st, n: n, id: n.ID(), inc: n.Incarnation(), addr: NodeAddr(n.ID()), udps: map[uint16]*UDPConn{}}
 	nn := st.node(n.ID())
 	nn.host, nn.ever = h, true
 	st.nw.Handle(n, st.handler(n.ID()))
@@ -210,34 +214,49 @@ func (h *Host) alive() bool { return !h.gone && h.st.d.Alive(h.id, h.inc) }
 // handler demultiplexes simnet payloads for node id by type (NSM-010).
 func (st *Stack) handler(id kernel.NodeID) simnet.Handler {
 	return func(from kernel.NodeID, payload any) {
-		switch payload.(type) { //nolint:gocritic // singleCaseSwitch: each netsim payload type gets a case here
+		switch p := payload.(type) {
+		case *Datagram:
+			st.deliverDatagram(id, p)
 		default:
-			st.emit(id, "net.udp.drop", "udp drop "+st.s.Node(from).Name()+" -> "+st.s.Node(id).Name()+": foreign",
-				kernel.Attr{Key: "src", Value: st.s.Node(from).Name()},
-				kernel.Attr{Key: "dst", Value: st.s.Node(id).Name()},
-				kernel.Attr{Key: "len", Value: "0"},
-				kernel.Attr{Key: "reason", Value: "foreign"})
+			st.emitDrop(id, st.s.Node(from).Name(), st.s.Node(id).Name(), "0", "foreign")
 		}
 	}
 }
 
 // Release closes everything h owns, as for a process exit. It runs on the driver goroutine with
 // the lock held.
-func (st *Stack) Release(h *Host) { h.gone = true }
+func (st *Stack) Release(h *Host) {
+	for _, port := range slices.Clone(h.uports) {
+		st.closeUDP(h.udps[port])
+		st.emitUDPClose(h.id, port, "exit")
+	}
+	h.gone = true
+}
 
 // Shutdown ends all network activity at the end of the run. It runs on the driver goroutine with
 // the lock held, emits no records and makes no simnet calls.
 func (st *Stack) Shutdown() {
 	for _, nn := range st.nodes {
-		if nn != nil && nn.host != nil {
-			nn.host.gone = true
+		if nn == nil || nn.host == nil {
+			continue
+		}
+		h := nn.host
+		h.gone = true
+		for _, port := range slices.Clone(h.uports) {
+			st.closeUDP(h.udps[port])
 		}
 	}
 }
 
 // onCrash is the crash hook (NSM-060); it runs after the driver's (GOR-051).
 func (st *Stack) onCrash(n *kernel.Node) {
-	if h := st.cur(n.ID()); h != nil {
-		h.gone = true
+	h := st.cur(n.ID())
+	if h == nil {
+		return
+	}
+	h.gone = true
+	for _, port := range slices.Clone(h.uports) { // step 3
+		st.closeUDP(h.udps[port])
+		st.emitUDPClose(h.id, port, "crash")
 	}
 }

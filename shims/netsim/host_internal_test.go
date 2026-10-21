@@ -4,6 +4,8 @@
 package netsim
 
 import (
+	"errors"
+	"net"
 	"net/netip"
 	"testing"
 	"time"
@@ -96,5 +98,72 @@ func TestRender(t *testing.T) {
 		if got := st.render(netip.MustParseAddrPort(tc.in)); got != tc.want {
 			t.Errorf("render(%s) = %s, want %s", tc.in, got, tc.want)
 		}
+	}
+}
+
+// A blocking call on the driver goroutine panics with NSM-003's message.
+func TestBlockOnDriver(t *testing.T) {
+	s := kernel.New(kernel.Config{Seed: 1})
+	st := New(s, simnet.New(s, simnet.DefaultConfig()), &stubDriver{}, Config{})
+	defer func() {
+		want := "netsim: blocking call UDPConn.ReadFrom on the driver goroutine (body, a check or a kernel callback)"
+		if v := recover(); v != want {
+			t.Fatalf("panic %v, want %q", v, want)
+		}
+	}()
+	st.block("UDPConn.ReadFrom", nil, nil, time.Time{})
+}
+
+// ListenPacket and a UDP dial of a gone incarnation fail with ErrProcessGone; WriteTo resolves
+// addresses of every net.Addr type.
+func TestUDPHostCalls(t *testing.T) {
+	s := kernel.New(kernel.Config{Seed: 1})
+	d := &stubDriver{}
+	st := New(s, simnet.New(s, simnet.DefaultConfig()), d, Config{})
+	var h *Host
+	s.AddNode("a", func(n *kernel.Node) { h = st.Host(n) })
+	s.AddNode("b", func(*kernel.Node) {})
+	s.RunFor(time.Millisecond)
+
+	u, err := h.bindUDP("listen", "udp", h.addr, 0, netip.AddrPort{})
+	if err != nil || u.port != 49152 || h.udps[49152] != u || len(h.uports) != 1 {
+		t.Fatalf("bindUDP: %v, port %d, ports %v", err, u.port, h.uports)
+	}
+	for _, tc := range []struct {
+		addr net.Addr
+		want string
+	}{
+		{&net.UDPAddr{IP: net.IPv4(10, 0, 0, 2), Port: 9}, "10.0.0.2:9"},
+		{&net.UDPAddr{IP: net.IP{10, 0, 0, 2}, Port: 9}, "10.0.0.2:9"},
+		{&net.TCPAddr{IP: net.IPv4(10, 0, 0, 2), Port: 9}, "10.0.0.2:9"},
+		{&net.UnixAddr{Name: "b:9"}, "10.0.0.2:9"},
+		{&net.UnixAddr{Name: "localhost:9"}, "127.0.0.1:9"},
+	} {
+		if got, err := h.udpTarget(tc.addr); err != nil || got.String() != tc.want {
+			t.Errorf("udpTarget(%v) = %v, %v; want %s", tc.addr, got, err, tc.want)
+		}
+	}
+	var ae *net.AddrError
+	if _, err := u.WriteTo([]byte("x"), &net.UDPAddr{IP: net.IP{1, 2, 3}, Port: 9}); !errors.As(err, &ae) || ae.Err != "invalid address" {
+		t.Errorf("WriteTo with a 3-byte IP: %v", err)
+	}
+	var dns *net.DNSError
+	if _, err := u.WriteTo([]byte("x"), &net.UnixAddr{Name: "nosuch:9"}); !errors.As(err, &dns) {
+		t.Errorf("WriteTo to an unknown name: %v", err)
+	}
+
+	d.dead = h.id
+	if _, err := h.ListenPacket("udp", ":9"); !errors.Is(err, ErrProcessGone) {
+		t.Errorf("ListenPacket of a gone incarnation: %v", err)
+	}
+	if _, err := h.DialContext(t.Context(), "udp", "b:9"); !errors.Is(err, ErrProcessGone) {
+		t.Errorf("UDP dial of a gone incarnation: %v", err)
+	}
+}
+
+func TestDatagramDescribe(t *testing.T) {
+	d := &Datagram{Src: netip.MustParseAddrPort("10.0.0.1:7"), Dst: netip.MustParseAddrPort("10.0.0.2:9"), Data: []byte("hi")}
+	if got, want := kernel.Describe(d), "udp 10.0.0.1:7 -> 10.0.0.2:9 len=2"; got != want {
+		t.Fatalf("Describe = %q, want %q", got, want)
 	}
 }
