@@ -109,7 +109,7 @@ func (h *Host) bindUDP(op, network string, ip netip.Addr, port uint16, remote ne
 	h.udps[port] = u
 	h.uports = insertSorted(h.uports, port)
 	ps := strconv.Itoa(int(port))
-	st.d.Post(h.id, h.inc, "net.udp.bind", "udp:"+ps, func() {
+	st.post(h, "net.udp.bind", "udp:"+ps, func() {
 		st.emit(h.id, "net.udp.bind", "udp bind :"+ps, kernel.Attr{Key: "port", Value: ps})
 	}, func() {})
 	return u, nil
@@ -218,7 +218,7 @@ func (u *UDPConn) writeTo(b []byte, addr net.Addr) (int, error) {
 		return 0, u.opErr("write", addr, err)
 	}
 	data, src, h := bytes.Clone(b), u.local, u.h
-	st.d.Post(h.id, h.inc, "net.udp.send", "udp:"+strconv.Itoa(int(u.port)), func() { st.sendDatagram(h, src, dst, data) }, func() {})
+	st.post(h, "net.udp.send", "udp:"+strconv.Itoa(int(u.port)), func() { st.sendDatagram(h, src, dst, data) }, func() {})
 	return len(b), nil
 }
 
@@ -326,7 +326,7 @@ func (u *UDPConn) Close() error {
 	}
 	st.closeUDP(u)
 	h, port := u.h, u.port
-	st.d.Post(h.id, h.inc, "net.udp.close", "udp:"+strconv.Itoa(int(port)), func() { st.emitUDPClose(h.id, port, "close") }, func() {})
+	st.post(h, "net.udp.close", "udp:"+strconv.Itoa(int(port)), func() { st.emitUDPClose(h.id, port, "close") }, func() {})
 	return nil
 }
 

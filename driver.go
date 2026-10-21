@@ -36,6 +36,8 @@ type driver struct {
 	failNow     bool     // a process goroutine called t.FailNow or t.Fatal (GOR-047, GOR-058)
 	checkpoints []uint64 // GOR-075
 
+	detached []*Process // incarnations whose netsim host endIncarnation detached on a process goroutine
+
 	queue []*request  // requests queued since the last drain (GOR-030)
 	seq   uint64      // arrival counter
 	reqN  uint64      // request IDs (GOR-031)

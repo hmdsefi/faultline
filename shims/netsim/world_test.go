@@ -168,7 +168,7 @@ func TestNetsimScenario(t *testing.T) {
 // The child stops itself (-test.timeout) after a fifth of the time left before the parent's
 // deadline and is killed at nine tenths of it; without a deadline it gets 10 minutes. Under
 // go test -cover it adds its coverage to this binary's.
-func runChild(t *testing.T, name string, env ...string) (string, int) { //nolint:unused // used by the child-process scenarios
+func runChild(t *testing.T, name string, env ...string) (string, int) {
 	t.Helper()
 	limit, kill := 10*time.Minute, 11*time.Minute
 	if d, ok := t.Deadline(); ok {

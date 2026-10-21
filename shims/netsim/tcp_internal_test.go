@@ -186,8 +186,8 @@ func TestEndpointTables(t *testing.T) {
 	if st.live(srv) || st.live(cli) {
 		t.Error("live of a removed or reset endpoint")
 	}
-	ep := newConn(c1, 1, hb, stSynRcvd, cli.remote, cli.local)
-	hb.addEndpoint(ep)
+	// Not in hb's table, so the crash hook leaves it as it is: only the incarnation makes it not live.
+	ep := newConn(c1, 1, hb, stEstablished, cli.remote, cli.local)
 	at(s, b.Crash)
 	at(s, b.Restart)
 	if st.live(ep) {

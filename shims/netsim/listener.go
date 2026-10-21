@@ -95,7 +95,7 @@ func (h *Host) Listen(network, address string) (net.Listener, error) {
 	h.listeners[port] = l
 	h.lports = insertSorted(h.lports, port)
 	ps, bl := strconv.Itoa(int(port)), strconv.Itoa(st.cfg.Backlog)
-	st.d.Post(h.id, h.inc, "net.listen", "listen:"+ps, func() {
+	st.post(h, "net.listen", "listen:"+ps, func() {
 		st.emit(h.id, "net.conn.listen", "listen :"+ps, kernel.Attr{Key: "port", Value: ps}, kernel.Attr{Key: "backlog", Value: bl})
 	}, func() {})
 	return l, nil
@@ -140,4 +140,60 @@ func (l *Listener) SetDeadline(t time.Time) error {
 	close(l.dlCh)
 	l.dlCh = make(chan struct{})
 	return nil
+}
+
+// Close closes the listener. Its port is free for a new Listen at once, blocked Accept calls return
+// net.ErrClosed, and connections queued for Accept are reset.
+func (l *Listener) Close() error {
+	st := l.h.st
+	st.d.Lock()
+	defer st.d.Unlock()
+	if l.closed {
+		return l.opErr("close", net.ErrClosed)
+	}
+	st.unbindListener(l)
+	st.post(l.h, "net.unlisten", "listen:"+strconv.Itoa(int(l.port)), func() { st.unlistenRun(l, "close", true) }, func() {})
+	return nil
+}
+
+// unbindListener marks l closed, unbinds its port and wakes Accept calls. Lock held.
+func (st *Stack) unbindListener(l *Listener) {
+	l.closed = true
+	if l.h.listeners[l.port] == l {
+		delete(l.h.listeners, l.port)
+		l.h.lports = removeSorted(l.h.lports, l.port)
+	}
+	l.wake()
+}
+
+// unlistenRun resets l's queued endpoints (FIFO, with an rst unless withRst is false) and removes
+// its half-open endpoints, then emits net.conn.unlisten (NSM-049; NSM-060 step 2 with withRst false).
+func (st *Stack) unlistenRun(l *Listener, reason string, withRst bool) {
+	resetReason := "listener-closed"
+	if reason == "crash" {
+		resetReason = "crash"
+	}
+	n := 0
+	for len(l.queue) > 0 {
+		ep := l.queue[0]
+		l.dequeue(ep)
+		if !st.live(ep) {
+			continue
+		}
+		if withRst {
+			st.sendUnreliable(ep.c, ep.side, kRst)
+		}
+		st.reset(ep, resetReason)
+		n++
+	}
+	for _, ep := range l.h.endpoints() {
+		if ep.lst == l && ep.state == stSynRcvd {
+			l.synrcvd--
+			st.removeEndpoint(ep)
+		}
+	}
+	p := strconv.Itoa(int(l.port))
+	st.emit(l.h.id, "net.conn.unlisten", "unlisten :"+p+": "+reason,
+		kernel.Attr{Key: "port", Value: p}, kernel.Attr{Key: "reason", Value: reason},
+		kernel.Attr{Key: "reset", Value: strconv.Itoa(n)})
 }

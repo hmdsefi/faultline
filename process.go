@@ -431,12 +431,20 @@ func (d *driver) ghostPanic(p *Process, v any) {
 }
 
 // endIncarnation performs GOR-048's steps after its record: the status, the end time, the
-// context, the netsim host, the scheduled requests and the WaitUnpaused waiters.
+// context, the netsim host, the scheduled requests and the WaitUnpaused waiters. On a process
+// goroutine (GOR-049, GOR-050, GOR-047's Goexit row) it only detaches the netsim host, and the
+// driver releases it in its next drain, so netsim's records and simnet calls stay on the driver
+// (NSM-002, NSM-061).
 func (d *driver) endIncarnation(p *Process, status incStatus, cause error, reason string) {
 	p.status = status
 	p.endAt = d.w.Sim.Now()
 	p.cancel(cause)
-	d.w.stack.Release(p.Net)
+	if d.OnDriver() {
+		d.w.stack.Release(p.Net)
+	} else {
+		d.w.stack.Detach(p.Net)
+		d.detached = append(d.detached, p)
+	}
 	d.cancelScheduled(p.Node.ID(), reason)
 	d.wakeWaiters(p.Node.ID())
 }
