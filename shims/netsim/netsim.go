@@ -222,6 +222,8 @@ func (h *Host) alive() bool { return !h.gone && h.st.d.Alive(h.id, h.inc) }
 func (st *Stack) handler(id kernel.NodeID) simnet.Handler {
 	return func(from kernel.NodeID, payload any) {
 		switch p := payload.(type) {
+		case *segment:
+			st.arrive(id, p)
 		case *Datagram:
 			st.deliverDatagram(id, p)
 		default:

@@ -86,7 +86,7 @@ func attr(r kernel.Record, key string) string {
 }
 
 // match reports whether r has kind and every key=value pair of kv.
-func match(r kernel.Record, kind string, kv ...string) bool { //nolint:unused // used by the tests that check record order
+func match(r kernel.Record, kind string, kv ...string) bool {
 	if r.Kind != kind {
 		return false
 	}
@@ -99,7 +99,7 @@ func match(r kernel.Record, kind string, kv ...string) bool { //nolint:unused //
 }
 
 // inOrder fails unless every step matches a record, each after the previous one.
-func inOrder(t *testing.T, rs []kernel.Record, steps ...func(kernel.Record) bool) { //nolint:unused // used by the tests that check record order
+func inOrder(t *testing.T, rs []kernel.Record, steps ...func(kernel.Record) bool) {
 	t.Helper()
 	i := 0
 	for n, step := range steps {
@@ -141,7 +141,7 @@ type timed struct {
 	at  time.Duration
 	n   int
 	err error
-	s   string //nolint:unused // used by the tests that check data read
+	s   string
 }
 
 // wait returns a process main that blocks until the run ends.

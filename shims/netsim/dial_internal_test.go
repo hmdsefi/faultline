@@ -58,7 +58,8 @@ func TestCtxErrors(t *testing.T) {
 // or abandoned record, fails with EADDRINUSE when no ephemeral port is free, and otherwise
 // creates the dialing client endpoint, records the dial and sends the syn.
 func TestStartDial(t *testing.T) {
-	s, _, st, ha, hb := txStack(t, Config{}, "e")
+	s, nw, st, ha, hb := txStack(t, Config{}, "e")
+	mute(nw, ha, hb)
 	mk := func(h *Host, target string, dst kernel.NodeID, loop bool) *dialRecord {
 		tp := netip.MustParseAddrPort(target)
 		dr := &dialRecord{h: h, target: tp, loop: loop, dst: dst, key: "dial:" + tp.String(), done: make(chan struct{})}
@@ -131,7 +132,8 @@ func TestStartDial(t *testing.T) {
 
 // abortDial fails only a dial that is still dialing with this record.
 func TestAbortDial(t *testing.T) {
-	s, _, st, ha, hb := txStack(t, Config{})
+	s, nw, st, ha, hb := txStack(t, Config{})
+	mute(nw, ha, hb)
 	start := func() *dialRecord {
 		tp := netip.MustParseAddrPort("10.0.0.2:80")
 		dr := &dialRecord{h: ha, target: tp, dst: hb.id, key: "dial:" + tp.String(), done: make(chan struct{})}
