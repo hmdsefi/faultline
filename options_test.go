@@ -14,6 +14,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
 	"github.com/hmdsefi/faultline/kernel/simnet"
+	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
 // optionsDiff returns "<field>: got <value>, want <value>" for each field of got that differs from
@@ -35,13 +36,14 @@ func TestApplyDefaults(t *testing.T) {
 	if d := optionsDiff(applyDefaults(Options{}), want); d != "" {
 		t.Errorf("applyDefaults(Options{}): %s", d)
 	}
-	// GOR-002: ModeGoroutine also defaults Procs, Drain and StallTimeout.
+	// GOR-002: ModeGoroutine also defaults Procs, Drain, StallTimeout and NetSim.
 	want.Mode, want.Procs, want.Drain, want.StallTimeout = ModeGoroutine, 1, DefaultDrain, DefaultStallTimeout
+	want.NetSim = netsim.DefaultConfig()
 	if d := optionsDiff(applyDefaults(Options{Mode: ModeGoroutine}), want); d != "" {
 		t.Errorf("applyDefaults(Options{Mode: ModeGoroutine}): %s", d)
 	}
 	// Only zero fields change: set values, negative and largest ones included, reach validation
-	// (API-001), and a Net with any field set is kept whole.
+	// (API-001), and a Net or NetSim with any field set is kept whole.
 	for _, c := range []struct {
 		name string
 		in   Options
@@ -55,7 +57,7 @@ func TestApplyDefaults(t *testing.T) {
 			Disk:             simdisk.Config{SectorSize: 512},
 			Trace:            kernel.TraceConfig{Level: kernel.TraceFull, Buffer: 4},
 			CheckDeterminism: true, KeepGoing: true, NoCryptoSeed: true, AllowLimit: true,
-			Procs: 2, Drain: 1, StallTimeout: 1, FailOnLeak: true, Swarm: true,
+			Procs: 2, Drain: 1, StallTimeout: 1, FailOnLeak: true, NetSim: netsim.Config{MSS: 32}, Swarm: true,
 		}},
 	} {
 		if d := optionsDiff(applyDefaults(c.in), c.in); d != "" {
@@ -113,6 +115,7 @@ func TestValidateOptions(t *testing.T) {
 		modeUnknown   = "faultline: unknown Options.Mode 9; want ModeEvent (the zero value) or ModeGoroutine"
 		procsNegative = "faultline: Options.Procs is negative: -1"
 		drainNegative = "faultline: Options.Drain is negative: -1ns"
+		netsimInvalid = "faultline: invalid Options.NetSim: invalid netsim config: MSS 32 out of range [64, 65535]"
 		swarmSet      = "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false" + roadmap
 	)
 	cases := []struct {
@@ -151,13 +154,18 @@ func TestValidateOptions(t *testing.T) {
 		{"negative StallTimeout", Options{StallTimeout: -1}, ""},
 		{"StallTimeout", Options{StallTimeout: time.Second}, ""},
 		{"FailOnLeak", Options{FailOnLeak: true}, ""},
-		// GOR-002 in ModeGoroutine: negative Procs, then negative Drain; any StallTimeout is valid.
+		{"invalid NetSim", Options{NetSim: netsim.Config{MSS: 32}}, ""},
+		// GOR-002 in ModeGoroutine: negative Procs, then negative Drain, then an invalid NetSim; any
+		// StallTimeout is valid.
 		{"goroutine mode: Procs and Drain set", Options{Mode: ModeGoroutine, Procs: 3, Drain: math.MaxInt64, StallTimeout: time.Second, FailOnLeak: true}, ""},
 		{"goroutine mode: negative StallTimeout", Options{Mode: ModeGoroutine, StallTimeout: -1}, ""},
 		{"goroutine mode: negative Procs", Options{Mode: ModeGoroutine, Procs: -1}, procsNegative},
 		{"goroutine mode: negative Drain", Options{Mode: ModeGoroutine, Drain: -1}, drainNegative},
 		{"goroutine mode: order: Procs before Drain", Options{Mode: ModeGoroutine, Procs: -1, Drain: -1, Swarm: true}, procsNegative},
 		{"goroutine mode: order: Drain before Swarm", Options{Mode: ModeGoroutine, Drain: -1, Swarm: true}, drainNegative},
+		{"goroutine mode: invalid NetSim", Options{Mode: ModeGoroutine, NetSim: netsim.Config{MSS: 32}}, netsimInvalid},
+		{"goroutine mode: order: Drain before NetSim", Options{Mode: ModeGoroutine, Drain: -1, NetSim: netsim.Config{MSS: 32}}, drainNegative},
+		{"goroutine mode: order: NetSim before Swarm", Options{Mode: ModeGoroutine, NetSim: netsim.Config{MSS: 32}, Swarm: true}, netsimInvalid},
 		// API-005: Swarm is the last option check.
 		{"Swarm", Options{Swarm: true}, swarmSet},
 		{"order: event-mode goroutine fields do not hide Swarm", Options{Procs: -1, Drain: -1, StallTimeout: 1, FailOnLeak: true, Swarm: true}, swarmSet},

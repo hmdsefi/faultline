@@ -16,6 +16,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel/fault"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
 	"github.com/hmdsefi/faultline/kernel/simnet"
+	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
 // phase is the attempt phase of API-032.
@@ -84,8 +85,9 @@ type World struct {
 	drove             bool
 	lastStop          kernel.StopReason
 	failedOutsideLoop bool
-	violationSeq      uint64  // Seq of the check.violation emitted by runInvariant (API-056)
-	drv               *driver // goroutine-mode driver (GOR-010); nil in event mode
+	violationSeq      uint64        // Seq of the check.violation emitted by runInvariant (API-056)
+	drv               *driver       // goroutine-mode driver (GOR-010); nil in event mode
+	stack             *netsim.Stack // goroutine-mode netsim stack (GOR-010); nil in event mode
 }
 
 // T returns the seed subtest. Use it for t.Fatalf on setup errors; prefer Invariant, Final

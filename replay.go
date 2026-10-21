@@ -270,7 +270,8 @@ func mustJSON(v any) json.RawMessage {
 }
 
 // hashedOptionsJSON returns the bytes that options_hash hashes for the effective options o
-// (API-082). Procs, Drain and FailOnLeak are hashed in goroutine mode only; StallTimeout never is.
+// (API-082). Procs, Drain, FailOnLeak and NetSim are hashed in goroutine mode only; StallTimeout
+// never is.
 func hashedOptionsJSON(o Options, scheduleHash string) []byte {
 	h := hashedOptions{
 		DurationNS:   int64(o.Duration),
@@ -284,6 +285,7 @@ func hashedOptionsJSON(o Options, scheduleHash string) []byte {
 	}
 	if o.Mode == ModeGoroutine {
 		h.Procs, h.DrainNS, h.FailOnLeak = o.Procs, int64(o.Drain), o.FailOnLeak
+		h.NetSim = mustJSON(o.NetSim)
 	}
 	return mustJSON(h)
 }
@@ -318,6 +320,7 @@ func runOptions(o Options, env *environment) artifact.RunOptions {
 	}
 	if o.Mode == ModeGoroutine { // zero in event mode, so omitted
 		ro.Procs, ro.DrainNS, ro.StallTimeoutNS, ro.FailOnLeak = o.Procs, int64(o.Drain), int64(o.StallTimeout), o.FailOnLeak
+		ro.NetSim = mustJSON(o.NetSim)
 	}
 	return ro
 }

@@ -238,8 +238,8 @@ func (d *driver) emitCancel(r *request, reason string) {
 		}})
 }
 
-// endRun is E1 of GOR-065: no live incarnations, cancelled contexts and requests, woken
-// WaitUnpaused waiters and an empty assert queue. Lock held.
+// endRun is E1 of GOR-065: no live incarnations, cancelled contexts, shut-down netsim hosts,
+// cancelled requests, woken WaitUnpaused waiters and an empty assert queue. Lock held.
 func (d *driver) endRun() {
 	d.ended = true
 	for _, np := range d.nodes {
@@ -250,6 +250,7 @@ func (d *driver) endRun() {
 			p.cancel(ErrRunEnded)
 		}
 	}
+	d.w.stack.Shutdown()
 	d.cancelAllRequests()
 	d.wakeAllWaiters()
 	d.ga.asserts.take() // discard the queue (GOR-085)

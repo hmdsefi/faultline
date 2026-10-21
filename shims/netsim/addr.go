@@ -5,7 +5,9 @@ package netsim
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
+	"strconv"
 
 	"github.com/hmdsefi/faultline/kernel"
 )
@@ -41,4 +43,40 @@ func AddrNode(a netip.Addr) (kernel.NodeID, bool) {
 func isLoopback(a netip.Addr) bool {
 	a = a.Unmap()
 	return a.Is4() && a.As4()[0] == 127
+}
+
+// Resolve returns the address of host: a node name, an IPv4 literal, "localhost", "" or "::1".
+// The loopback names and every 127.0.0.0/8 literal resolve to 127.0.0.1.
+func (h *Host) Resolve(host string) (netip.Addr, error) {
+	switch host {
+	case "", "localhost", "::1":
+		return loopback, nil
+	}
+	if a, err := netip.ParseAddr(host); err == nil {
+		if a.Is4() {
+			if isLoopback(a) {
+				return loopback, nil
+			}
+			return a, nil
+		}
+		return netip.Addr{}, &net.AddrError{Err: "IPv6 is not supported by netsim", Addr: host}
+	}
+	h.st.d.Lock()
+	n := h.st.s.Lookup(host)
+	h.st.d.Unlock()
+	if n != nil {
+		return NodeAddr(n.ID()), nil
+	}
+	return netip.Addr{}, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+// render prints a for net.udp.* and net.conn.* attributes: "<node name>:<port>" when AddrNode
+// finds an existing node, otherwise the address as is (NSM §8).
+func (st *Stack) render(a netip.AddrPort) string {
+	if id, ok := AddrNode(a.Addr()); ok {
+		if n := st.s.Node(id); n != nil {
+			return n.Name() + ":" + strconv.Itoa(int(a.Port()))
+		}
+	}
+	return a.String()
 }
