@@ -380,6 +380,14 @@ func txStack(t *testing.T, cfg Config, extra ...string) (*kernel.Sim, *simnet.Ne
 	return s, nw, st, st.cur(a.ID()), st.cur(b.ID())
 }
 
+// mute removes the simnet handlers of hosts, so that the segments a test sends arrive nowhere and
+// only the sending side runs.
+func mute(nw *simnet.Network, hosts ...*Host) {
+	for _, h := range hosts {
+		nw.Handle(h.n, nil)
+	}
+}
+
 // clientConn makes a connection from ha to hb:80 whose established client endpoint is in ha's
 // table at port 49152.
 func clientConn(st *Stack, ha, hb *Host) (*connection, *Conn) {
@@ -432,6 +440,7 @@ func sameLines(t *testing.T, what string, got, want []string) {
 // net.send_raw record follows its segment record.
 func TestAttemptOutcomes(t *testing.T) {
 	s, nw, st, ha, hb := txStack(t, Config{Loopback: 7 * time.Microsecond})
+	mute(nw, ha, hb)
 	c, _ := clientConn(st, ha, hb)
 	t0 := s.Now()
 	data := &segment{c: c, dir: c2s, kind: kData, seq: 3, data: []byte("abc")}

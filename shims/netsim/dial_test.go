@@ -192,14 +192,14 @@ func TestDialContextErrors(t *testing.T) {
 	}
 }
 
-// DialTimeout, Dialer.DialContext, tcp4, a loopback dial and the remaining address errors; the
-// dial and segment records name endpoints as NSM §8 renders them.
+// DialTimeout, Dialer.DialContext, tcp4, a loopback dial, a refused loopback dial and the remaining
+// address errors; the dial and segment records name endpoints as NSM §8 renders them.
 func TestDialVariantsAndRecords(t *testing.T) {
-	var res result[[6]timed]
+	var res result[[7]timed]
 	var rec records
 	world(t, netsim.Config{}, faultline.Options{Duration: time.Second}, func(w *faultline.World) {
 		w.AddProcess("a", func(ctx context.Context, p *faultline.Process) error {
-			var e [6]timed
+			var e [7]timed
 			_, err := p.Net.DialTimeout("tcp4", "b:80", 10*time.Millisecond)
 			e[0] = timed{at: vnow(), err: err}
 			c, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
@@ -209,14 +209,19 @@ func TestDialVariantsAndRecords(t *testing.T) {
 			if _, err := p.Net.Listen("tcp", ":81"); err != nil {
 				return err
 			}
-			_, err = p.Net.DialTimeout("tcp", "localhost:81", 5*time.Millisecond)
+			lc, err := p.Net.DialTimeout("tcp", "localhost:81", 5*time.Millisecond)
 			e[2] = timed{at: vnow(), err: err}
+			if err == nil {
+				e[2].s = lc.LocalAddr().String() + " " + lc.RemoteAddr().String()
+			}
 			_, err = p.Net.Dial("tcp", "b:0")
 			e[3] = timed{err: err}
 			_, err = p.Net.Dial("tcp6", "b:80")
 			e[4] = timed{err: err}
 			_, err = p.Net.Dial("tcp", "192.168.1.1:80")
 			e[5] = timed{err: err}
+			_, err = p.Net.Dial("tcp", "localhost:82")
+			e[6] = timed{at: vnow(), err: err}
 			res.put(e)
 			<-ctx.Done()
 			return nil
@@ -237,8 +242,8 @@ func TestDialVariantsAndRecords(t *testing.T) {
 	if e[1].at != 30*time.Millisecond || !errors.Is(e[1].err, context.DeadlineExceeded) || !op(e[1].err, "tcp", "10.0.0.2:80") {
 		t.Fatalf("Dialer.DialContext: %v at %v", e[1].err, e[1].at)
 	}
-	if e[2].at != 35*time.Millisecond || !errors.Is(e[2].err, os.ErrDeadlineExceeded) || !op(e[2].err, "tcp", "127.0.0.1:81") {
-		t.Fatalf("loopback DialTimeout: %v at %v", e[2].err, e[2].at)
+	if e[2].at != 30*time.Millisecond+20*time.Microsecond || e[2].err != nil || e[2].s != "127.0.0.1:49154 127.0.0.1:81" {
+		t.Fatalf("loopback DialTimeout: %v at %v, addresses %q", e[2].err, e[2].at, e[2].s)
 	}
 	var ae *net.AddrError
 	if !errors.As(e[3].err, &ae) || ae.Err != "invalid port" || ae.Addr != "b:0" || !op(e[3].err, "tcp", "10.0.0.2:0") {
@@ -252,6 +257,9 @@ func TestDialVariantsAndRecords(t *testing.T) {
 	if !errors.As(e[5].err, &se) || se.Syscall != "connect" || !errors.Is(e[5].err, syscall.EHOSTUNREACH) || !op(e[5].err, "tcp", "192.168.1.1:80") {
 		t.Fatalf("192.168.1.1:80: %v", e[5].err)
 	}
+	if e[6].at != 30*time.Millisecond+40*time.Microsecond || !errors.Is(e[6].err, syscall.ECONNREFUSED) || !op(e[6].err, "tcp", "127.0.0.1:82") {
+		t.Fatalf("refused loopback dial: %v at %v", e[6].err, e[6].at)
+	}
 	var dials []string
 	for _, r := range rec.kind("net.conn.dial") {
 		dials = append(dials, r.Text)
@@ -259,11 +267,11 @@ func TestDialVariantsAndRecords(t *testing.T) {
 			t.Fatalf("net.conn.dial %+v", r)
 		}
 	}
-	if want := []string{"dial c1 a:49152 -> b:80", "dial c2 a:49153 -> b:80", "dial c3 127.0.0.1:49154 -> 127.0.0.1:81"}; strings.Join(dials, ";") != strings.Join(want, ";") {
+	if want := []string{"dial c1 a:49152 -> b:80", "dial c2 a:49153 -> b:80", "dial c3 127.0.0.1:49154 -> 127.0.0.1:81", "dial c4 127.0.0.1:49155 -> 127.0.0.1:82"}; strings.Join(dials, ";") != strings.Join(want, ";") {
 		t.Fatalf("dials %q, want %q", dials, want)
 	}
 	for _, r := range rec.kind("net.conn.segment") {
-		if attr(r, "conn") == "c3" && (attr(r, "outcome") != "loopback" || attr(r, "delay_ns") != "10000" || r.Node != 1) {
+		if (attr(r, "conn") == "c3" || attr(r, "conn") == "c4") && (attr(r, "outcome") != "loopback" || attr(r, "delay_ns") != "10000" || r.Node != 1) {
 			t.Fatalf("loopback syn %+v", r)
 		}
 	}

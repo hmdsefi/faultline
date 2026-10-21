@@ -99,7 +99,7 @@ type direction struct {
 	buf      []byte
 	ooo      map[uint64]*segment // lookup only
 	oooBytes int
-	eof      bool //nolint:unused // byte-stream state, not wired up yet
+	eof      bool
 }
 
 func (d *direction) sender() *Conn   { return d.c.endpoint(d.dir) }
@@ -321,5 +321,169 @@ func (st *Stack) failDial(c *connection, err error, refused bool) {
 	if dr != nil {
 		dr.h.removeDial(dr)
 		dr.finish(nil, err)
+	}
+}
+
+// arrive dispatches a segment arriving at node id (handler, receiving node up).
+func (st *Stack) arrive(id kernel.NodeID, s *segment) {
+	switch s.kind {
+	case kSyn:
+		st.arriveSyn(id, s)
+	case kSynAck:
+		st.arriveSynAck(id, s)
+	case kData, kFin:
+		st.arriveData(id, s)
+	case kRst:
+		st.arriveRst(id, s)
+	}
+}
+
+// arriveSyn is NSM-023.
+func (st *Stack) arriveSyn(id kernel.NodeID, s *segment) {
+	c, h := s.c, st.cur(id)
+	if srv := c.srv; srv != nil && srv.state != stRemoved && srv.h == h {
+		st.emitArrive(id, s, "duplicate")
+		if srv.state == stSynRcvd {
+			st.sendUnreliable(c, s2c, kSynAck)
+		}
+		return
+	}
+	if cli := c.cli; !st.live(cli) || cli.state != stDialing { // a late copy: the dial ended or completed
+		st.emitArrive(id, s, "ignored")
+		return
+	}
+	var l *Listener
+	if h != nil && !h.gone {
+		l = h.listeners[c.srvPort]
+	}
+	if l == nil {
+		st.emitArrive(id, s, "refused")
+		st.sendUnreliable(c, s2c, kRst)
+		return
+	}
+	if l.synrcvd+len(l.queue) >= st.cfg.Backlog {
+		st.emitArrive(id, s, "backlog-full")
+		return
+	}
+	srv := newConn(c, 1, h, stSynRcvd, c.cli.remote, c.cli.local)
+	srv.lst = l
+	c.srv = srv
+	h.addEndpoint(srv)
+	l.synrcvd++
+	st.emitArrive(id, s, "synrcvd")
+	st.sendUnreliable(c, s2c, kSynAck)
+}
+
+// arriveSynAck is NSM-024.
+func (st *Stack) arriveSynAck(id kernel.NodeID, s *segment) {
+	c := s.c
+	cli := c.cli
+	switch {
+	case st.live(cli) && cli.state == stEstablished:
+		st.emitArrive(id, s, "duplicate")
+		return
+	case !st.live(cli) || cli.state != stDialing:
+		st.emitArrive(id, s, "no-conn")
+		st.sendUnreliable(c, c2s, kRst)
+		return
+	case c.dial != nil && c.dial.abandoned: // its net.dial_abort has not run yet
+		st.emitArrive(id, s, "no-conn")
+		st.failDial(c, errAbandoned, false)
+		st.sendUnreliable(c, c2s, kRst)
+		return
+	}
+	cli.state = stEstablished
+	d := c.dirs[c2s]
+	var syn *segment
+	if len(d.unacked) > 0 {
+		syn = d.unacked[0] // a dialing client has sent nothing but the syn
+	}
+	st.emitArrive(id, s, "established")
+	rtt := time.Duration(0)
+	if syn != nil {
+		rtt = st.s.Now().Sub(syn.first)
+		st.ack(d, syn)
+	}
+	st.emit(c.cliNode, "net.conn.established", "established "+c.id,
+		kernel.Attr{Key: "conn", Value: c.id}, kernel.Attr{Key: "rtt_ns", Value: strconv.FormatInt(int64(rtt), 10)})
+	if dr := c.dial; dr != nil {
+		c.dial = nil
+		dr.h.removeDial(dr)
+		dr.finish(cli, nil)
+	}
+	if srv := c.srv; srv != nil && srv.state == stSynRcvd && st.cur(c.srvNode) == srv.h {
+		srv.state = stEstablished
+		srv.lst.synrcvd--
+		srv.lst.enqueue(srv)
+		st.emit(c.srvNode, "net.conn.accept", "accept queue "+c.id,
+			kernel.Attr{Key: "conn", Value: c.id}, kernel.Attr{Key: "port", Value: strconv.Itoa(int(c.srvPort))})
+	}
+}
+
+// arriveData is NSM-027 (no live endpoint) and NSM-037 (live endpoint).
+func (st *Stack) arriveData(id kernel.NodeID, s *segment) {
+	c := s.c
+	ep := c.endpoint(1 - s.dir)
+	if !st.live(ep) {
+		st.emitArrive(id, s, "no-conn")
+		st.sendUnreliable(c, 1-s.dir, kRst)
+		return
+	}
+	d := c.dirs[s.dir]
+	st.ack(d, s)
+	if s.seq < d.rcvNext || d.ooo[s.seq] != nil {
+		st.emitArrive(id, s, "duplicate")
+		return
+	}
+	if ep.closed && s.kind == kData {
+		st.emitArrive(id, s, "closed")
+		st.sendUnreliable(c, 1-s.dir, kRst)
+		st.reset(ep, "abort")
+		return
+	}
+	if s.seq != d.rcvNext {
+		d.ooo[s.seq] = s
+		d.oooBytes += len(s.data)
+		st.emitArrive(id, s, "buffered")
+		return
+	}
+	st.deliver(ep, d, s)
+	for {
+		n := d.ooo[d.rcvNext]
+		if n == nil {
+			break
+		}
+		delete(d.ooo, n.seq)
+		d.oooBytes -= len(n.data)
+		st.deliver(ep, d, n)
+	}
+	ep.wake()
+	st.emitArrive(id, s, "in-order")
+}
+
+// deliver hands one in-order segment to the receiving endpoint (NSM-037).
+func (st *Stack) deliver(ep *Conn, d *direction, s *segment) {
+	d.rcvNext++
+	if s.kind == kFin {
+		d.eof = true
+		return
+	}
+	if !ep.rdShut {
+		d.buf = append(d.buf, s.data...)
+	}
+}
+
+// arriveRst is NSM-039.
+func (st *Stack) arriveRst(id kernel.NodeID, s *segment) {
+	ep := s.c.endpoint(1 - s.dir)
+	switch {
+	case st.live(ep) && ep.side == 0 && ep.state == stDialing:
+		st.emitArrive(id, s, "refused")
+		st.failDial(s.c, &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}, true)
+	case st.live(ep):
+		st.emitArrive(id, s, "reset")
+		st.reset(ep, "rst")
+	default:
+		st.emitArrive(id, s, "ignored")
 	}
 }

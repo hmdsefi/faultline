@@ -46,3 +46,12 @@ func (st *Stack) emitSegment(node kernel.NodeID, s *segment, outcome string, del
 		kernel.Attr{Key: "len", Value: strconv.Itoa(len(s.data))}, kernel.Attr{Key: "attempt", Value: strconv.Itoa(s.attempts)},
 		kernel.Attr{Key: "outcome", Value: outcome}, kernel.Attr{Key: "delay_ns", Value: strconv.FormatInt(int64(delay), 10)})
 }
+
+// emitArrive records net.conn.arrive for s on the receiving node (NSM §8).
+func (st *Stack) emitArrive(node kernel.NodeID, s *segment, result string) {
+	st.emit(node, "net.conn.arrive",
+		fmt.Sprintf("%s %s %s seq=%d: %s", s.c.id, dirNames[s.dir], kindNames[s.kind], s.seq, result),
+		kernel.Attr{Key: "conn", Value: s.c.id}, kernel.Attr{Key: "dir", Value: dirNames[s.dir]},
+		kernel.Attr{Key: "kind", Value: kindNames[s.kind]}, kernel.Attr{Key: "seq", Value: strconv.FormatUint(s.seq, 10)},
+		kernel.Attr{Key: "len", Value: strconv.Itoa(len(s.data))}, kernel.Attr{Key: "result", Value: result})
+}

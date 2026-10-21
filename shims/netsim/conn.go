@@ -56,7 +56,7 @@ type Conn struct {
 	state         epState
 	errno         error // error state: syscall.ECONNRESET, syscall.ETIMEDOUT, ErrProcessGone or net.ErrClosed
 	closed        bool  // Close called
-	rdShut        bool  //nolint:unused // CloseRead called; close state, not wired up yet
+	rdShut        bool  // CloseRead called
 	wrShut        bool  //nolint:unused // CloseWrite called; close state, not wired up yet
 	local         netip.AddrPort
 	remote        netip.AddrPort
