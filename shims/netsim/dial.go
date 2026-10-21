@@ -150,7 +150,7 @@ func (h *Host) dialTCP(ctx context.Context, network, address string, timeout tim
 	}
 	dr := &dialRecord{h: h, target: target, loop: loop, dst: dst, key: "dial:" + target.String(), done: make(chan struct{})}
 	h.dials = append(h.dials, dr)
-	st.d.Post(h.id, h.inc, "net.dial", dr.key, func() { st.startDial(dr) },
+	st.post(h, "net.dial", dr.key, func() { st.startDial(dr) },
 		func() { dr.h.removeDial(dr); dr.finish(nil, ErrProcessGone) })
 	st.d.Unlock()
 	var tc <-chan time.Time // step 4; a negative timeout has passed already, as in package net
@@ -170,7 +170,7 @@ func (h *Host) dialTCP(ctx context.Context, network, address string, timeout tim
 	st.d.Lock()
 	if cerr != nil && (!dr.finished || dr.err != nil) { // a dial that completed successfully wins
 		dr.abandoned = true
-		st.d.Post(h.id, h.inc, "net.dial_abort", dr.key, func() { st.abortDial(dr) }, func() {})
+		st.post(h, "net.dial_abort", dr.key, func() { st.abortDial(dr) }, func() {})
 		return nil, &net.OpError{Op: "dial", Net: network, Addr: taddr, Err: cerr}
 	}
 	if dr.err != nil {

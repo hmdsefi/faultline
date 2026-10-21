@@ -56,7 +56,8 @@ type Conn struct {
 	h             *Host
 	state         epState
 	errno         error // error state: syscall.ECONNRESET, syscall.ETIMEDOUT, ErrProcessGone or net.ErrClosed
-	closed        bool  // Close called
+	closed        bool  // Close called, or the process exited
+	exitClose     bool  // closed by Detach; Release runs its close
 	rdShut        bool  // CloseRead called
 	wrShut        bool  // CloseWrite called
 	local         netip.AddrPort
@@ -145,7 +146,7 @@ func (c *Conn) requestWindow(r *direction) {
 	}
 	c.windowPending = true
 	st := c.h.st
-	st.d.Post(c.h.id, c.h.inc, "net.window", c.reqKey(),
+	st.post(c.h, "net.window", c.reqKey(),
 		func() { c.windowPending = false; st.schedulePump(r) },
 		func() { c.windowPending = false })
 }
@@ -201,7 +202,7 @@ func (c *Conn) requestPump(d *direction) {
 	}
 	c.pumpPending = true
 	st := c.h.st
-	st.d.Post(c.h.id, c.h.inc, "net.pump", c.reqKey(),
+	st.post(c.h, "net.pump", c.reqKey(),
 		func() { c.pumpPending = false; st.pump(d) },
 		func() { c.pumpPending = false })
 }
@@ -221,12 +222,48 @@ func (c *Conn) CloseWrite() error {
 	c.wrShut = true
 	c.wake()
 	d, h, id := c.c.dirs[c.side], c.h, c.c.id
-	st.d.Post(h.id, h.inc, "net.shutdown", c.reqKey(), func() { // NSM-047: a fin after the queued data
+	st.post(h, "net.shutdown", c.reqKey(), func() { // NSM-047: a fin after the queued data
 		d.finPending = true
 		st.pump(d)
 		st.emitClose(h.id, id, "shutdown")
 	}, func() {})
 	return nil
+}
+
+// Close closes the connection without waiting. Bytes already written are still sent, followed by a
+// fin; if received bytes are left unread, the connection is reset instead. Later calls fail with
+// net.ErrClosed.
+func (c *Conn) Close() error {
+	st := c.h.st
+	st.d.Lock()
+	defer st.d.Unlock()
+	if c.closed {
+		return c.opErr("close", net.ErrClosed)
+	}
+	c.closed = true
+	c.wake()
+	st.post(c.h, "net.close", c.reqKey(), func() { st.closeRun(c) }, func() {})
+	return nil
+}
+
+// closeRun is the net.close request (NSM-045), also run directly by Release (NSM-061).
+func (st *Stack) closeRun(c *Conn) {
+	if !st.live(c) {
+		return
+	}
+	if r := c.c.dirs[1-c.side]; len(r.buf)+r.oooBytes > 0 { // unread data
+		st.sendUnreliable(c.c, c.side, kRst)
+		st.reset(c, "abort")
+		st.emitClose(c.h.id, c.c.id, "rst")
+		return
+	}
+	d := c.c.dirs[c.side]
+	d.finPending = true
+	st.pump(d)
+	st.emitClose(c.h.id, c.c.id, "fin")
+	if d.finSent && len(d.unacked) == 0 { // CloseWrite's fin was acknowledged already
+		st.removeEndpoint(c)
+	}
 }
 
 // CloseRead shuts down the receiving side. Unread bytes and later arrivals are discarded, and Read

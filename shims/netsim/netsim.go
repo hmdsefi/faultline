@@ -8,8 +8,11 @@ package netsim
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
@@ -193,6 +196,45 @@ type Host struct {
 	udps      map[uint16]*UDPConn  // bound UDP sockets by port; lookups only (NSM-011)
 	uports    []uint16             // the ports of udps, ascending
 	dials     []*dialRecord        // pending TCP dials, in posting order
+	reqs      []*request           // posted requests that have not run or been cancelled, in posting order
+
+	// Set by Detach for Release.
+	held   []*request  // the requests Detach took over, in (key, posting) order
+	exitLs []*Listener // the listeners Detach unbound, ascending port
+	exitUs []uint16    // the ports of the UDP sockets Detach closed, ascending
+}
+
+// request is a request that netsim posted for a host and that has neither run nor been cancelled
+// yet. A process exit carries it out (NSM-061).
+type request struct {
+	kind, key string
+	run       func()
+	taken     bool // Detach took it over: Release runs it, and the driver's run and cancel do nothing
+}
+
+// post posts a request of h's incarnation (GOR-030) and keeps it in h.reqs until it runs or is
+// cancelled. Lock held.
+func (st *Stack) post(h *Host, kind, key string, run, cancel func()) {
+	r := &request{kind: kind, key: key, run: run}
+	h.reqs = append(h.reqs, r)
+	st.d.Post(h.id, h.inc, kind, key, func() {
+		if !r.taken {
+			h.dropRequest(r)
+			run()
+		}
+	}, func() {
+		if !r.taken {
+			h.dropRequest(r)
+			cancel()
+		}
+	})
+}
+
+// dropRequest removes r from h.reqs. Lock held.
+func (h *Host) dropRequest(r *request) {
+	if i := slices.Index(h.reqs, r); i >= 0 {
+		h.reqs = slices.Delete(h.reqs, i, i+1)
+	}
 }
 
 // Host creates the Host of n's current incarnation and installs n's simnet handler. It runs on
@@ -232,17 +274,76 @@ func (st *Stack) handler(id kernel.NodeID) simnet.Handler {
 	}
 }
 
-// Release closes everything h owns, as for a process exit. It runs on the driver goroutine with
-// the lock held.
-func (st *Stack) Release(h *Host) {
+// Detach is the part of Release that may run on a process goroutine, when a process ends there by
+// returning an error, panicking or calling t.FailNow. It marks h gone and closes everything h owns
+// at once, as the Close methods do before they post their requests: listeners are unbound, open
+// endpoints marked closed, UDP sockets unbound, blocked calls woken, and pending dials fail with
+// ErrProcessGone. It also takes over h's pending requests other than dials. Detach emits no records
+// and makes no simnet calls; Release, called later on the driver goroutine, does that work. A second
+// call finds nothing left to do. Lock held.
+func (st *Stack) Detach(h *Host) {
+	h.gone = true
+	var dials []*request // a dial never starts after the exit; Detach fails its record below
+	for _, r := range h.reqs {
+		if r.kind == "net.dial" {
+			dials = append(dials, r)
+			continue
+		}
+		r.taken = true
+		h.held = append(h.held, r)
+	}
+	h.reqs = dials
+	slices.SortStableFunc(h.held, func(a, b *request) int { return strings.Compare(a.key, b.key) })
+	for _, port := range slices.Clone(h.lports) {
+		l := h.listeners[port]
+		st.unbindListener(l)
+		h.exitLs = append(h.exitLs, l)
+	}
+	for _, ep := range h.endpoints() {
+		if !ep.closed {
+			ep.closed, ep.exitClose = true, true
+			ep.wake()
+		}
+	}
+	for _, dr := range slices.Clone(h.dials) {
+		h.removeDial(dr)
+		dr.finish(nil, ErrProcessGone)
+	}
 	for _, port := range slices.Clone(h.uports) {
 		st.closeUDP(h.udps[port])
+		h.exitUs = append(h.exitUs, port)
+	}
+}
+
+// Release closes everything h owns, as for a process exit. It first carries out the requests that
+// h's process posted and that have not run, except dials, in the order the driver runs one key's
+// requests: bytes and datagrams written right before the exit are still sent, and a Close called
+// right before it takes effect. Then it closes h's listeners, endpoints and UDP sockets. It runs on
+// the driver goroutine with the lock held, while h's node is up.
+func (st *Stack) Release(h *Host) {
+	st.Detach(h) // nothing left to do if the driver detached h on a process goroutine
+	held := h.held
+	h.held = nil
+	for _, r := range held {
+		r.run()
+	}
+	for _, l := range h.exitLs {
+		st.unlistenRun(l, "exit", true)
+	}
+	for _, ep := range h.endpoints() {
+		switch {
+		case ep.state == stRemoved: // removed earlier in this walk
+		case ep.side == 0 && ep.state == stDialing:
+			st.failDial(ep.c, ErrProcessGone, false)
+		case ep.exitClose:
+			ep.exitClose = false
+			st.closeRun(ep) // as Conn.Close, run at once
+		}
+	}
+	for _, port := range h.exitUs {
 		st.emitUDPClose(h.id, port, "exit")
 	}
-	h.gone = true
-	for _, port := range h.lports { // a blocked Accept sees the host gone and returns net.ErrClosed
-		h.listeners[port].wake()
-	}
+	h.exitLs, h.exitUs = nil, nil
 }
 
 // Shutdown ends all network activity at the end of the run. It runs on the driver goroutine with
@@ -254,27 +355,90 @@ func (st *Stack) Shutdown() {
 		}
 		h := nn.host
 		h.gone = true
+		for _, ep := range h.endpoints() {
+			if ep.errno == nil {
+				ep.errno = net.ErrClosed
+			}
+			ep.wake()
+		}
+		for _, port := range slices.Clone(h.lports) {
+			st.unbindListener(h.listeners[port])
+		}
 		for _, port := range slices.Clone(h.uports) {
 			st.closeUDP(h.udps[port])
 		}
-		for _, port := range h.lports {
-			h.listeners[port].wake()
+		for _, dr := range slices.Clone(h.dials) {
+			h.removeDial(dr)
+			dr.finish(nil, ErrProcessGone)
 		}
 	}
 }
 
-// onCrash is the crash hook (NSM-060); it runs after the driver's (GOR-051).
+// onCrash is the crash hook (NSM-060). It runs after the driver's hook (GOR-051), lock held.
 func (st *Stack) onCrash(n *kernel.Node) {
-	h := st.cur(n.ID())
+	id := n.ID()
+	h := st.cur(id)
 	if h == nil {
 		return
 	}
-	h.gone = true
-	for _, port := range h.lports {
-		h.listeners[port].wake()
+	// 1. endpoints, ascending (connection ID, side)
+	for _, ep := range h.endpoints() {
+		switch {
+		case ep.state == stRemoved: // removed earlier in this walk
+		case ep.side == 0 && ep.state == stDialing:
+			st.failDial(ep.c, ErrProcessGone, false) // a pending dial of the node (NSM-025)
+		case ep.state == stSynRcvd:
+			// half-open: removed without a record and without notifying the dialing peer, which must
+			// never be reset (NSM-041); it retransmits syn and gets rst after a restart
+			ep.lst.synrcvd--
+			st.removeEndpoint(ep)
+		case ep.inAcceptQueue && ep.lst.h.listeners[ep.lst.port] == ep.lst:
+			// queued on a bound listener: step 2 resets it without notifying the peer
+		default:
+			st.notifyPeer(id, ep)
+			st.reset(ep, "crash")
+		}
 	}
-	for _, port := range slices.Clone(h.uports) { // step 3
+	for _, dr := range slices.Clone(h.dials) { // dials whose net.dial request has not run
+		h.removeDial(dr)
+		dr.finish(nil, ErrProcessGone)
+	}
+	// 2. listeners, ascending port
+	for _, port := range slices.Clone(h.lports) {
+		l := h.listeners[port]
+		st.unbindListener(l)
+		st.unlistenRun(l, "crash", false)
+	}
+	// 3. UDP sockets, ascending port
+	for _, port := range slices.Clone(h.uports) {
 		st.closeUDP(h.udps[port])
-		st.emitUDPClose(h.id, port, "crash")
+		st.emitUDPClose(id, port, "crash")
 	}
+	h.gone = true
+}
+
+// notifyPeer schedules the crash notification of ep's peer on another, connected node (NSM-060).
+func (st *Stack) notifyPeer(crashed kernel.NodeID, ep *Conn) {
+	peer := ep.c.endpoint(1 - ep.side)
+	if peer == nil || peer.h.id == crashed || !st.nw.Connected(crashed, peer.h.id) {
+		return
+	}
+	lat := st.nw.Link(crashed, peer.h.id).Latency
+	st.s.At(st.s.Now().Add(lat), "net.rst", func() { st.peerCrashed(peer) })
+	name := peer.h.n.Name()
+	st.emit(crashed, "net.conn.rst", "crash rst "+ep.c.id+" -> "+name,
+		kernel.Attr{Key: "conn", Value: ep.c.id}, kernel.Attr{Key: "peer", Value: name},
+		kernel.Attr{Key: "delay_ns", Value: strconv.FormatInt(int64(lat), 10)})
+}
+
+// peerCrashed resets p if it is still live; on a paused node it is deferred to resume.
+func (st *Stack) peerCrashed(p *Conn) {
+	if !st.live(p) {
+		return
+	}
+	if n := st.s.Node(p.h.id); n.State() == kernel.NodePaused {
+		n.Post("net.rst", func() { st.peerCrashed(p) })
+		return
+	}
+	st.reset(p, "peer-crashed")
 }

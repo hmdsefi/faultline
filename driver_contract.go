@@ -111,8 +111,9 @@ func (d *driver) signal() {
 }
 
 // drain numbers the queued requests in (node, key, arrival) order and schedules them on their
-// nodes (GOR-031). Lock held.
+// nodes (GOR-031). It first releases the netsim hosts detached since the last drain. Lock held.
 func (d *driver) drain() {
+	d.releaseDetached()
 	q := d.queue
 	d.queue = nil
 	select {
@@ -144,6 +145,22 @@ func (d *driver) drain() {
 		np := d.node(r.node)
 		np.pending = append(np.pending, r)
 		d.postNext(r.node, np)
+	}
+}
+
+// releaseDetached releases, in ascending node ID, the netsim hosts that endIncarnation detached on
+// a process goroutine (NSM-061). A paused node's release waits for its resume, as its requests do:
+// simnet sends nothing from a paused node. Driver goroutine, lock held.
+func (d *driver) releaseDetached() {
+	ps := d.detached
+	d.detached = nil
+	slices.SortStableFunc(ps, func(a, b *Process) int { return cmp.Compare(a.Node.ID(), b.Node.ID()) })
+	for _, p := range ps {
+		if p.Node.State() == kernel.NodeUp {
+			d.w.stack.Release(p.Net)
+			continue
+		}
+		p.Node.Post("process.release", func() { d.w.stack.Release(p.Net) })
 	}
 }
 
