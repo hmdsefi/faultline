@@ -500,6 +500,7 @@ func (st *Stack) pump(d *direction) {
 		return
 	}
 	d.windowFull = false
+	q := d.queued // segments copy their bytes, so a drained queue can keep its array for the next Write
 	for len(d.queued) > 0 {
 		n := min(st.cfg.MSS, len(d.queued))
 		if d.inflight+len(d.buf)+d.oooBytes+n > st.cfg.RecvBuffer { // receiver window
@@ -511,6 +512,9 @@ func (st *Stack) pump(d *direction) {
 		d.queued = d.queued[n:]
 		d.inflight += n
 		st.transmit(s)
+	}
+	if len(d.queued) == 0 {
+		d.queued = q[:0]
 	}
 	if d.finPending && !d.finSent && len(d.queued) == 0 {
 		d.finSent = true

@@ -196,7 +196,8 @@ type Host struct {
 	udps      map[uint16]*UDPConn  // bound UDP sockets by port; lookups only (NSM-011)
 	uports    []uint16             // the ports of udps, ascending
 	dials     []*dialRecord        // pending TCP dials, in posting order
-	reqs      []*request           // posted requests that have not run or been cancelled, in posting order
+	reqs      []*request           // posted requests in posting order; finished ones leave lazily (dropRequest)
+	finished  int                  // the requests in reqs that ran or were cancelled
 
 	// Set by Detach for Release.
 	held   []*request  // the requests Detach took over, in (key, posting) order
@@ -204,15 +205,16 @@ type Host struct {
 	exitUs []uint16    // the ports of the UDP sockets Detach closed, ascending
 }
 
-// request is a request that netsim posted for a host and that has neither run nor been cancelled
-// yet. A process exit carries it out (NSM-061).
+// request is a request that netsim posted for a host; done marks one that ran or was cancelled. A
+// process exit carries out the ones that are not done (NSM-061).
 type request struct {
 	kind, key string
 	run       func()
 	taken     bool // Detach took it over: Release runs it, and the driver's run and cancel do nothing
+	done      bool // it ran or was cancelled; it may still be in h.reqs
 }
 
-// post posts a request of h's incarnation (GOR-030) and keeps it in h.reqs until it runs or is
+// post posts a request of h's incarnation (GOR-030) and tracks it in h.reqs until it runs or is
 // cancelled. Lock held.
 func (st *Stack) post(h *Host, kind, key string, run, cancel func()) {
 	r := &request{kind: kind, key: key, run: run}
@@ -230,10 +232,18 @@ func (st *Stack) post(h *Host, kind, key string, run, cancel func()) {
 	})
 }
 
-// dropRequest removes r from h.reqs. Lock held.
+// dropRequest marks r finished. Finished requests stay in h.reqs until more than half of it is
+// finished; one pass then removes them all and keeps posting order. Each request is removed once
+// that way, so n requests cost O(n) in any order the driver runs them in. Lock held.
 func (h *Host) dropRequest(r *request) {
-	if i := slices.Index(h.reqs, r); i >= 0 {
-		h.reqs = slices.Delete(h.reqs, i, i+1)
+	if r.done {
+		return
+	}
+	r.done = true
+	h.finished++
+	if h.finished > len(h.reqs)/2 {
+		h.reqs = slices.DeleteFunc(h.reqs, func(q *request) bool { return q.done })
+		h.finished = 0
 	}
 }
 
@@ -285,14 +295,16 @@ func (st *Stack) Detach(h *Host) {
 	h.gone = true
 	var dials []*request // a dial never starts after the exit; Detach fails its record below
 	for _, r := range h.reqs {
-		if r.kind == "net.dial" {
+		switch {
+		case r.done: // finished, not yet removed
+		case r.kind == "net.dial":
 			dials = append(dials, r)
-			continue
+		default:
+			r.taken = true
+			h.held = append(h.held, r)
 		}
-		r.taken = true
-		h.held = append(h.held, r)
 	}
-	h.reqs = dials
+	h.reqs, h.finished = dials, 0
 	slices.SortStableFunc(h.held, func(a, b *request) int { return strings.Compare(a.key, b.key) })
 	for _, port := range slices.Clone(h.lports) {
 		l := h.listeners[port]
