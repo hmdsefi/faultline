@@ -55,3 +55,9 @@ func (st *Stack) emitArrive(node kernel.NodeID, s *segment, result string) {
 		kernel.Attr{Key: "kind", Value: kindNames[s.kind]}, kernel.Attr{Key: "seq", Value: strconv.FormatUint(s.seq, 10)},
 		kernel.Attr{Key: "len", Value: strconv.Itoa(len(s.data))}, kernel.Attr{Key: "result", Value: result})
 }
+
+// emitClose records net.conn.close on the closing node (NSM §8).
+func (st *Stack) emitClose(node kernel.NodeID, conn, mode string) {
+	st.emit(node, "net.conn.close", "close "+conn+": "+mode,
+		kernel.Attr{Key: "conn", Value: conn}, kernel.Attr{Key: "mode", Value: mode})
+}

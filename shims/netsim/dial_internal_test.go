@@ -181,6 +181,8 @@ type postDriver struct {
 }
 
 type posted struct {
+	node        kernel.NodeID
+	inc         uint32
 	kind, key   string
 	run, cancel func()
 }
@@ -189,8 +191,8 @@ func (d *postDriver) Lock()                          { d.mu.Lock() }
 func (d *postDriver) Unlock()                        { d.mu.Unlock() }
 func (*postDriver) Alive(kernel.NodeID, uint32) bool { return true }
 func (*postDriver) OnDriver() bool                   { return false }
-func (d *postDriver) Post(_ kernel.NodeID, _ uint32, kind, key string, run, cancel func()) {
-	d.posts = append(d.posts, posted{kind: kind, key: key, run: run, cancel: cancel})
+func (d *postDriver) Post(node kernel.NodeID, inc uint32, kind, key string, run, cancel func()) {
+	d.posts = append(d.posts, posted{node: node, inc: inc, kind: kind, key: key, run: run, cancel: cancel})
 }
 
 // dialTCP waits for the dial, the context or the Dialer timeout, and maps each outcome.
