@@ -8,6 +8,7 @@ package netsim
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
@@ -117,4 +118,126 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid netsim config: UDPRecvBuffer %d is smaller than 65507", c.UDPRecvBuffer)
 	}
 	return nil
+}
+
+// Stack is the netsim state of one world.
+type Stack struct {
+	s     *kernel.Sim
+	nw    *simnet.Network
+	d     Driver
+	cfg   Config     // defaults applied
+	nodes []*nodeNet // indexed by kernel.NodeID
+}
+
+// nodeNet is per-node state that outlives incarnations.
+type nodeNet struct {
+	host   *Host  // the current incarnation's host; nil before the first boot as a process
+	ever   bool   // the node has had a netsim host (NSM-022)
+	tcpCtr uint64 // NSM-016 ephemeral-port counters
+	udpCtr uint64
+}
+
+// New creates the Stack of s and nw and registers its crash hook with s.OnCrash. It panics if
+// s, nw or d is nil or if cfg is invalid.
+func New(s *kernel.Sim, nw *simnet.Network, d Driver, cfg Config) *Stack {
+	switch {
+	case s == nil:
+		panic("netsim: New: nil *kernel.Sim")
+	case nw == nil:
+		panic("netsim: New: nil *simnet.Network")
+	case d == nil:
+		panic("netsim: New: nil Driver")
+	}
+	if err := cfg.Validate(); err != nil {
+		panic("netsim: New: invalid Config: " + err.Error())
+	}
+	st := &Stack{s: s, nw: nw, d: d, cfg: cfg.withDefaults()}
+	s.OnCrash(st.onCrash)
+	return st
+}
+
+func (st *Stack) node(id kernel.NodeID) *nodeNet {
+	for int(id) >= len(st.nodes) {
+		st.nodes = append(st.nodes, nil)
+	}
+	if st.nodes[id] == nil {
+		st.nodes[id] = &nodeNet{}
+	}
+	return st.nodes[id]
+}
+
+// cur returns node id's current host, or nil.
+func (st *Stack) cur(id kernel.NodeID) *Host {
+	if int(id) >= len(st.nodes) || st.nodes[id] == nil {
+		return nil
+	}
+	return st.nodes[id].host
+}
+
+// Host is the network interface of one process incarnation. Its methods are safe for concurrent
+// use from process goroutines and must not be called from kernel callbacks.
+type Host struct {
+	st   *Stack
+	n    *kernel.Node
+	id   kernel.NodeID
+	inc  uint32
+	addr netip.Addr
+	gone bool // released, crashed or shut down
+}
+
+// Host creates the Host of n's current incarnation and installs n's simnet handler. It runs on
+// the driver goroutine with the lock held.
+func (st *Stack) Host(n *kernel.Node) *Host {
+	h := &Host{st: st, n: n, id: n.ID(), inc: n.Incarnation(), addr: NodeAddr(n.ID())}
+	nn := st.node(n.ID())
+	nn.host, nn.ever = h, true
+	st.nw.Handle(n, st.handler(n.ID()))
+	return h
+}
+
+// Name returns the name of h's node.
+func (h *Host) Name() string { return h.n.Name() }
+
+// Addr returns the address of h's node: 10.0.0.0 plus the node ID.
+func (h *Host) Addr() netip.Addr { return h.addr }
+
+// Incarnation returns the incarnation of the process that h belongs to.
+func (h *Host) Incarnation() uint32 { return h.inc }
+
+// alive is NSM-004's ghost check. Lock held.
+func (h *Host) alive() bool { return !h.gone && h.st.d.Alive(h.id, h.inc) }
+
+// handler demultiplexes simnet payloads for node id by type (NSM-010).
+func (st *Stack) handler(id kernel.NodeID) simnet.Handler {
+	return func(from kernel.NodeID, payload any) {
+		switch payload.(type) { //nolint:gocritic // singleCaseSwitch: each netsim payload type gets a case here
+		default:
+			st.emit(id, "net.udp.drop", "udp drop "+st.s.Node(from).Name()+" -> "+st.s.Node(id).Name()+": foreign",
+				kernel.Attr{Key: "src", Value: st.s.Node(from).Name()},
+				kernel.Attr{Key: "dst", Value: st.s.Node(id).Name()},
+				kernel.Attr{Key: "len", Value: "0"},
+				kernel.Attr{Key: "reason", Value: "foreign"})
+		}
+	}
+}
+
+// Release closes everything h owns, as for a process exit. It runs on the driver goroutine with
+// the lock held.
+func (st *Stack) Release(h *Host) { h.gone = true }
+
+// Shutdown ends all network activity at the end of the run. It runs on the driver goroutine with
+// the lock held, emits no records and makes no simnet calls.
+func (st *Stack) Shutdown() {
+	for _, nn := range st.nodes {
+		if nn != nil && nn.host != nil {
+			nn.host.gone = true
+		}
+	}
+}
+
+// onCrash is the crash hook (NSM-060); it runs after the driver's (GOR-051).
+func (st *Stack) onCrash(n *kernel.Node) {
+	if h := st.cur(n.ID()); h != nil {
+		h.gone = true
+	}
 }

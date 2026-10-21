@@ -11,6 +11,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
 	"github.com/hmdsefi/faultline/kernel/simnet"
+	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
 // Mode selects how code under test runs.
@@ -75,8 +76,8 @@ type Options struct {
 	MaxEvents uint64
 
 	// Mode selects how code under test runs: ModeEvent, the zero value, or ModeGoroutine.
-	// Procs, Drain, StallTimeout and FailOnLeak apply to ModeGoroutine only; ModeEvent ignores
-	// them.
+	// Procs, Drain, StallTimeout, FailOnLeak and NetSim apply to ModeGoroutine only; ModeEvent
+	// ignores them.
 	Mode Mode
 
 	// Net configures the simulated network. The zero value means simnet.DefaultConfig(), so a
@@ -126,6 +127,9 @@ type Options struct {
 	// Without it, Run logs the leak report and the seed's outcome does not change.
 	FailOnLeak bool
 
+	// NetSim configures shims/netsim. The zero value means netsim.DefaultConfig().
+	NetSim netsim.Config
+
 	// Swarm is reserved for swarm testing, where each seed also picks which fault kinds are on.
 	// Run rejects true with a setup error.
 	Swarm bool
@@ -152,6 +156,9 @@ func applyDefaults(o Options) Options {
 		}
 		if o.StallTimeout == 0 {
 			o.StallTimeout = DefaultStallTimeout
+		}
+		if o.NetSim == (netsim.Config{}) {
+			o.NetSim = netsim.DefaultConfig()
 		}
 	}
 	return o
@@ -180,6 +187,9 @@ func validateOptions(o Options) error {
 		}
 		if o.Drain < 0 {
 			return fmt.Errorf("faultline: Options.Drain is negative: %v", o.Drain)
+		}
+		if err := o.NetSim.Validate(); err != nil {
+			return fmt.Errorf("faultline: invalid Options.NetSim: %v", err)
 		}
 	}
 	later := []struct {

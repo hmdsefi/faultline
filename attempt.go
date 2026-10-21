@@ -19,6 +19,7 @@ import (
 	"github.com/hmdsefi/faultline/kernel/fault"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
 	"github.com/hmdsefi/faultline/kernel/simnet"
+	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
 // runner is the state of one Run call.
@@ -218,7 +219,8 @@ func (r *runner) newWorld(st *testing.T, seed uint64, traceCfg kernel.TraceConfi
 	w.History = history.NewRecorder(sim)
 	sim.OnEvent(w.afterEvent)
 	if ga != nil {
-		w.drv = newDriver(w, ga) // GOR-010
+		w.drv = newDriver(w, ga)                       // GOR-010
+		w.stack = netsim.New(sim, nw, w.drv, o.NetSim) // GOR-010 step 2
 	}
 	kv := []string{"phase", "setup", "seed", fmt.Sprintf("0x%016x", seed), "duration_ns", strconv.FormatInt(int64(o.Duration), 10), "max_events", itoa(o.MaxEvents), "mode", o.Mode.String()}
 	if sched != nil {

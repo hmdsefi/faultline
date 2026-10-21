@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
 // Errors that end a process. Each one is the context.Cause of the process's context, and
@@ -45,16 +46,19 @@ func (e *ProcessError) Error() string {
 // Unwrap returns Err.
 func (e *ProcessError) Unwrap() error { return e.Err }
 
-// ProcessFunc is the main function of a process. It runs once per incarnation, on its own
-// goroutine, and should return when ctx is done. Returning nil ends the process and leaves its
-// node up. Returning an error or panicking fails the run, unless the incarnation already ended.
-// t.FailNow and t.Fatal stop the run, as they do in the function passed to Run. Calling
-// runtime.Goexit without failing the test is the same as returning nil.
+// ProcessFunc is the main function of a process. It must reach the world only through p.Net,
+// p.Rand, p.Clock, p.Do and p.Logf (p.Do is the only way to call kernel, World, history and fault
+// APIs). It runs once per incarnation, on its own goroutine, and should return when ctx is done.
+// Returning nil ends the process and leaves its node up. Returning an error or panicking fails
+// the run, unless the incarnation already ended. t.FailNow and t.Fatal stop the run, as they do
+// in the function passed to Run. Calling runtime.Goexit without failing the test is the same as
+// returning nil.
 type ProcessFunc func(ctx context.Context, p *Process) error
 
 // Process is one incarnation of a process node. A new Process is created at every boot.
 type Process struct {
 	Node *kernel.Node // only ID and Name may be called from process goroutines; use Rand, not Node.Rand
+	Net  *netsim.Host // bound to this incarnation
 
 	d      *driver
 	inc    uint32
@@ -115,11 +119,11 @@ func (p *Process) Incarnation() uint32 { return p.inc }
 
 // Do runs fn on the driver goroutine as one node-bound kernel event at the current virtual time,
 // and returns after fn returns. If the node is paused, fn runs when it resumes, and Do waits until
-// then. fn may call kernel, World, history and fault APIs; it must not block. Do returns
-// ErrCrashed, ErrExited or ErrRunEnded without running fn if this incarnation is no longer alive
-// when Do is called or before fn starts. A panic in fn fails the run, and Do returns nil. Calling
-// Do from body, a check or a kernel callback panics; call fn directly there. Concurrent Do calls
-// from one node run in byte order of their labels (equal labels: arrival order).
+// then. fn may call kernel, World, history and fault APIs; it must not block or call shims. Do
+// returns ErrCrashed, ErrExited or ErrRunEnded without running fn if this incarnation is no longer
+// alive when Do is called or before fn starts. A panic in fn fails the run, and Do returns nil.
+// Calling Do from body, a check or a kernel callback panics; call fn directly there. Concurrent
+// Do calls from one node run in byte order of their labels (equal labels: arrival order).
 func (p *Process) Do(label string, fn func()) error {
 	d := p.d
 	if d.OnDriver() {
@@ -305,7 +309,8 @@ func (d *driver) processBoot(main ProcessFunc) kernel.BootFunc {
 		p := &Process{Node: n, d: d, inc: inc, status: incRunning} // step 1
 		np := d.node(id)
 		np.procs = append(np.procs, p)
-		// Steps 2 (the netsim host) and 3 (the fsx file system) go here, with the shims.
+		p.Net = d.w.stack.Host(n) // step 2: the netsim host
+		// Step 3 (the fsx file system) goes here, with the fsx shim.
 		// Step 4: the node's seeded stream, safe for concurrent use.
 		p.rnd = rand.New(&lockedSource{src: n.Rand()}) //nolint:gosec // seeded on purpose: a deterministic simulator needs reproducible streams
 		// Step 5: the clock state of GOR-055.
@@ -426,11 +431,12 @@ func (d *driver) ghostPanic(p *Process, v any) {
 }
 
 // endIncarnation performs GOR-048's steps after its record: the status, the end time, the
-// context, the scheduled requests and the WaitUnpaused waiters.
+// context, the netsim host, the scheduled requests and the WaitUnpaused waiters.
 func (d *driver) endIncarnation(p *Process, status incStatus, cause error, reason string) {
 	p.status = status
 	p.endAt = d.w.Sim.Now()
 	p.cancel(cause)
+	d.w.stack.Release(p.Net)
 	d.cancelScheduled(p.Node.ID(), reason)
 	d.wakeWaiters(p.Node.ID())
 }
