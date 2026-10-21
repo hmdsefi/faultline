@@ -41,6 +41,7 @@ var inventory = []struct {
 	{"1.4", []string{"artifact"}},
 	{"1.4", []string{"cmd/faultline"}},
 	{"1.4", []string{""}},
+	{"2.2", []string{"shims/netsim"}},
 }
 
 // TestPackageInventory pins the package directories that exist in this phase.
