@@ -137,11 +137,11 @@ func (r *result[T]) get(t *testing.T) T {
 }
 
 // timed is a value with the virtual time it was observed at.
-type timed struct { //nolint:unused // used by the tests that check when a call returned
-	at  time.Duration
+type timed struct {
+	at  time.Duration //nolint:unused // used by the tests that check when a call returned
 	n   int
 	err error
-	s   string
+	s   string //nolint:unused // used by the tests that check data read
 }
 
 // wait returns a process main that blocks until the run ends.
