@@ -55,12 +55,12 @@ type Conn struct {
 	h             *Host
 	state         epState
 	errno         error // error state: syscall.ECONNRESET, syscall.ETIMEDOUT, ErrProcessGone or net.ErrClosed
-	closed        bool  //nolint:unused // Close called; close state, not wired up yet
+	closed        bool  // Close called
 	rdShut        bool  //nolint:unused // CloseRead called; close state, not wired up yet
 	wrShut        bool  //nolint:unused // CloseWrite called; close state, not wired up yet
 	local         netip.AddrPort
 	remote        netip.AddrPort
-	lst           *Listener //nolint:unused // server endpoints; handshake state, not wired up yet
+	lst           *Listener // server endpoints
 	inAcceptQueue bool
 	pumpPending   bool //nolint:unused // byte-stream state, not wired up yet
 	windowPending bool //nolint:unused // byte-stream state, not wired up yet

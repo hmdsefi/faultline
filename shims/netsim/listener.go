@@ -21,7 +21,7 @@ type Listener struct {
 	port    uint16
 	addr    netip.AddrPort // reported Addr (NSM-018)
 	closed  bool
-	synrcvd int     //nolint:unused // half-open count, not wired up yet
+	synrcvd int     // half-open endpoints
 	queue   []*Conn // accept queue, FIFO
 	notify  chan struct{}
 	dl      time.Time

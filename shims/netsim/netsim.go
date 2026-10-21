@@ -192,6 +192,7 @@ type Host struct {
 	eks       []int                // the keys of eps, ascending
 	udps      map[uint16]*UDPConn  // bound UDP sockets by port; lookups only (NSM-011)
 	uports    []uint16             // the ports of udps, ascending
+	dials     []*dialRecord        // pending TCP dials, in posting order
 }
 
 // Host creates the Host of n's current incarnation and installs n's simnet handler. It runs on

@@ -4,8 +4,10 @@
 package netsim
 
 import (
+	"fmt"
 	"net/netip"
 	"strconv"
+	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
 )
@@ -33,4 +35,14 @@ func (st *Stack) emitUDPClose(node kernel.NodeID, port uint16, reason string) {
 	p := strconv.Itoa(int(port))
 	st.emit(node, "net.udp.close", "udp close :"+p+": "+reason,
 		kernel.Attr{Key: "port", Value: p}, kernel.Attr{Key: "reason", Value: reason})
+}
+
+// emitSegment records net.conn.segment for one attempt of s on the sender node (NSM §8).
+func (st *Stack) emitSegment(node kernel.NodeID, s *segment, outcome string, delay time.Duration) {
+	st.emit(node, "net.conn.segment",
+		fmt.Sprintf("%s %s %s seq=%d len=%d attempt=%d: %s", s.c.id, dirNames[s.dir], kindNames[s.kind], s.seq, len(s.data), s.attempts, outcome),
+		kernel.Attr{Key: "conn", Value: s.c.id}, kernel.Attr{Key: "dir", Value: dirNames[s.dir]},
+		kernel.Attr{Key: "kind", Value: kindNames[s.kind]}, kernel.Attr{Key: "seq", Value: strconv.FormatUint(s.seq, 10)},
+		kernel.Attr{Key: "len", Value: strconv.Itoa(len(s.data))}, kernel.Attr{Key: "attempt", Value: strconv.Itoa(s.attempts)},
+		kernel.Attr{Key: "outcome", Value: outcome}, kernel.Attr{Key: "delay_ns", Value: strconv.FormatInt(int64(delay), 10)})
 }

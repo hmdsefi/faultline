@@ -42,7 +42,7 @@ func world(t *testing.T, cfg netsim.Config, opts faultline.Options, body func(w 
 }
 
 // vnow is the virtual time of the calling process goroutine (processes start at t=0).
-func vnow() time.Duration { return time.Since(kernel.Epoch) } //nolint:unused // used by the tests that check virtual times
+func vnow() time.Duration { return time.Since(kernel.Epoch) }
 
 // records collects the records of the last attempt that reached its final checks.
 type records struct {
@@ -138,7 +138,7 @@ func (r *result[T]) get(t *testing.T) T {
 
 // timed is a value with the virtual time it was observed at.
 type timed struct {
-	at  time.Duration //nolint:unused // used by the tests that check when a call returned
+	at  time.Duration
 	n   int
 	err error
 	s   string //nolint:unused // used by the tests that check data read
