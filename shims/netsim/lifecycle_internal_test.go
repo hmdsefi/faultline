@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -222,6 +223,89 @@ func TestDetachAndRelease(t *testing.T) {
 	at(s, func() { st.Release(ha) })
 	if got := texts(s, t1, lifecycleKinds...); len(got) != 0 {
 		t.Fatalf("a second Release recorded %q", got)
+	}
+}
+
+// A host tracks the requests that have neither run nor been cancelled in posting order, whatever
+// order the driver finishes the others in: Detach takes over exactly the unfinished ones, Release
+// runs each of them once, and the list stays short when only the oldest request is left. The
+// host's finished count always equals the finished requests still in its list, so a compaction
+// starts the count again and the list is compacted once per halving, not on every drop.
+func TestRequestTracking(t *testing.T) {
+	s := kernel.New(kernel.Config{Seed: 1})
+	d := &postDriver{}
+	st := New(s, simnet.New(s, simnet.DefaultConfig()), d, Config{})
+	boot := func(n *kernel.Node) { st.Host(n) }
+	a := s.AddNode("a", boot)
+	b := s.AddNode("b", boot)
+	s.RunFor(time.Millisecond)
+	counted := func(phase string, h *Host) {
+		t.Helper()
+		done := 0
+		for _, r := range h.reqs {
+			if r.done {
+				done++
+			}
+		}
+		if h.finished != done {
+			t.Fatalf("%s: finished count %d, %d of %d tracked requests are done", phase, h.finished, done, len(h.reqs))
+		}
+	}
+
+	ha := st.cur(a.ID())
+	const n = 12
+	ran := make([]int, n)
+	for i := range n {
+		st.post(ha, fmt.Sprintf("k%d", i), fmt.Sprintf("udp:%d", i%3), func() { ran[i]++ }, func() { ran[i] += 100 })
+	}
+	for _, i := range []int{5, 1, 4, 0} {
+		d.posts[i].run()
+	}
+	for _, i := range []int{10, 7} {
+		d.posts[i].cancel()
+	}
+	counted("before Detach", ha)
+	st.Detach(ha)
+	counted("after Detach", ha)
+	var held []string
+	for _, r := range ha.held {
+		held = append(held, r.kind+" "+r.key)
+	}
+	sameLines(t, "held", held, []string{"k3 udp:0", "k6 udp:0", "k9 udp:0", "k2 udp:2", "k8 udp:2", "k11 udp:2"})
+	if len(ha.reqs) != 0 {
+		t.Fatalf("%d requests left with the host", len(ha.reqs))
+	}
+	d.posts[3].run()
+	d.posts[6].cancel()
+	st.Release(ha)
+	counted("after Release", ha)
+	if want := []int{1, 1, 1, 1, 1, 1, 1, 100, 1, 1, 100, 1}; !slices.Equal(ran, want) {
+		t.Fatalf("runs and cancels %v, want %v", ran, want)
+	}
+
+	hb := st.cur(b.ID())
+	first := len(d.posts)
+	const m = 1000
+	for range m {
+		st.post(hb, "net.udp.send", "udp:9", func() {}, func() {})
+	}
+	for i := first + m - 1; i > first; i-- {
+		d.posts[i].run()
+		if i == first+m/2-1 { // the 501st finished request is more than half: one compaction
+			counted("after the first compaction", hb)
+			if len(hb.reqs) != m/2-1 {
+				t.Fatalf("%d requests tracked after the first compaction, want %d", len(hb.reqs), m/2-1)
+			}
+		}
+	}
+	counted("with only the oldest unfinished", hb)
+	if len(hb.reqs) > 3 || hb.reqs[0].done || slices.IndexFunc(hb.reqs[1:], func(r *request) bool { return !r.done }) >= 0 {
+		t.Fatalf("%d requests tracked with only the oldest unfinished", len(hb.reqs))
+	}
+	d.posts[first].run()
+	counted("after all finished", hb)
+	if len(hb.reqs) != 0 {
+		t.Fatalf("%d requests tracked after all finished", len(hb.reqs))
 	}
 }
 

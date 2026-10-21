@@ -123,7 +123,11 @@ func (c *Conn) Read(b []byte) (int, error) {
 			return 0, io.EOF
 		case len(r.buf) > 0:
 			n := copy(b, r.buf)
-			r.buf = r.buf[n:]
+			if n == len(r.buf) {
+				r.buf = r.buf[:0] // keep the array for the next arrival
+			} else {
+				r.buf = r.buf[n:]
+			}
 			c.requestWindow(r)
 			return n, nil
 		case c.errno != nil:

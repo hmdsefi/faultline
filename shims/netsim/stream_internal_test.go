@@ -164,6 +164,35 @@ func TestPump(t *testing.T) {
 	}
 }
 
+// A pump that sends every queued byte and a Read that takes every buffered byte keep their buffer's
+// array for the next Write and arrival. Segments still carry copies of the queued bytes (NSM-036),
+// so the next Write cannot change a segment that is waiting for its acknowledgment.
+func TestStreamBufferReuse(t *testing.T) {
+	p := streamPair(t, Config{MSS: 100})
+	s, st, cli := p.s, p.st, p.cli
+	d := cli.c.dirs[c2s]
+	d.queued = append(make([]byte, 0, 512), bytes.Repeat([]byte("a"), 150)...)
+	base := &d.queued[0]
+	at(s, func() { st.pump(d) })
+	if len(d.queued) != 0 || cap(d.queued) != 512 || &d.queued[:1][0] != base {
+		t.Fatalf("queue after the pump: len %d, cap %d", len(d.queued), cap(d.queued))
+	}
+	if _, err := cli.Write(bytes.Repeat([]byte("b"), 150)); err != nil {
+		t.Fatal(err)
+	}
+	if &d.queued[0] != base || len(d.unacked) != 2 ||
+		!bytes.Equal(d.unacked[0].data, bytes.Repeat([]byte("a"), 100)) || !bytes.Equal(d.unacked[1].data, bytes.Repeat([]byte("a"), 50)) {
+		t.Fatalf("Write after the pump: new array %v, unacked %d", &d.queued[0] != base, len(d.unacked))
+	}
+
+	r := cli.c.dirs[s2c]
+	r.buf = append(make([]byte, 0, 256), "hello"...)
+	rbase := &r.buf[0]
+	if n, err := cli.Read(make([]byte, 10)); n != 5 || err != nil || len(r.buf) != 0 || cap(r.buf) != 256 || &r.buf[:1][0] != rbase {
+		t.Fatalf("draining Read: %d, %v, len %d, cap %d", n, err, len(r.buf), cap(r.buf))
+	}
+}
+
 // schedulePump pumps at once for an up sender, posts net.pump to a paused sender's node, which runs
 // at the resume, and does nothing for a sender that is not live.
 func TestSchedulePump(t *testing.T) {
