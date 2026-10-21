@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -519,5 +520,103 @@ func TestATGOR18_PausedWriterDeferred(t *testing.T) {
 	}
 	if !sawResume || !strings.HasPrefix(sent.String(), all.String()) || len(all.String()) < len(sent.String())-10 {
 		t.Fatalf("arrivals %+v; sent %q", got, sent.String())
+	}
+}
+
+func init() { //nolint:gochecknoinits // registers the child-process scenarios
+	gorScenarios["gor-30"] = func(t *testing.T) {
+		servers := []string{"s1", "s2", "s3", "s4", "s5"}
+		Run(t, Options{Mode: ModeGoroutine, Seeds: 50, Duration: 30 * time.Second, CheckDeterminism: true, KeepGoing: true},
+			func(w *World) {
+				var echoes atomic.Int64
+				w.Final("echoes completed", func() error {
+					if echoes.Load() == 0 {
+						return errors.New("no echo completed")
+					}
+					return nil
+				})
+				for _, name := range servers {
+					w.AddProcess(name, func(ctx context.Context, p *Process) error {
+						ln, err := p.Net.Listen("tcp", ":7")
+						if err != nil {
+							return err
+						}
+						p.Go(func() {
+							for {
+								c, err := ln.Accept()
+								if err != nil {
+									return
+								}
+								p.Go(func() { _, _ = io.Copy(c, c); c.Close() })
+							}
+						})
+						<-ctx.Done()
+						return nil
+					})
+				}
+				for _, name := range []string{"c1", "c2", "c3"} {
+					w.AddClientProcess(name, func(ctx context.Context, p *Process) error {
+						r := p.Rand()
+						conns := map[string]net.Conn{}
+						buf := make([]byte, 1024)
+						tk := time.NewTicker(100 * time.Millisecond)
+						defer tk.Stop()
+						for {
+							select {
+							case <-ctx.Done():
+								return nil
+							case <-tk.C:
+							}
+							srv, size := servers[r.IntN(len(servers))], 1+r.IntN(1024)
+							c := conns[srv]
+							if c == nil {
+								var err error
+								if c, err = (&netsim.Dialer{Host: p.Net, Timeout: time.Second}).Dial("tcp", srv+":7"); err != nil {
+									continue
+								}
+								conns[srv] = c
+							}
+							_ = c.SetDeadline(time.Now().Add(time.Second))
+							if _, err := c.Write(buf[:size]); err != nil {
+								c.Close()
+								delete(conns, srv)
+								continue
+							}
+							if _, err := io.ReadFull(c, buf[:size]); err != nil {
+								c.Close()
+								delete(conns, srv)
+								continue
+							}
+							echoes.Add(1)
+						}
+					})
+				}
+				w.Plan(&fault.Random{Rules: []fault.Rule{{Kind: fault.KindPartition, Every: 5 * time.Second}}})
+			})
+	}
+}
+
+func TestATGOR30_EchoReplayRate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("soak")
+	}
+	res := runGorScenario(t, "gor-30", "FAULTLINE_RESULTS=$ARTIFACTS/results.jsonl")
+	lines := res.results(t)
+	if len(lines) != 50 {
+		t.Fatalf("%d result lines, want 50\n%s", len(lines), res.out)
+	}
+	det, other := 0, 0
+	for _, l := range lines {
+		switch {
+		case l["status"] == "pass":
+		case l["kind"] == "determinism":
+			det++
+		default:
+			other++
+		}
+	}
+	t.Logf("AT-GOR-30 replay rate: %d/50 seeds identical", 50-det)
+	if other != 0 || det > 1 {
+		t.Fatalf("%d determinism failures (want <= 1) and %d other failures\n%s", det, other, res.out)
 	}
 }
