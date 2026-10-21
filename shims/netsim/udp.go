@@ -5,7 +5,6 @@ package netsim
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -124,21 +123,6 @@ func bindInUse(op, network string, ip netip.Addr, port uint16, remote netip.Addr
 		at = netip.AddrPortFrom(ip, port)
 	}
 	return &net.OpError{Op: op, Net: network, Addr: net.UDPAddrFromAddrPort(at), Err: &os.SyscallError{Syscall: "bind", Err: syscall.EADDRINUSE}}
-}
-
-// Dial is DialContext(context.Background(), network, address).
-func (h *Host) Dial(network, address string) (net.Conn, error) {
-	return h.DialContext(context.Background(), network, address)
-}
-
-// DialContext connects to address. network is "udp" or "udp4", and the result is a connected
-// *UDPConn. Its signature matches http.Transport.DialContext.
-func (h *Host) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	switch network {
-	case "udp", "udp4":
-		return h.dialUDP(network, address)
-	}
-	return nil, &net.OpError{Op: "dial", Net: network, Err: net.UnknownNetworkError(network)}
 }
 
 // dialUDP binds an ephemeral socket connected to address (NSM-050).
