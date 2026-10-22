@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/fstest"
 
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
@@ -766,4 +767,126 @@ func TestSimHandleCheckOrder(t *testing.T) {
 		v := newVolume(t)
 		return fsx.Sim(v), func() { v.Node().Crash() }
 	})
+}
+func populate(t *testing.T, fsys fsx.FS) {
+	t.Helper()
+	if err := fsx.WriteFile(fsys, "a", []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsys.Mkdir("d", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsx.WriteFile(fsys, "d/b", []byte("2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestATFSX09_IOFSPassesFstest(t *testing.T) {
+	for name, fsys := range map[string]fsx.FS{"OS": fsx.OS(t.TempDir()), "Sim": fsx.Sim(newVolume(t))} {
+		t.Run(name, func(t *testing.T) {
+			populate(t, fsys)
+			if err := fstest.TestFS(fsx.IOFS(fsys), "a", "d/b"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestATFSX10_IOFSRejectsInvalidPaths(t *testing.T) {
+	iofs := fsx.IOFS(fsx.Sim(newVolume(t)))
+	for _, name := range []string{"../a", "/a"} {
+		if _, err := iofs.Open(name); !errors.Is(err, fs.ErrInvalid) {
+			t.Fatalf("Open(%q) = %v, want fs.ErrInvalid", name, err)
+		}
+	}
+}
+
+// TestIOFSShape checks the parts of FSX-075 that fstest.TestFS treats as optional.
+func TestIOFSShape(t *testing.T) {
+	fsys := fsx.Sim(newVolume(t))
+	populate(t, fsys)
+	iofs := fsx.IOFS(fsys)
+	statFS, ok1 := iofs.(fs.StatFS)
+	readDirFS, ok2 := iofs.(fs.ReadDirFS)
+	readFileFS, ok3 := iofs.(fs.ReadFileFS)
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatalf("IOFS: StatFS %v, ReadDirFS %v, ReadFileFS %v", ok1, ok2, ok3)
+	}
+	for op, call := range map[string]func(string) error{
+		"open":     func(n string) error { _, err := iofs.Open(n); return err },
+		"stat":     func(n string) error { _, err := statFS.Stat(n); return err },
+		"readdir":  func(n string) error { _, err := readDirFS.ReadDir(n); return err },
+		"readfile": func(n string) error { _, err := readFileFS.ReadFile(n); return err },
+	} {
+		err := call("a/../a")
+		var pe *fs.PathError
+		if !errors.As(err, &pe) || pe.Op != op || pe.Path != "a/../a" || pe.Err != fs.ErrInvalid {
+			t.Errorf("%s(a/../a) = %#v, want *fs.PathError{%s, a/../a, fs.ErrInvalid}", op, err, op)
+		}
+	}
+	if info, err := statFS.Stat("."); err != nil || info.Name() != "." || !info.IsDir() {
+		t.Fatalf("Stat(.) = %v, %v; want the root named .", info, err)
+	}
+	if data, err := readFileFS.ReadFile("d/b"); err != nil || string(data) != "2" {
+		t.Fatalf("ReadFile(d/b) = %q, %v", data, err)
+	}
+	f, err := iofs.Open("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ra, ok1 := f.(io.ReaderAt)
+	sk, ok2 := f.(io.Seeker)
+	if !ok1 || !ok2 {
+		t.Fatalf("file: ReaderAt %v, Seeker %v", ok1, ok2)
+	}
+	b := make([]byte, 1)
+	if n, err := ra.ReadAt(b, 0); n != 1 || err != nil || b[0] != '1' {
+		t.Fatalf("ReadAt = %d, %v, %q", n, err, b)
+	}
+	if off, err := sk.Seek(0, io.SeekEnd); off != 1 || err != nil {
+		t.Fatalf("Seek(0, SeekEnd) = %d, %v", off, err)
+	}
+	f.Close()
+	root, err := iofs.Open(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if info, err := root.Stat(); err != nil || info.Name() != "." {
+		t.Fatalf("Open(.).Stat() = %v, %v; want the name .", info, err)
+	}
+	dir, ok := root.(fs.ReadDirFile)
+	if !ok {
+		t.Fatal("Open(.) is not an fs.ReadDirFile")
+	}
+	names := func(ents []fs.DirEntry) string {
+		var s []string
+		for _, e := range ents {
+			s = append(s, e.Name())
+		}
+		return strings.Join(s, ",")
+	}
+	if ents, err := dir.ReadDir(1); names(ents) != "a" || err != nil {
+		t.Fatalf("ReadDir(1) = [%s], %v; want [a], nil", names(ents), err)
+	}
+	if err := fsx.WriteFile(fsys, "c", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ents, err := dir.ReadDir(0); names(ents) != "d" || err != nil {
+		t.Fatalf("ReadDir(0) = [%s], %v; want [d], nil (the entries are loaded once)", names(ents), err)
+	}
+	if ents, err := dir.ReadDir(1); len(ents) != 0 || err != io.EOF {
+		t.Fatalf("ReadDir(1) at the end = [%s], %v; want [], io.EOF", names(ents), err)
+	}
+	if ents, err := dir.ReadDir(-1); len(ents) != 0 || err != nil {
+		t.Fatalf("ReadDir(-1) at the end = [%s], %v; want [], nil", names(ents), err)
+	}
+	if sub, err := iofs.Open("d"); err != nil {
+		t.Fatal(err)
+	} else {
+		if info, err := sub.Stat(); err != nil || info.Name() != "d" {
+			t.Fatalf("Open(d).Stat() = %v, %v; want the name d", info, err)
+		}
+		sub.Close()
+	}
 }
