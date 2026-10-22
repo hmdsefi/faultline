@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
@@ -61,17 +63,55 @@ var errSkip = errors.New("fsx: skip")
 
 // frame runs one operation (FSX-011). check runs FSX-030's handle checks first; run is the simdisk
 // work; class 0 means the operation is never sampled (Seek, File.Stat); stale is the error for a
-// dead incarnation.
-func (s *simFS) frame(class simdisk.Op, op, cleanPath string, stale error, check, run func() error) error { //nolint:unparam // class, op and cleanPath are read by the driver-mode frame
+// dead incarnation. In driver mode it unlocks on every return path instead of deferring Unlock:
+// on the driver goroutine WaitUnpaused unlocks before it panics.
+func (s *simFS) frame(class simdisk.Op, op, cleanPath string, stale error, check, run func() error) error {
+	if s.d == nil { // direct mode
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
+		}
+		if s.n.State() == kernel.NodeDown || s.n.Incarnation() != s.inc {
+			return stale
+		}
+		return run()
+	}
+	d, id := s.d, s.n.ID()
+	d.Lock()
 	if check != nil {
 		if err := check(); err != nil {
+			d.Unlock()
 			return err
 		}
 	}
-	if s.n.State() == kernel.NodeDown || s.n.Incarnation() != s.inc {
+	if !d.Alive(id, s.inc) {
+		d.Unlock()
 		return stale
 	}
-	return run()
+	if s.n.State() == kernel.NodePaused && !d.WaitUnpaused(id, s.inc) { // FSX-012
+		d.Unlock()
+		return stale
+	}
+	d.SyncClock() // records get the current virtual time
+	err := run()
+	var lat time.Duration
+	if class != 0 {
+		if lat = s.v.SampleLatency(class); lat > 0 { // FSX-050/051
+			s.n.Sim().Emit(kernel.Record{Node: id, Inc: s.inc, Kind: "fsx.latency",
+				Text: op + " " + cleanPath + ": " + lat.String(),
+				Attrs: []kernel.Attr{
+					{Key: "op", Value: op}, {Key: "path", Value: cleanPath},
+					{Key: "class", Value: class.String()},
+					{Key: "latency_ns", Value: strconv.FormatInt(int64(lat), 10)},
+				}})
+		}
+	}
+	d.Unlock()
+	if lat > 0 && !d.OnDriver() {
+		time.Sleep(lat)
+	}
+	return err
 }
 
 func (s *simFS) pathStale(op, name string) error {
