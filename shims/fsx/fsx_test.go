@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
@@ -505,6 +506,45 @@ func TestSimDirectModeStale(t *testing.T) {
 	}
 	if _, err := fsx.Sim(d.Volume(n)).Stat("a"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a new FS of incarnation 2: %v", err)
+	}
+}
+
+// TestSimDirectModeNoLatency pins FSX-011's direct frame: with every latency class configured, Sim
+// operations draw nothing from the node's latency stream and emit no fsx.latency record.
+func TestSimDirectModeNoLatency(t *testing.T) {
+	cfg := simdisk.DefaultConfig()
+	l := simdisk.Latency{Base: time.Millisecond, Jitter: 10 * time.Millisecond}
+	cfg.Latency.Read, cfg.Latency.Write, cfg.Latency.Sync, cfg.Latency.Meta = l, l, l, l
+	newSim := func() (*kernel.Sim, *simdisk.Volume) {
+		s := kernel.New(kernel.Config{Seed: 1, Trace: kernel.TraceConfig{Level: kernel.TraceFull}})
+		d := simdisk.New(s, cfg)
+		n := s.AddNode("n", func(*kernel.Node) {})
+		s.RunUntil(0)
+		return s, d.Volume(n)
+	}
+	s, v := newSim()
+	fsys := fsx.Sim(v)
+	f, err := fsys.Create("f") // meta
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte("x"), 0); err != nil { // write
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil { // sync
+		t.Fatal(err)
+	}
+	if _, err := f.ReadAt(make([]byte, 1), 0); err != nil { // read
+		t.Fatal(err)
+	}
+	_, ref := newSim()
+	if got, want := v.SampleLatency(simdisk.OpWrite), ref.SampleLatency(simdisk.OpWrite); got != want {
+		t.Fatalf("next latency draw %v, want the stream's first draw %v", got, want)
+	}
+	for _, r := range s.Records() {
+		if r.Kind == "fsx.latency" {
+			t.Fatalf("direct mode emitted %+v", r)
+		}
 	}
 }
 

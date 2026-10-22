@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hmdsefi/faultline/kernel"
+	"github.com/hmdsefi/faultline/shims/fsx"
 	"github.com/hmdsefi/faultline/shims/netsim"
 )
 
@@ -47,11 +48,11 @@ func (e *ProcessError) Error() string {
 func (e *ProcessError) Unwrap() error { return e.Err }
 
 // ProcessFunc is the main function of a process. It must reach the world only through p.Net,
-// p.Rand, p.Clock, p.Do and p.Logf (p.Do is the only way to call kernel, World, history and fault
-// APIs). It runs once per incarnation, on its own goroutine, and should return when ctx is done.
-// Returning nil ends the process and leaves its node up. Returning an error or panicking fails
-// the run, unless the incarnation already ended. t.FailNow and t.Fatal stop the run, as they do
-// in the function passed to Run. Calling runtime.Goexit without failing the test is the same as
+// p.FS, p.Rand, p.Clock, p.Do and p.Logf (p.Do is the only way to call kernel, World, history and
+// fault APIs). It runs once per incarnation, on its own goroutine, and should return when ctx is
+// done. Returning nil ends the process and leaves its node up. Returning an error or panicking
+// fails the run, unless the incarnation already ended. t.FailNow and t.Fatal stop the run, as they
+// do in the function passed to Run. Calling runtime.Goexit without failing the test is the same as
 // returning nil.
 type ProcessFunc func(ctx context.Context, p *Process) error
 
@@ -59,6 +60,7 @@ type ProcessFunc func(ctx context.Context, p *Process) error
 type Process struct {
 	Node *kernel.Node // only ID and Name may be called from process goroutines; use Rand, not Node.Rand
 	Net  *netsim.Host // bound to this incarnation
+	FS   fsx.FS       // the node's volume, bound to this incarnation
 
 	d      *driver
 	inc    uint32
@@ -309,8 +311,8 @@ func (d *driver) processBoot(main ProcessFunc) kernel.BootFunc {
 		p := &Process{Node: n, d: d, inc: inc, status: incRunning} // step 1
 		np := d.node(id)
 		np.procs = append(np.procs, p)
-		p.Net = d.w.stack.Host(n) // step 2: the netsim host
-		// Step 3 (the fsx file system) goes here, with the fsx shim.
+		p.Net = d.w.stack.Host(n)                                  // step 2: the netsim host
+		p.FS = fsx.Sim(d.w.Disk.Volume(n), fsx.WithDriver(d, inc)) // step 3: the fsx file system
 		// Step 4: the node's seeded stream, safe for concurrent use.
 		p.rnd = rand.New(&lockedSource{src: n.Rand()}) //nolint:gosec // seeded on purpose: a deterministic simulator needs reproducible streams
 		// Step 5: the clock state of GOR-055.
