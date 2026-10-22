@@ -5,6 +5,7 @@ package fsx_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/hmdsefi/faultline/kernel"
 	"github.com/hmdsefi/faultline/kernel/simdisk"
 	"github.com/hmdsefi/faultline/shims/fsx"
 )
@@ -248,16 +250,27 @@ func TestOSRenameCaseOnly(t *testing.T) {
 // inputs os checks in another order or not at all: zero-length buffers, negative offsets and
 // WriteAt in append mode.
 func TestOSHandleCheckOrder(t *testing.T) {
-	fsys := fsx.OS(t.TempDir())
-	if cl, ok := fsys.(io.Closer); ok {
-		t.Cleanup(func() { _ = cl.Close() })
-	}
-	if err := fsx.WriteFile(fsys, "f", []byte("data"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := fsys.Mkdir("d", 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testHandleCheckOrder(t, func(t *testing.T) (fsx.FS, func()) {
+		fsys := fsx.OS(t.TempDir())
+		if cl, ok := fsys.(io.Closer); ok {
+			t.Cleanup(func() { _ = cl.Close() })
+		}
+		return fsys, nil
+	})
+}
+
+// testHandleCheckOrder checks FSX-030's handle checks, in order, and FSX-031's offset and size rows.
+// Each row gets a fresh FS from newFS with the file "f" ("data") and the directory "d" in it, and
+// wants n and the exact Err. newFS returns a nil crash for OS; for Sim, crash kills the node behind
+// the FS. The rows on a dead incarnation, and Seek(0, SeekEnd) on a directory (OS gives the
+// platform's directory size), run on Sim only.
+func testHandleCheckOrder(t *testing.T, newFS func(*testing.T) (fsys fsx.FS, crash func())) {
+	t.Helper()
+	const (
+		closed  = 1 << iota // close the handle before the call
+		dead                // crash the node before the call (Sim only)
+		simOnly             // OS gives a platform-specific result
+	)
 	b := []byte("x")
 	read := func(b []byte) func(fsx.File) (int, error) {
 		return func(f fsx.File) (int, error) { return f.Read(b) }
@@ -271,64 +284,136 @@ func TestOSHandleCheckOrder(t *testing.T) {
 	writeAt := func(b []byte, off int64) func(fsx.File) (int, error) {
 		return func(f fsx.File) (int, error) { return f.WriteAt(b, off) }
 	}
-	for _, tc := range []struct {
-		desc   string
-		name   string
-		flag   int
-		closed bool
-		op     string
-		call   func(fsx.File) (int, error)
-		want   error // nil means 0, nil
-	}{
-		{"Read(nil) closed", "f", os.O_RDONLY, true, "read", read(nil), fs.ErrClosed},
-		{"Read(nil) O_WRONLY", "f", os.O_WRONLY, false, "read", read(nil), syscall.EBADF},
-		{"Read(nil) directory", "d", os.O_RDONLY, false, "read", read(nil), syscall.EISDIR},
-		{"Read(nil)", "f", os.O_RDONLY, false, "read", read(nil), nil},
-		{"Write(nil) closed", "f", os.O_WRONLY, true, "write", write(nil), fs.ErrClosed},
-		{"Write(nil) O_RDONLY", "f", os.O_RDONLY, false, "write", write(nil), syscall.EBADF},
-		{"Write(nil)", "f", os.O_WRONLY, false, "write", write(nil), nil},
-		{"ReadAt(b, -1) closed", "f", os.O_RDONLY, true, "readat", readAt(b, -1), fs.ErrClosed},
-		{"ReadAt(b, -1) O_WRONLY", "f", os.O_WRONLY, false, "readat", readAt(b, -1), syscall.EBADF},
-		{"ReadAt(b, -1) directory", "d", os.O_RDONLY, false, "readat", readAt(b, -1), syscall.EISDIR},
-		{"ReadAt(b, -1)", "f", os.O_RDONLY, false, "readat", readAt(b, -1), syscall.EINVAL},
-		{"ReadAt(nil, -1)", "f", os.O_RDONLY, false, "readat", readAt(nil, -1), syscall.EINVAL},
-		{"ReadAt(nil, 0) O_WRONLY", "f", os.O_WRONLY, false, "readat", readAt(nil, 0), syscall.EBADF},
-		{"ReadAt(nil, 0) directory", "d", os.O_RDONLY, false, "readat", readAt(nil, 0), syscall.EISDIR},
-		{"ReadAt(nil, 0)", "f", os.O_RDONLY, false, "readat", readAt(nil, 0), nil},
-		{"WriteAt(b, -1) closed", "f", os.O_RDWR, true, "writeat", writeAt(b, -1), fs.ErrClosed},
-		{"WriteAt(b, 0) closed O_APPEND", "f", os.O_WRONLY | os.O_APPEND, true, "writeat", writeAt(b, 0), fs.ErrClosed},
-		{"WriteAt(b, 0) O_RDONLY|O_APPEND", "f", os.O_RDONLY | os.O_APPEND, false, "writeat", writeAt(b, 0), syscall.EBADF},
-		{"WriteAt(b, -1) O_RDONLY", "f", os.O_RDONLY, false, "writeat", writeAt(b, -1), syscall.EBADF},
-		{"WriteAt(b, -1) directory", "d", os.O_RDONLY, false, "writeat", writeAt(b, -1), syscall.EBADF},
-		{"WriteAt(nil, 0) O_RDONLY", "f", os.O_RDONLY, false, "writeat", writeAt(nil, 0), syscall.EBADF},
-		{"WriteAt(b, -1) O_APPEND", "f", os.O_WRONLY | os.O_APPEND, false, "writeat", writeAt(b, -1), fsx.ErrWriteAtInAppendMode},
-		{"WriteAt(b, -1)", "f", os.O_RDWR, false, "writeat", writeAt(b, -1), syscall.EINVAL},
-		{"WriteAt(nil, -1)", "f", os.O_RDWR, false, "writeat", writeAt(nil, -1), syscall.EINVAL},
-		{"WriteAt(nil, 0)", "f", os.O_RDWR, false, "writeat", writeAt(nil, 0), nil},
-	} {
-		f, err := fsys.OpenFile(tc.name, tc.flag, 0)
+	seek := func(off int64, whence int) func(fsx.File) (int, error) {
+		return func(f fsx.File) (int, error) {
+			n, err := f.Seek(off, whence)
+			return int(n), err
+		}
+	}
+	truncate := func(size int64) func(fsx.File) (int, error) {
+		return func(f fsx.File) (int, error) { return 0, f.Truncate(size) }
+	}
+	stat := func(f fsx.File) (int, error) {
+		info, err := f.Stat()
 		if err != nil {
-			t.Fatalf("%s: OpenFile: %v", tc.desc, err)
+			return 0, err
 		}
-		if tc.closed {
-			if err := f.Close(); err != nil {
-				t.Fatalf("%s: Close: %v", tc.desc, err)
+		return int(info.Size()), nil
+	}
+	syncFile := func(f fsx.File) (int, error) { return 0, f.Sync() }
+	closeFile := func(f fsx.File) (int, error) { return 0, f.Close() }
+	// readAfter runs call, then reads from the offset: 4 bytes when call left it at 0.
+	readAfter := func(call func(fsx.File) (int, error)) func(fsx.File) (int, error) {
+		return func(f fsx.File) (int, error) {
+			if _, err := call(f); err != nil {
+				return 0, err
 			}
+			return f.Read(make([]byte, 10))
 		}
-		n, err := tc.call(f)
-		if !tc.closed {
-			_ = f.Close()
-		}
-		if tc.want == nil {
-			if n != 0 || err != nil {
-				t.Errorf("%s = %d, %v; want 0, nil", tc.desc, n, err)
+	}
+	for _, tc := range []struct {
+		desc string
+		name string
+		flag int
+		how  int // closed, dead, simOnly
+		op   string
+		call func(fsx.File) (int, error)
+		n    int
+		want error // nil means n, nil
+	}{
+		{"Read(nil) closed", "f", os.O_RDONLY, closed, "read", read(nil), 0, fs.ErrClosed},
+		{"Read(nil) O_WRONLY", "f", os.O_WRONLY, 0, "read", read(nil), 0, syscall.EBADF},
+		{"Read(nil) directory", "d", os.O_RDONLY, 0, "read", read(nil), 0, syscall.EISDIR},
+		{"Read(nil)", "f", os.O_RDONLY, 0, "read", read(nil), 0, nil},
+		{"Write(nil) closed", "f", os.O_WRONLY, closed, "write", write(nil), 0, fs.ErrClosed},
+		{"Write(nil) O_RDONLY", "f", os.O_RDONLY, 0, "write", write(nil), 0, syscall.EBADF},
+		{"Write(nil)", "f", os.O_WRONLY, 0, "write", write(nil), 0, nil},
+		{"ReadAt(b, -1) closed", "f", os.O_RDONLY, closed, "readat", readAt(b, -1), 0, fs.ErrClosed},
+		{"ReadAt(b, -1) O_WRONLY", "f", os.O_WRONLY, 0, "readat", readAt(b, -1), 0, syscall.EBADF},
+		{"ReadAt(b, -1) directory", "d", os.O_RDONLY, 0, "readat", readAt(b, -1), 0, syscall.EISDIR},
+		{"ReadAt(b, -1)", "f", os.O_RDONLY, 0, "readat", readAt(b, -1), 0, syscall.EINVAL},
+		{"ReadAt(nil, -1)", "f", os.O_RDONLY, 0, "readat", readAt(nil, -1), 0, syscall.EINVAL},
+		{"ReadAt(nil, 0) O_WRONLY", "f", os.O_WRONLY, 0, "readat", readAt(nil, 0), 0, syscall.EBADF},
+		{"ReadAt(nil, 0) directory", "d", os.O_RDONLY, 0, "readat", readAt(nil, 0), 0, syscall.EISDIR},
+		{"ReadAt(nil, 0)", "f", os.O_RDONLY, 0, "readat", readAt(nil, 0), 0, nil},
+		{"WriteAt(b, -1) closed", "f", os.O_RDWR, closed, "writeat", writeAt(b, -1), 0, fs.ErrClosed},
+		{"WriteAt(b, 0) closed O_APPEND", "f", os.O_WRONLY | os.O_APPEND, closed, "writeat", writeAt(b, 0), 0, fs.ErrClosed},
+		{"WriteAt(b, 0) O_RDONLY|O_APPEND", "f", os.O_RDONLY | os.O_APPEND, 0, "writeat", writeAt(b, 0), 0, syscall.EBADF},
+		{"WriteAt(b, -1) O_RDONLY", "f", os.O_RDONLY, 0, "writeat", writeAt(b, -1), 0, syscall.EBADF},
+		{"WriteAt(b, -1) directory", "d", os.O_RDONLY, 0, "writeat", writeAt(b, -1), 0, syscall.EBADF},
+		{"WriteAt(nil, 0) O_RDONLY", "f", os.O_RDONLY, 0, "writeat", writeAt(nil, 0), 0, syscall.EBADF},
+		{"WriteAt(b, -1) O_APPEND", "f", os.O_WRONLY | os.O_APPEND, 0, "writeat", writeAt(b, -1), 0, fsx.ErrWriteAtInAppendMode},
+		{"WriteAt(b, -1)", "f", os.O_RDWR, 0, "writeat", writeAt(b, -1), 0, syscall.EINVAL},
+		{"WriteAt(nil, -1)", "f", os.O_RDWR, 0, "writeat", writeAt(nil, -1), 0, syscall.EINVAL},
+		{"WriteAt(nil, 0)", "f", os.O_RDWR, 0, "writeat", writeAt(nil, 0), 0, nil},
+
+		// The other methods' checks, and directory handles.
+		{"Read(b) closed directory", "d", os.O_RDONLY, closed, "read", read(b), 0, fs.ErrClosed},
+		{"Write(b) closed directory", "d", os.O_RDONLY, closed, "write", write(b), 0, fs.ErrClosed},
+		{"Write(b) directory", "d", os.O_RDONLY, 0, "write", write(b), 0, syscall.EBADF},
+		{"ReadAt(b, 0) closed directory", "d", os.O_RDONLY, closed, "readat", readAt(b, 0), 0, fs.ErrClosed},
+		{"Seek(0, SeekStart) closed", "f", os.O_RDONLY, closed, "seek", seek(0, io.SeekStart), 0, fs.ErrClosed},
+		{"Truncate(0) closed O_RDONLY", "f", os.O_RDONLY, closed, "truncate", truncate(0), 0, fs.ErrClosed},
+		{"Truncate(0) directory", "d", os.O_RDONLY, 0, "truncate", truncate(0), 0, syscall.EINVAL},
+		{"Truncate(-1)", "f", os.O_RDWR, 0, "truncate", truncate(-1), 0, syscall.EINVAL},
+		{"Stat() closed", "f", os.O_RDONLY, closed, "stat", stat, 0, fs.ErrClosed},
+		{"Sync() closed directory", "d", os.O_RDONLY, closed, "sync", syncFile, 0, fs.ErrClosed},
+		{"Close() closed directory", "d", os.O_RDONLY, closed, "close", closeFile, 0, fs.ErrClosed},
+
+		// FSX-031: Seek's result, Stat's size, and ReadAt and WriteAt leave the offset.
+		{"Seek(-1, SeekStart)", "f", os.O_RDONLY, 0, "seek", seek(-1, io.SeekStart), 0, syscall.EINVAL},
+		{"Seek(0, SeekEnd) directory", "d", os.O_RDONLY, simOnly, "seek", seek(0, io.SeekEnd), 0, nil},
+		{"Stat() size", "f", os.O_RDONLY, 0, "stat", stat, 4, nil},
+		{"ReadAt then Read", "f", os.O_RDONLY, 0, "read", readAfter(readAt(make([]byte, 2), 1)), 4, nil},
+		{"WriteAt then Read", "f", os.O_RDWR, 0, "read", readAfter(writeAt([]byte("zz"), 0)), 4, nil},
+
+		// A dead incarnation: the checks still come first (FSX-011).
+		{"Write(nil) dead", "f", os.O_RDWR, dead, "write", write(nil), 0, nil},
+		{"ReadAt(b, -1) dead", "f", os.O_RDWR, dead, "readat", readAt(b, -1), 0, syscall.EINVAL},
+		{"WriteAt(b, -1) dead", "f", os.O_RDWR, dead, "writeat", writeAt(b, -1), 0, syscall.EINVAL},
+		{"Truncate(-1) dead", "f", os.O_RDWR, dead, "truncate", truncate(-1), 0, syscall.EINVAL},
+		{"Write(b) closed dead", "f", os.O_RDWR, closed | dead, "write", write(b), 0, fs.ErrClosed},
+		{"WriteAt(b, 0) closed dead", "f", os.O_RDWR, closed | dead, "writeat", writeAt(b, 0), 0, fs.ErrClosed},
+		{"Truncate(0) closed dead", "f", os.O_RDWR, closed | dead, "truncate", truncate(0), 0, fs.ErrClosed},
+		{"Sync() closed dead", "f", os.O_RDWR, closed | dead, "sync", syncFile, 0, fs.ErrClosed},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			fsys, crash := newFS(t)
+			if crash == nil && tc.how&(dead|simOnly) != 0 {
+				t.Skip("Sim only")
 			}
-			continue
-		}
-		var pe *fs.PathError
-		if n != 0 || !errors.As(err, &pe) || pe.Op != tc.op || pe.Path != tc.name || pe.Err != tc.want {
-			t.Errorf("%s = %d, %#v; want 0, *fs.PathError{%s, %s, %v}", tc.desc, n, err, tc.op, tc.name, tc.want)
-		}
+			if err := fsx.WriteFile(fsys, "f", []byte("data"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := fsys.Mkdir("d", 0o755); err != nil {
+				t.Fatal(err)
+			}
+			f, err := fsys.OpenFile(tc.name, tc.flag, 0)
+			if err != nil {
+				t.Fatalf("OpenFile: %v", err)
+			}
+			if tc.how&closed != 0 {
+				if err := f.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+			} else {
+				defer func() { _ = f.Close() }()
+			}
+			if tc.how&dead != 0 {
+				crash()
+			}
+			n, err := tc.call(f)
+			if tc.want == nil {
+				if n != tc.n || err != nil {
+					t.Errorf("= %d, %v; want %d, nil", n, err, tc.n)
+				}
+				return
+			}
+			var pe *fs.PathError
+			if n != 0 || !errors.As(err, &pe) || pe.Op != tc.op || pe.Path != tc.name || pe.Err != tc.want {
+				t.Errorf("= %d, %#v; want 0, *fs.PathError{%s, %s, %v}", n, err, tc.op, tc.name, tc.want)
+			}
+		})
 	}
 }
 
@@ -357,4 +442,328 @@ func TestOSTruncateOnOpen(t *testing.T) {
 	if info, err := fsys.Stat("f"); err != nil || info.Size() != 0 {
 		t.Fatalf("Stat after Create of a non-empty file = %v, %v; want size 0", info, err)
 	}
+}
+
+// newVolume is AT-FSX-02's setup: a fresh kernel, simdisk with defaults, one booted node.
+func newVolume(tb testing.TB) *simdisk.Volume {
+	tb.Helper()
+	s := kernel.New(kernel.Config{Seed: 1})
+	d := simdisk.New(s, simdisk.DefaultConfig())
+	n := s.AddNode("n", func(*kernel.Node) {})
+	s.RunUntil(0)
+	return d.Volume(n)
+}
+
+func TestATFSX02_SimConformance(t *testing.T) {
+	for _, c := range fsx.Conformance() {
+		t.Run(c.Name, func(t *testing.T) {
+			if err := c.Run(fsx.Sim(newVolume(t))); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestATFSX15_SimPanics(t *testing.T) {
+	for _, tc := range []struct {
+		f    func()
+		want string
+	}{
+		{func() { fsx.Sim(nil) }, "fsx: Sim: nil *simdisk.Volume"},
+		{func() { fsx.WithDriver(nil, 1) }, "fsx: WithDriver: nil Driver"},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r != tc.want {
+					t.Fatalf("panic %v, want %q", r, tc.want)
+				}
+			}()
+			tc.f()
+		}()
+	}
+}
+
+func TestSimDirectModeStale(t *testing.T) {
+	s := kernel.New(kernel.Config{Seed: 1})
+	d := simdisk.New(s, simdisk.DefaultConfig())
+	n := s.AddNode("n", func(*kernel.Node) {})
+	s.RunUntil(0)
+	fsys := fsx.Sim(d.Volume(n))
+	if err := fsx.WriteFile(fsys, "a", []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n.Crash()
+	_, err := fsys.Stat("a")
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || pe.Op != "stat" || pe.Path != "a" || !errors.Is(err, syscall.ESTALE) || !errors.Is(err, simdisk.ErrStale) {
+		t.Fatalf("Stat after crash = %v, want ESTALE", err)
+	}
+	n.Restart()
+	if _, err := fsys.Stat("a"); !errors.Is(err, syscall.ESTALE) {
+		t.Fatalf("Stat after restart through the old FS = %v, want ESTALE (bound incarnation)", err)
+	}
+	if _, err := fsx.Sim(d.Volume(n)).Stat("a"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a new FS of incarnation 2: %v", err)
+	}
+}
+
+// TestSimDirectModeRules pins the Sim rows that the conformance cases do not reach: FSX-020's flag
+// rows, the "/" rows of FSX-022 to FSX-024, FSX-023's rule for a directory as the new name, FSX-030's
+// check order, a directory handle's Stat (FSX-031), and the error of each method on a dead
+// incarnation (FSX-011): clean errors and handle checks first, then ESTALE with the method's op.
+func TestSimDirectModeRules(t *testing.T) {
+	type rule struct {
+		name    string
+		setup   func(fsx.FS) (fsx.File, error) // runs on the live node; the handle goes to call
+		crash   bool                           // crash the node between setup and call
+		call    func(fsx.FS, fsx.File) error
+		op      string             // "" wants nil; "rename" wants an *os.LinkError
+		path    string             // PathError.Path, or LinkError.Old
+		newPath string             // LinkError.New
+		is      []error            // errors.Is holds for each
+		plain   bool               // the Err is exactly is[0]
+		after   func(fsx.FS) error // checks the volume after call
+	}
+	stale := []error{syscall.ESTALE, simdisk.ErrStale}
+	einval := []error{syscall.EINVAL}
+	writeA := func(fsys fsx.FS) error { return fsx.WriteFile(fsys, "a", []byte("abc"), 0o644) }
+	fileA := func(fsys fsx.FS) (fsx.File, error) { return nil, writeA(fsys) }
+	dirD := func(fsys fsx.FS) (fsx.File, error) { return nil, fsys.Mkdir("d", 0o755) }
+	tree := func(fsys fsx.FS) (fsx.File, error) {
+		return nil, errors.Join(writeA(fsys), fsys.Mkdir("d", 0o755), fsx.WriteFile(fsys, "d/b", []byte("b"), 0o644))
+	}
+	handle := func(flag int, closed bool) func(fsx.FS) (fsx.File, error) {
+		return func(fsys fsx.FS) (fsx.File, error) {
+			if err := writeA(fsys); err != nil {
+				return nil, err
+			}
+			h, err := fsys.OpenFile("a", flag, 0)
+			if err == nil && closed {
+				err = h.Close()
+			}
+			return h, err
+		}
+	}
+	opened := func(h fsx.File, err error) error {
+		if err != nil {
+			return err
+		}
+		return h.Close()
+	}
+	openFile := func(name string, flag int) func(fsx.FS, fsx.File) error {
+		return func(fsys fsx.FS, _ fsx.File) error { return opened(fsys.OpenFile(name, flag, 0o644)) }
+	}
+	removeAll := func(name string) func(fsx.FS, fsx.File) error {
+		return func(fsys fsx.FS, _ fsx.File) error { return fsys.RemoveAll(name) }
+	}
+	mkdirAll := func(name string) func(fsx.FS, fsx.File) error {
+		return func(fsys fsx.FS, _ fsx.File) error { return fsys.MkdirAll(name, 0o755) }
+	}
+	rename := func(oldname, newname string) func(fsx.FS, fsx.File) error {
+		return func(fsys fsx.FS, _ fsx.File) error { return fsys.Rename(oldname, newname) }
+	}
+	read := func(_ fsx.FS, h fsx.File) error {
+		_, err := h.Read(make([]byte, 1))
+		return err
+	}
+	readEmpty := func(_ fsx.FS, h fsx.File) error {
+		if n, err := h.Read(nil); n != 0 || err != nil {
+			return fmt.Errorf("Read(nil) = %d, %v; want 0, nil", n, err)
+		}
+		return nil
+	}
+	exist := func(names ...string) func(fsx.FS) error {
+		return func(fsys fsx.FS) error {
+			for _, name := range names {
+				if _, err := fsys.Stat(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	rules := []rule{
+		// FSX-020: the access mode and the flags on a directory and with O_RDONLY.
+		{name: "open bad access mode", setup: fileA, call: openFile("a", os.O_WRONLY|os.O_RDWR),
+			op: "open", path: "a", is: einval, plain: true},
+		{name: "open dir create excl", setup: dirD, call: openFile("d", os.O_RDONLY|os.O_CREATE|os.O_EXCL),
+			op: "open", path: "d", is: []error{syscall.EEXIST}, plain: true},
+		{name: "open dir create", setup: dirD, call: openFile("d", os.O_RDONLY|os.O_CREATE),
+			op: "open", path: "d", is: []error{syscall.EISDIR}, plain: true},
+		{name: "open read-only trunc keeps the data", setup: fileA, call: openFile("a", os.O_RDONLY|os.O_TRUNC),
+			after: func(fsys fsx.FS) error {
+				if b, err := fsx.ReadFile(fsys, "a"); err != nil || string(b) != "abc" {
+					return fmt.Errorf("ReadFile(a) = %q, %v; want abc", b, err)
+				}
+				return nil
+			}},
+
+		// FSX-022 to FSX-024: the root, live.
+		{name: "removeall root keeps the tree", setup: tree, call: removeAll("/"),
+			op: "removeall", path: "/", is: einval, plain: true, after: exist("a", "d", "d/b")},
+		{name: "mkdirall root", call: mkdirAll("/")},
+		{name: "rename root", call: rename("/", "x"), op: "rename", path: "/", newPath: "x", is: einval, plain: true},
+		{name: "rename onto root", setup: fileA, call: rename("a", "/"),
+			op: "rename", path: "a", newPath: "/", is: einval, plain: true, after: exist("a")},
+
+		// FSX-023: onto a directory, the error of Stat(oldp) wins over EEXIST.
+		{name: "rename missing onto dir", setup: tree, call: rename("m", "d"),
+			op: "rename", path: "m", newPath: "d", is: []error{syscall.ENOENT, simdisk.ErrNotExist}, after: exist("d/b")},
+		{name: "rename through a file onto dir", setup: tree, call: rename("a/x", "d"),
+			op: "rename", path: "a/x", newPath: "d", is: []error{syscall.ENOTDIR, simdisk.ErrNotDir}, after: exist("a", "d/b")},
+
+		// FSX-030 and FSX-031 on a live node.
+		{name: "read checks closed before the access mode", setup: handle(os.O_WRONLY, true), call: read,
+			op: "read", path: "a", is: []error{fs.ErrClosed}, plain: true},
+		{name: "read empty", setup: handle(os.O_RDONLY, false), call: readEmpty},
+		{name: "dir handle stat reports its path",
+			setup: func(fsys fsx.FS) (fsx.File, error) {
+				if err := fsys.Mkdir("d", 0o755); err != nil {
+					return nil, err
+				}
+				h, err := fsys.Open("d")
+				if err != nil {
+					return nil, err
+				}
+				return h, errors.Join(fsys.Remove("d"), fsx.WriteFile(fsys, "d", []byte("abc"), 0o644))
+			},
+			call: func(_ fsx.FS, h fsx.File) error {
+				fi, err := h.Stat()
+				if err != nil {
+					return err
+				}
+				if fi.Name() != "d" || fi.IsDir() || fi.Mode().IsDir() || fi.Size() != 3 {
+					return fmt.Errorf("Stat() = %q dir %v mode %v size %d; want the file d of size 3", fi.Name(), fi.IsDir(), fi.Mode(), fi.Size())
+				}
+				return nil
+			}},
+
+		// A dead incarnation: clean errors and handle checks come first.
+		{name: "dead removeall empty name", crash: true, call: removeAll("")},
+		{name: "dead open empty name", crash: true, call: openFile("", os.O_RDONLY),
+			op: "open", path: "", is: []error{syscall.ENOENT}, plain: true},
+		{name: "dead read closed", setup: handle(os.O_RDWR, true), crash: true, call: read,
+			op: "read", path: "a", is: []error{fs.ErrClosed}, plain: true},
+		{name: "dead read write-only", setup: handle(os.O_WRONLY, false), crash: true, call: read,
+			op: "read", path: "a", is: []error{syscall.EBADF}, plain: true},
+		{name: "dead read empty", setup: handle(os.O_RDONLY, false), crash: true, call: readEmpty},
+
+		// A dead incarnation: the root rows run inside the frame.
+		{name: "dead mkdirall root", crash: true, call: mkdirAll("/"), op: "mkdir", path: "/", is: stale},
+		{name: "dead removeall root", crash: true, call: removeAll("/"), op: "removeall", path: "/", is: stale},
+		{name: "dead rename root", crash: true, call: rename("/", "x"), op: "rename", path: "/", newPath: "x", is: stale},
+		{name: "dead rename onto root", crash: true, call: rename("x", "/"), op: "rename", path: "x", newPath: "/", is: stale},
+
+		// A dead incarnation: each FS method's stale error (Stat is TestSimDirectModeStale).
+		{name: "dead open", crash: true, call: func(fsys fsx.FS, _ fsx.File) error { return opened(fsys.Open("a")) },
+			op: "open", path: "a", is: stale},
+		{name: "dead create", crash: true, call: func(fsys fsx.FS, _ fsx.File) error { return opened(fsys.Create("a")) },
+			op: "open", path: "a", is: stale},
+		{name: "dead openfile", crash: true, call: openFile("a", os.O_RDWR|os.O_CREATE), op: "open", path: "a", is: stale},
+		{name: "dead remove", crash: true, call: func(fsys fsx.FS, _ fsx.File) error { return fsys.Remove("a") },
+			op: "remove", path: "a", is: stale},
+		{name: "dead removeall", crash: true, call: removeAll("a"), op: "removeall", path: "a", is: stale},
+		{name: "dead rename", crash: true, call: rename("a", "b"), op: "rename", path: "a", newPath: "b", is: stale},
+		{name: "dead mkdir", crash: true, call: func(fsys fsx.FS, _ fsx.File) error { return fsys.Mkdir("d", 0o755) },
+			op: "mkdir", path: "d", is: stale},
+		{name: "dead mkdirall", crash: true, call: mkdirAll("d/e"), op: "mkdir", path: "d/e", is: stale},
+		{name: "dead readdir", crash: true, call: func(fsys fsx.FS, _ fsx.File) error {
+			_, err := fsys.ReadDir("/")
+			return err
+		}, op: "readdir", path: "/", is: stale},
+		{name: "dead syncdir", crash: true, call: func(fsys fsx.FS, _ fsx.File) error { return fsys.SyncDir("/") },
+			op: "syncdir", path: "/", is: stale},
+	}
+	// A dead incarnation: each File method's stale error, with the handle's name.
+	for _, m := range []struct {
+		op   string
+		call func(fsx.FS, fsx.File) error
+	}{
+		{"read", read},
+		{"write", func(_ fsx.FS, h fsx.File) error {
+			_, err := h.Write([]byte("x"))
+			return err
+		}},
+		{"readat", func(_ fsx.FS, h fsx.File) error {
+			_, err := h.ReadAt(make([]byte, 1), 0)
+			return err
+		}},
+		{"writeat", func(_ fsx.FS, h fsx.File) error {
+			_, err := h.WriteAt([]byte("x"), 0)
+			return err
+		}},
+		{"seek", func(_ fsx.FS, h fsx.File) error {
+			_, err := h.Seek(0, io.SeekStart)
+			return err
+		}},
+		{"truncate", func(_ fsx.FS, h fsx.File) error { return h.Truncate(0) }},
+		{"stat", func(_ fsx.FS, h fsx.File) error {
+			_, err := h.Stat()
+			return err
+		}},
+		{"sync", func(_ fsx.FS, h fsx.File) error { return h.Sync() }},
+		{"close", func(_ fsx.FS, h fsx.File) error { return h.Close() }},
+	} {
+		rules = append(rules, rule{name: "dead file " + m.op, setup: handle(os.O_RDWR, false), crash: true, call: m.call,
+			op: m.op, path: "a", is: stale})
+	}
+	for _, tc := range rules {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newVolume(t)
+			fsys := fsx.Sim(v)
+			var h fsx.File
+			if tc.setup != nil {
+				var err error
+				if h, err = tc.setup(fsys); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			}
+			if tc.crash {
+				v.Node().Crash()
+			}
+			err := tc.call(fsys, h)
+			var inner error
+			switch tc.op {
+			case "":
+				if err != nil {
+					t.Fatalf("got %v, want nil", err)
+				}
+			case "rename":
+				var le *os.LinkError
+				if !errors.As(err, &le) || le.Op != "rename" || le.Old != tc.path || le.New != tc.newPath {
+					t.Fatalf("got %T %v, want *os.LinkError rename %q %q", err, err, tc.path, tc.newPath)
+				}
+				inner = le.Err
+			default:
+				var pe *fs.PathError
+				if !errors.As(err, &pe) || pe.Op != tc.op || pe.Path != tc.path {
+					t.Fatalf("got %T %v, want *fs.PathError %s %q", err, err, tc.op, tc.path)
+				}
+				inner = pe.Err
+			}
+			for _, target := range tc.is {
+				if !errors.Is(err, target) {
+					t.Fatalf("got %v, want errors.Is %v", err, target)
+				}
+			}
+			if tc.plain && inner != tc.is[0] {
+				t.Fatalf("Err = %T %v, want exactly %v", inner, inner, tc.is[0])
+			}
+			if tc.after != nil {
+				if err := tc.after(fsys); err != nil {
+					t.Fatalf("after: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestSimHandleCheckOrder runs the rows of TestOSHandleCheckOrder on Sim, so that both
+// implementations agree (FSX-061), and the rows on a dead incarnation, where the handle checks still
+// come first (FSX-011).
+func TestSimHandleCheckOrder(t *testing.T) {
+	testHandleCheckOrder(t, func(t *testing.T) (fsx.FS, func()) {
+		v := newVolume(t)
+		return fsx.Sim(v), func() { v.Node().Crash() }
+	})
 }
