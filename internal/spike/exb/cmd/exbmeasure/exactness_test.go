@@ -422,6 +422,8 @@ func TestHelperProcess(t *testing.T) {
 		time.Sleep(time.Minute)
 	case "slow": // a passing run that takes a second
 		time.Sleep(time.Second)
+	case "run": // configured by EXBMEASURE_HELPER_* (helperRun)
+		helperRun(t)
 	}
 }
 
@@ -921,5 +923,29 @@ func TestExactnessRunsEverySeed(t *testing.T) {
 	c.reuse = true
 	if err := exactness(c); err != errRequirement {
 		t.Fatalf("exactness -reuse = %v, want errRequirement", err)
+	}
+}
+
+func TestCodeLines(t *testing.T) {
+	src := []byte("package p\n\n// comment\n/* block\n   still */\nfunc f() { /* x */ }\n\tx := 1 // trailing\n")
+	got := codeLines(src)
+	if len(got) != 3 || !got[1] || !got[6] || !got[7] {
+		t.Fatalf("code lines %v, want 1, 6, 7", got)
+	}
+}
+
+// EXB-066 counts every non-blank line outside a comment: the later lines of a raw string literal
+// count too, except blank ones, and a //line directive does not move the line numbers.
+func TestCodeLinesMultiLineTokens(t *testing.T) {
+	src := []byte("package p\n\nvar s = `a\n\n  // b\n`\n//line other.go:100\nvar t = 1; var u = 2\n/* x */ var v = 3\n")
+	got := codeLines(src)
+	want := []int{1, 3, 5, 6, 8, 9}
+	var lines []int
+	for l := range got {
+		lines = append(lines, l)
+	}
+	slices.Sort(lines)
+	if !slices.Equal(lines, want) {
+		t.Fatalf("code lines %v, want %v", lines, want)
 	}
 }

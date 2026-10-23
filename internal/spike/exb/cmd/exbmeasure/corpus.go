@@ -18,8 +18,9 @@ type testCase struct {
 	Args    []string // extra test flags after -test.count=1
 	Outcome bool     // writes an EXB_OUT line (C4, C5, C7)
 	Gated   bool     // counts for compatibility (EXB-065)
-	// Check judges a compat run beyond its exit code (scenario entry points); nil: exit code only.
-	Check func(out string, results []map[string]any) error
+	// Check is a scenario entry point's parent-test assertion on a compat run (exit code, output,
+	// results lines); it decides instead of the exit code. nil: the run passes when it exits 0.
+	Check func(code int, out string, results []map[string]any) error
 }
 
 func at(name, module, pkg string) testCase {
@@ -46,7 +47,7 @@ func c1() []testCase {
 	}
 	gor30 := testCase{Name: "TestATGOR30_EchoReplayRate", Module: ".", Pkg: ".", Run: "^TestGoroutineScenario$",
 		Env: []string{"FAULTLINE_GOR_SCENARIO=gor-30"}, Gated: true,
-		Check: func(out string, results []map[string]any) error {
+		Check: func(_ int, _ string, results []map[string]any) error { // the parent reads only the results lines
 			det, other := 0, 0
 			for _, l := range results {
 				switch {
@@ -81,9 +82,9 @@ func c1() []testCase {
 	// parent test runs the child with -test.v too.
 	c = append(c, testCase{Name: "TestATNSM27_RunEndUnblocks", Module: ".", Pkg: "./shims/netsim",
 		Run: "^TestNetsimScenario$", Env: []string{"NETSIM_SCENARIO=nsm-27"}, Args: []string{"-test.v"}, Gated: true,
-		Check: func(out string, _ []map[string]any) error {
-			if !strings.Contains(out, "nsm27-ok=true") || strings.Contains(out, "still blocked") {
-				return fmt.Errorf("nsm27-ok=true missing")
+		Check: func(code int, out string, _ []map[string]any) error {
+			if code != 0 || !strings.Contains(out, "nsm27-ok=true") || strings.Contains(out, "still blocked") {
+				return fmt.Errorf("exit %d, or nsm27-ok=true missing", code)
 			}
 			return nil
 		}})

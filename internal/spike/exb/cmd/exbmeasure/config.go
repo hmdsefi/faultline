@@ -20,7 +20,7 @@ var errRequirement = errors.New("requirement not met")
 // config holds the flags shared by the subcommands.
 type config struct {
 	backend, corpus, out, work, root, wasmRunner, toolexec string
-	seeds, runs, reps, parallel                            int //nolint:unused // reps is the slowdown subcommand's -reps
+	seeds, runs, reps, parallel                            int
 	reuse                                                  bool
 }
 
