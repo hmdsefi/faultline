@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hmdsefi/faultline"
 )
 
 var (
@@ -225,5 +228,146 @@ func TestATEXB07_CryptoRandFollowsSeed(t *testing.T) {
 	a, b, c := read("5"), read("5"), read("6")
 	if a != b || a == c || len(a) != 32 {
 		t.Fatalf("seed 5: %q, %q; seed 6: %q", a, b, c)
+	}
+}
+
+// goTestExec runs GOOS=wasip1 GOARCH=wasm go test -exec <runner> args... in a fixtureModule
+// copy of testdata/exact, without FAULTLINE_* variables except an artifact root and env. A hung
+// guest does not outlive the test: with the -timeout below, go test kills the runner before the
+// test's deadline (one minute after that timeout), and the context kills go test itself.
+func goTestExec(t *testing.T, env []string, args ...string) (string, int) {
+	t.Helper()
+	mod, err := fixtureModule(t.TempDir(), "exact", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, flags := t.Context(), []string{"test", "-exec", runner}
+	if d, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, d.Add(-5*time.Second))
+		defer cancel()
+		flags = append(flags, fmt.Sprintf("-timeout=%v", max(time.Until(d)-90*time.Second, 30*time.Second).Round(time.Second)))
+	}
+	cmd := exec.CommandContext(ctx, "go", append(flags, args...)...) //nolint:gosec // G204: runner is the binary setup built, args are the tests' literals
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Dir = mod
+	cmd.Env = append(cleanEnv("GOOS=wasip1", "GOARCH=wasm", "GOWORK=off", "FAULTLINE_ARTIFACTS="+t.TempDir()), env...)
+	out, err := cmd.CombinedOutput()
+	if ee, ok := err.(*exec.ExitError); ok {
+		return string(out), ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return string(out), 0
+}
+
+// testASeeds are TestA's default seeds (API-015); computed with DeriveSeed and pinned:
+// 0xbc886b4ba098a264, 0xe2c3c685e03b7dda, 0x6bf2f4f90164d0cf.
+func testASeeds(t *testing.T) []uint64 {
+	var s []uint64
+	for i := range 3 {
+		s = append(s, faultline.DeriveSeed(faultline.NameBase("TestA"), i))
+	}
+	if s[0] != 0xbc886b4ba098a264 || s[1] != 0xe2c3c685e03b7dda || s[2] != 0x6bf2f4f90164d0cf {
+		t.Fatalf("TestA seeds %#x differ from the pinned values", s)
+	}
+	return s
+}
+
+// AT-EXB-04
+func TestATEXB04_PlanRunThroughGoTest(t *testing.T) {
+	out, code := goTestExec(t, nil, "-count=1", "-v", "./pass")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	b := 0
+	for _, l := range strings.Split(out, "\n") {
+		if l == "B" {
+			b++
+		}
+	}
+	if b != 1 {
+		t.Fatalf("B printed %d times, want once\n%s", b, out)
+	}
+	for _, s := range testASeeds(t) {
+		if n := strings.Count(out, fmt.Sprintf("--- PASS: TestA/seed=0x%016x", s)); n != 1 {
+			t.Fatalf("seed 0x%016x passed %d times, want once\n%s", s, n, out)
+		}
+	}
+	if strings.Contains(out, "faultline-exact-plan") {
+		t.Fatalf("plan lines leaked into the output\n%s", out)
+	}
+}
+
+// AT-EXB-05
+func TestATEXB05_FailingSeedReported(t *testing.T) {
+	out, code := goTestExec(t, nil, "-count=1", "-v", "./fail")
+	s := testASeeds(t)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\n%s", code, out)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("--- FAIL: TestA/seed=0x%016x", s[1]),
+		`faultline: invariant "seed two fails" violated`,
+		fmt.Sprintf("replay:    FAULTLINE_SEED=0x%016x go test -v -run '^TestA$'", s[1]),
+		"determinism: exact (wasip1 backend)",
+		fmt.Sprintf("--- PASS: TestA/seed=0x%016x", s[0]),
+		fmt.Sprintf("--- PASS: TestA/seed=0x%016x", s[2]),
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q\n%s", want, out)
+		}
+	}
+}
+
+func TestBadPlanLine(t *testing.T) {
+	_, errOut, code := runWasm(t, []string{"BAD_PLAN=1"}, guest, "-test.run=^TestBadPlan$")
+	if code != 2 || !strings.Contains(errOut, `faultline-wasm: bad plan line "faultline-exact-plan\tTestBadPlan\tnot-a-seed"`) {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+// A plan line that follows output without a newline still runs its seed, here the failing one,
+// and the plan instance's final partial line is forwarded (EXB-014 removes plan lines wherever
+// they start). Without -v, Run logs nothing before its plan lines.
+func TestPlanLineAfterPartialOutput(t *testing.T) {
+	out, code := goTestExec(t, nil, "-count=1", "./partial")
+	if s := testASeeds(t)[0]; code != 1 || !strings.Contains(out, fmt.Sprintf("--- FAIL: TestA/seed=0x%016x", s)) {
+		t.Fatalf("exit %d, want 1 with seed 0x%016x failing\n%s", code, s, out)
+	}
+	if n := strings.Count(out, "partial-end"); n != 4 || strings.Contains(out, "faultline-exact-plan") {
+		t.Fatalf("partial-end printed %d times, want 4 (every instance), and no plan text\n%s", n, out)
+	}
+}
+
+// With -count=2 and FAULTLINE_SEED_LIST, each seed runs once per repetition, each in its own run
+// instance whose seed is its plan line's, in plan order after the plan instance (EXB-014).
+func TestPlanRunCountAndSeedList(t *testing.T) {
+	out, code := goTestExec(t, []string{"FAULTLINE_SEED_LIST=0x1,0x2", "FAULTLINE_WASM_STATS=1"}, "-count=2", "-v", "./partial")
+	var seeds []string
+	for _, m := range regexp.MustCompile(`faultline-wasm: seed=(0x[0-9a-f]{16}) `).FindAllStringSubmatch(out, -1) {
+		seeds = append(seeds, m[1])
+	}
+	want := "0x0000000000000000 0x0000000000000001 0x0000000000000002 0x0000000000000001 0x0000000000000002"
+	if code != 0 || strings.Join(seeds, " ") != want {
+		t.Fatalf("exit %d, instance seeds %v, want exit 0 and %s\n%s", code, seeds, want, out)
+	}
+	for _, s := range []string{"0x0000000000000001", "0x0000000000000002"} {
+		if n := strings.Count(out, "--- PASS: TestA/seed="+s); n != 2 {
+			t.Fatalf("seed %s passed %d times, want twice\n%s", s, n, out)
+		}
+	}
+}
+
+// Both kinds of instance write to stdout, a run instance prints what single mode prints for its
+// seed, and the plan instance's exit code counts (EXB-014, EXB-016).
+func TestPlanRunStdoutAndSeed(t *testing.T) {
+	single, _, _ := runWasm(t, []string{"FAULTLINE_SEED=5"}, guest, "-test.run=^TestCryptoRand$")
+	zero, _, _ := runWasm(t, []string{"FAULTLINE_SEED=0"}, guest, "-test.run=^TestCryptoRand$")
+	out, errOut, code := runWasm(t, []string{"GOOD_PLAN=1"}, guest, "-test.run=^(TestFail|TestCryptoRand|TestBadPlan)$")
+	hex := regexp.MustCompile(`(?m)^[0-9a-f]{32}$`).FindAllString(out, -1)
+	want := []string{strings.SplitN(zero, "\n", 2)[0], strings.SplitN(single, "\n", 2)[0]}
+	if code != 1 || strings.Join(hex, " ") != strings.Join(want, " ") {
+		t.Fatalf("exit %d, stdout lines %q, want exit 1 and %q (seed 0, then seed 5)\nstdout %s\nstderr %s", code, hex, want, out, errOut)
 	}
 }
