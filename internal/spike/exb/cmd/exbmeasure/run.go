@@ -158,10 +158,20 @@ var waitDelay = 5 * time.Second
 
 // runResult is one execution of a test binary.
 type runResult struct {
-	code   int
-	out    string
-	wall   time.Duration
-	reason string // why a run with code -1 ended: "timeout after <limit>" or the signal
+	code     int
+	out      string
+	wall     time.Duration
+	reason   string // why a run with code -1 ended: "timeout after <limit>" or the signal
+	timedOut bool   // the run limit ended the run
+}
+
+// head is the first line of a run's log: "exit <code>", and for a run that the limit or a signal
+// ended, why.
+func (r runResult) head() string {
+	if r.reason == "" {
+		return fmt.Sprintf("exit %d", r.code)
+	}
+	return fmt.Sprintf("exit %d (%s)", r.code, r.reason)
 }
 
 // exec runs tc's binary in its package directory with baseEnv, tc.Env and env, under runTimeout
@@ -169,6 +179,11 @@ type runResult struct {
 // env sets FAULTLINE_SEED and in plan/run mode otherwise (EXB-014). A run that exits but leaves
 // a process holding its output open for waitDelay is a tool error.
 func (c *config) exec(tc testCase, env []string) (runResult, error) {
+	return c.execWithin(tc, env, runTimeout)
+}
+
+// execWithin is exec with the run limit limit instead of runTimeout.
+func (c *config) execWithin(tc testCase, env []string, limit time.Duration) (runResult, error) {
 	bin, err := c.binary(tc)
 	if err != nil {
 		return runResult{}, err
@@ -178,7 +193,8 @@ func (c *config) exec(tc testCase, env []string) (runResult, error) {
 	if c.backend == "wasm" {
 		name, args = c.wasmRunner, append([]string{bin}, args...)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	start := time.Now() // the deadline counts from here, so a run that the limit ended took at least limit
+	ctx, cancel := context.WithDeadline(context.Background(), start.Add(limit))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = filepath.Join(c.root, tc.Module, tc.Pkg)
@@ -186,11 +202,10 @@ func (c *config) exec(tc testCase, env []string) (runResult, error) {
 	cmd.WaitDelay = waitDelay
 	var b bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &b, &b
-	start := time.Now()
 	err = cmd.Run()
 	res := runResult{out: b.String(), wall: time.Since(start)}
 	if ctx.Err() != nil {
-		res.code, res.reason = -1, fmt.Sprintf("timeout after %v", runTimeout) // a failed run
+		res.code, res.reason, res.timedOut = -1, fmt.Sprintf("timeout after %v", limit), true // a failed run
 		return res, nil
 	}
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -239,11 +254,7 @@ func (c *config) ensureRun(tc testCase, s uint64, r int) error {
 			return err
 		}
 	}
-	head := fmt.Sprintf("exit %d", rr.code)
-	if rr.reason != "" {
-		head += " (" + rr.reason + ")"
-	}
-	return os.WriteFile(c.rawPath(tc, s, r, "log"), []byte(head+"\n"+rr.out), 0o600)
+	return os.WriteFile(c.rawPath(tc, s, r, "log"), []byte(rr.head()+"\n"+rr.out), 0o600)
 }
 
 // job is one run of one seed of one test.
