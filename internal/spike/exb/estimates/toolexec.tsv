@@ -1,6 +1,5 @@
 complete rewrite table: sync.Cond, sync/atomic, method values, generic code, else-if headers (EXB-096)	600
 standard-library coverage policy and rewriting of selected std packages (EXB-096)	400
 wrapper cache keyed by toolchain and flags (EXB-096)	120
-rewriter test suite per supported Go release (EXB-096)	300
 promotion of internal/gosched to a documented seam (EXB-096)	60
 wrapper error handling for every tool invocation path	80
