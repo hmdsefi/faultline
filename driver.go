@@ -52,6 +52,7 @@ func newDriver(w *World, ga *goAttempt) *driver {
 	d.lockDriver()
 	w.Sim.OnCrash(d.onCrash) // after simnet's and simdisk's hooks (API-030 created them first)
 	ga.watch.phase.Store(watchBody)
+	d.schedStart()
 	return d
 }
 
@@ -130,7 +131,10 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 	}
 	d.emitDrive(until)
 	for {
-		d.quiesce() // (1)
+		d.quiesce()           // (1)
+		if d.schedRelease() { // EXB-036: one release per pass, before time and events advance
+			continue
+		}
 		b := bubbleNow()
 		d.advance(b) // GOR-021
 		if d.failNow {

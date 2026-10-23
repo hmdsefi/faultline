@@ -271,6 +271,7 @@ func (d *driver) endRun() {
 	d.cancelAllRequests()
 	d.wakeAllWaiters()
 	d.ga.asserts.take() // discard the queue (GOR-085)
+	d.schedEnd()
 }
 
 // WaitUnpaused blocks a process goroutine while node is paused (GOR-040). It reports whether
