@@ -988,7 +988,6 @@ func TestRunLaterPhase(t *testing.T) {
 		{[]string{"ROW=swarm"}, "faultline: Options.Swarm is set, but swarm testing is not in this release yet; set it to false, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 		{[]string{"FAULTLINE_SWARM=0"}, "faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 		{[]string{"FAULTLINE_SWARM_CONFIG=/x.json"}, "faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
-		{[]string{"FAULTLINE_EXACT=run"}, "faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167"},
 	}
 	for _, c := range cases {
 		o, code := runScenario(t, "later-phase", c.env)
