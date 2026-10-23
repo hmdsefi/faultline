@@ -1,0 +1,6 @@
+production seed protocol: aggregated go test output and -test.json passthrough (EXB-095 item 3)	250
+artifact re-runs and FAULTLINE_CHECK_DETERMINISM as separate instances (EXB-095 item 3)	120
+faultline sweep and minimization replays spawning one instance per seed (EXB-095 item 4)	150
+runner error handling for every path: traps, timeouts, interrupted runs	80
+compilation-cache management and stats output	40
+CI job and golden hashes per toolchain (EXB-095 item 6)	60
