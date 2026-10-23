@@ -86,6 +86,31 @@ func main() {
 		}
 		os.Exit(run(seed, env, args, os.Stdout))
 	}
-	// Plan/run mode (EXB-014) is not implemented yet.
-	fail(fmt.Errorf("FAULTLINE_SEED is not set (plan/run mode is not implemented yet)"))
+	// Plan/run mode (EXB-014): a plan instance with seed 0, then one run instance per plan line.
+	planEnv := clone(env)
+	planEnv["FAULTLINE_EXACT"] = "plan"
+	filter := &wasm.PlanFilter{W: os.Stdout}
+	code := run(0, planEnv, args, filter)
+	filter.Flush()
+	if filter.Err != nil {
+		fail(filter.Err)
+	}
+	for _, e := range filter.Entries {
+		runEnv := clone(env)
+		delete(runEnv, "FAULTLINE_SEED_LIST") // FAULTLINE_SEED and FAULTLINE_SEED_LIST conflict (API-011)
+		runEnv["FAULTLINE_EXACT"] = "run"
+		runEnv["FAULTLINE_SEED"] = fmt.Sprintf("0x%016x", e.Seed)
+		if c := run(e.Seed, runEnv, wasm.RunArgs(args, e.Test), os.Stdout); code == 0 {
+			code = c // EXB-016: the first non-zero code, plan instance first
+		}
+	}
+	os.Exit(code)
+}
+
+func clone(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

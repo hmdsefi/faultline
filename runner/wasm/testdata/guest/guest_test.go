@@ -74,9 +74,13 @@ func TestCryptoRand(t *testing.T) {
 	fmt.Printf("%x\n", b)
 }
 
-// TestBadPlan prints a malformed plan line in a plan instance (the runner's TestBadPlanLine).
+// TestBadPlan prints a plan line in a plan instance: a malformed one with BAD_PLAN=1 (the runner's
+// TestBadPlanLine), one that runs TestCryptoRand with seed 5 with GOOD_PLAN=1.
 func TestBadPlan(t *testing.T) {
 	if os.Getenv("FAULTLINE_EXACT") == "plan" && os.Getenv("BAD_PLAN") == "1" {
 		os.Stdout.WriteString("faultline-exact-plan\tTestBadPlan\tnot-a-seed\n")
+	}
+	if os.Getenv("FAULTLINE_EXACT") == "plan" && os.Getenv("GOOD_PLAN") == "1" {
+		os.Stdout.WriteString("faultline-exact-plan\tTestCryptoRand\t0x0000000000000005\n")
 	}
 }
