@@ -425,7 +425,7 @@ func TestResolveErrors(t *testing.T) {
 		{Options{}, map[string]string{"FAULTLINE_MINIMIZE": "fast"}, `faultline: invalid FAULTLINE_MINIMIZE "fast": parameter "fast" is not key=value`},
 		{Options{}, map[string]string{"FAULTLINE_SWARM": "0"}, `faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
 		{Options{}, map[string]string{"FAULTLINE_SWARM_CONFIG": "/x.json"}, `faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
-		{Options{}, map[string]string{"FAULTLINE_EXACT": "run"}, `faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167`},
+		{Options{}, map[string]string{"FAULTLINE_EXACT": "Run"}, `faultline: FAULTLINE_EXACT="Run": want plan or run`},
 		{Options{Seeds: -1}, nil, `faultline: Options.Seeds is -1; want 0 (default 20) or more`},
 		{Options{Seeds: MaxSeeds + 1}, nil, `faultline: Options.Seeds is 1000001; want at most 1000000`},
 		{Options{Duration: -time.Second}, nil, `faultline: Options.Duration is -1s; want 0 (default 1m0s) or more`},
@@ -487,7 +487,7 @@ func TestResolveErrorOrder(t *testing.T) {
 		{"FAULTLINE_MINIMIZE", "x"},
 		{"FAULTLINE_SWARM", "0"},
 		{"FAULTLINE_SWARM_CONFIG", "/x.json"},
-		{"FAULTLINE_EXACT", "run"},
+		{"FAULTLINE_EXACT", "Run"},
 		{"FAULTLINE_SEED_LIST", "x"},
 	}
 	for i, v := range invalid {

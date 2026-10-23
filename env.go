@@ -58,6 +58,7 @@ type environment struct {
 	checkDeterminism bool            // FAULTLINE_CHECK_DETERMINISM=1
 	traceFull        bool            // FAULTLINE_TRACE=full
 	minimize         bool            // FAULTLINE_MINIMIZE enables minimization (Phase 3 acts on it)
+	exact            exactMode       // FAULTLINE_EXACT (spike branch)
 	seedList         []uint64        // FAULTLINE_SEED_LIST, duplicates removed
 }
 
@@ -177,7 +178,11 @@ func (e *environment) parse(name, v string) error {
 	case envSwarm, envSwarmConfig:
 		return notInRelease(name, featureSwarm, "unset it")
 	case envExact:
-		return notInRelease(name, featureExact, "unset it")
+		m, err := parseExact(v)
+		if err != nil {
+			return err
+		}
+		e.exact = m
 	case envSeedList:
 		list, err := parseSeedList(v)
 		if err != nil {

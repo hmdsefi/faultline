@@ -176,6 +176,10 @@ func run(t *testing.T, opts Options, body func(w *World), runSeeds bool, seeds [
 	for _, l := range p.logs {
 		t.Log(l)
 	}
+	if p.env.exact == exactPlan { // EXB-014 step 1
+		writeExactPlan(t.Name(), p.seeds)
+		t.Skip("faultline: exact backend plan instance")
+	}
 	for i, seed := range p.seeds {
 		var res *seedResult
 		t.Run(fmt.Sprintf("seed=0x%016x", seed), func(st *testing.T) {
@@ -347,7 +351,11 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			r.t.Name(), seed, r.replay(seed, nil).Command)
 	}
 	r.attemptNo = res.attempts
-	a1 := r.attempt(st, seed, r.plan.opts.Trace, r.plan.env.schedule, true)
+	trace := r.plan.opts.Trace
+	if r.plan.env.exact == exactRun { // EXB-015 (a): the primary attempt keeps the full trace
+		trace = kernel.TraceConfig{Level: kernel.TraceFull}
+	}
+	a1 := r.attempt(st, seed, trace, r.plan.env.schedule, true)
 	if a1.setupErr != "" {
 		res.status = "fail"
 		res.fail = &failure{kind: "setup", message: a1.setupErr}
@@ -364,7 +372,9 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 
 	var outcome *failure
 	var art attemptResult
-	if a1.fail != nil {
+	if a1.fail != nil && r.plan.env.exact == exactRun { // EXB-015 (a)
+		outcome, art = a1.fail, a1
+	} else if a1.fail != nil {
 		cfg := kernel.TraceConfig{Level: kernel.TraceFull}
 		if a1.fail.kind == "limit" {
 			cfg.Buffer = 1_000_000
@@ -380,7 +390,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			a3 := r.rerun(st, res, cfg)
 			outcome = newDeterminismFailure("artifact_rerun", seed, []attemptResult{a1, a2, a3}, a1.fail, a2.records, a3.records, a2, goroutine)
 		}
-	} else if r.plan.opts.CheckDeterminism {
+	} else if r.plan.opts.CheckDeterminism && r.plan.env.exact != exactRun {
 		a2 := r.rerun(st, res, r.plan.opts.Trace)
 		switch {
 		case a2.hash != a1.hash:
@@ -415,7 +425,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		warnings = append(warnings, art.warnings...) // about extra files, so only with artifacts on (API-077)
 		a := r.buildArtifact(st, res, outcome, art, warnings)
 		d, err := r.writeArtifact(seed, a, func(dir string) string {
-			return "--- FAIL: " + st.Name() + "\n" + joinLines(consoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true, goroutine), "    ")
+			return "--- FAIL: " + st.Name() + "\n" + joinLines(r.exactConsole(consoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true, goroutine)), "    ")
 		})
 		if err != nil {
 			artifactsLine = "not written: " + err.Error()
@@ -425,7 +435,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			res.artifactDir = d
 		}
 	}
-	fmt.Fprint(st.Output(), joinLines(consoleLines(outcome, rep.Command, artifactsLine, warnings, false, written, goroutine), ""))
+	fmt.Fprint(st.Output(), joinLines(r.exactConsole(consoleLines(outcome, rep.Command, artifactsLine, warnings, false, written, goroutine)), ""))
 	st.Fail()
 	completed = true
 }
@@ -464,12 +474,13 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 	if f != nil {
 		status, rf = "fail", f.report()
 	}
+	level, backend := r.determinism()
 	rep := artifact.Report{
 		Status: status, Package: r.build.importPath, Test: r.t.Name(), Subtest: st.Name(),
 		Seed: seedText, SeedSource: p.seedSource, SeedIndex: res.index, Failure: rf, Warnings: warnings,
 		Replay: r.replay(res.seed, f), Versions: vers, Options: runOptions(p.opts, p.env),
 		OptionsHash: optionsHash(p.opts, p.env.scheduleHash), Nodes: art.nodes,
-		DeterminismLevel: determinismLevel(p.opts.Mode),
+		DeterminismLevel: level, ExactBackend: backend,
 		Run: artifact.RunInfo{
 			TraceHash: hex16(art.hash), Events: art.executed, Records: art.lastSeq,
 			EndNS: int64(art.now), End: art.now.String(), Stop: art.stop, Planners: art.planners, Attempts: res.attempts,
@@ -810,7 +821,7 @@ func (r *runner) writeResult(st *testing.T, res *seedResult) {
 		Leaks: res.leaks,
 	}
 	if res.events != nil {
-		line.DeterminismLevel = determinismLevel(r.plan.opts.Mode)
+		line.DeterminismLevel, line.ExactBackend = r.determinism()
 	}
 	if res.status == "fail" && res.fail != nil {
 		f := res.fail
