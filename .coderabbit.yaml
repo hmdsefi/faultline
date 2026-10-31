@@ -112,7 +112,7 @@ reviews:
       instructions: >-
         Keep the default token permissions read-only and grant write scopes per
         job only when the job needs them. The root job's matrix (ubuntu-latest
-        and macos-14, Go 1.26.x and 1.27.x) with FAULTLINE_CHECK_DETERMINISM=1
+        and macos-15, Go 1.26.x and 1.27.x) with FAULTLINE_CHECK_DETERMINISM=1
         is what proves cross-platform determinism, and golden-compare compares
         the FAULTLINE_GOLDEN_OUT files of all its cells; flag any change that
         drops a cell, the variable or the comparison.
