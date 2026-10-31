@@ -75,9 +75,10 @@ type scheduler struct {
 	waiting []waiter
 	mutexes map[any][]waiter // per-mutex waiters, keyed by *sync.Mutex or *sync.RWMutex
 	onces   map[*sync.Once]*onceState
+	conds   map[*sync.Cond][]waiter // per-Cond waiters, in wait order
 }
 
-var s = &scheduler{mutexes: map[any][]waiter{}, onces: map[*sync.Once]*onceState{}}
+var s = &scheduler{mutexes: map[any][]waiter{}, onces: map[*sync.Once]*onceState{}, conds: map[*sync.Cond][]waiter{}}
 
 func init() { gosched.Active = s } //nolint:gochecknoinits // registers the scheduler with the driver before any test runs
 
@@ -109,6 +110,11 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 			close(w.ch)
 		}
 	}
+	for _, ws := range s.conds { //faultline:maporder every waiter's channel is closed; the order does not matter
+		for _, w := range ws {
+			close(w.ch)
+		}
+	}
 	for _, o := range s.onces { //faultline:maporder every waiter's channel is closed; the order does not matter
 		for _, ch := range o.waiters {
 			close(ch)
@@ -116,6 +122,7 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 		o.waiters = nil // the caller still running f would close them again
 	}
 	s.waiting, s.mutexes, s.onces = nil, map[any][]waiter{}, map[*sync.Once]*onceState{}
+	s.conds = map[*sync.Cond][]waiter{}
 	s.release, s.user, s.active, s.driver = release, user, release != nil, id
 	s.on.Store(s.active)
 	if release != nil {
