@@ -38,7 +38,7 @@ type rewriter struct {
 	n       int                   // temporary-name counter
 	sched   bool                  // the file now uses sched
 	reflect bool                  // the file now uses reflect
-	rands   map[string]bool       // local names of rewritten math/rand imports
+	keeps   map[string]string     // local name -> declaration that keeps a replaced import used
 	points  map[int]bool          // offsets where a point was inserted
 	gotos   map[types.Object]bool // labels a goto statement names
 }
@@ -81,12 +81,13 @@ const (
 )
 
 // render returns src[lo:hi] with the edits inside it applied. Edits nested in another edit are
-// applied by that edit's text function (through render on sub-ranges).
+// applied by that edit's text function (through render on sub-ranges). An insertion at either end
+// of a sub-range belongs to the enclosing text, which applies it around the edit.
 func (r *rewriter) render(lo, hi int) string {
 	var b strings.Builder
 	cur := lo
 	for _, e := range r.edits {
-		if e.pos < cur || e.end > hi || (e.pos == e.end && e.pos >= hi) {
+		if e.pos < cur || e.end > hi || (e.pos == e.end && (e.pos == lo || e.pos >= hi)) {
 			continue
 		}
 		b.Write(r.src[cur:e.pos])
@@ -131,13 +132,13 @@ func (r *rewriter) output() string {
 		imports = append(imports, `import __fl_reflect "reflect"`)
 	}
 	var tail string
-	names := make([]string, 0, len(r.rands))
-	for n := range r.rands {
+	names := make([]string, 0, len(r.keeps))
+	for n := range r.keeps {
 		names = append(names, n)
 	}
 	slices.Sort(names)
 	for _, n := range names {
-		tail += "\nvar _ " + n + ".Source\n"
+		tail += "\nvar _ " + r.keeps[n] + "\n"
 	}
 	if len(gaps) > 0 {
 		tail += "\nvar _ = __fl_sched.Gaps(" + strconv.Quote(strings.Join(gaps, "\n")) + ")\n"
@@ -167,7 +168,7 @@ func (r *rewriter) sortedGaps() []string {
 
 // rewrite walks the file once and records the edits of EXB-034.
 func (r *rewriter) rewrite() {
-	r.rands, r.points, r.gotos = map[string]bool{}, map[int]bool{}, map[types.Object]bool{}
+	r.keeps, r.points, r.gotos = map[string]string{}, map[int]bool{}, map[types.Object]bool{}
 	ast.Inspect(r.file, func(n ast.Node) bool {
 		if b, ok := n.(*ast.BranchStmt); ok && b.Tok == token.GOTO && b.Label != nil {
 			if obj := r.info.Uses[b.Label]; obj != nil {
@@ -195,11 +196,7 @@ func (r *rewriter) rewrite() {
 				r.call(n, sel)
 			}
 		case *ast.SelectorExpr:
-			if !calls[n] {
-				if name, ok := r.syncMethod(n); ok {
-					r.gap(n, "method value "+name)
-				}
-			}
+			r.selector(n, calls[n])
 		}
 		return true
 	})
@@ -321,11 +318,10 @@ func (r *rewriter) deferStmt(start token.Pos, st *ast.DeferStmt) {
 			return "{ " + d + " := " + r.text(call.Args[0]) + "; defer func() { __fl_sched.Point(); close(" + d + ") }() }"
 		})
 	} else if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-		if name, ok := r.syncMethod(sel); ok && name == "WaitGroup.Wait" {
+		if name, ok := r.syncMethod(sel); ok && name == "WaitGroup.Wait" && !r.recvGap(st, sel) {
 			d = r.tmp("d")
 			r.add(r.off(st.Pos()), r.off(st.End()), func() string {
-				addr, _ := r.recvAddr(sel)
-				return "{ " + d + " := " + addr + "; defer func() { __fl_sched.Point(); " + d + ".Wait() }() }"
+				return "{ " + d + " := " + r.recvAddr(sel) + "; defer func() { __fl_sched.Point(); " + d + ".Wait() }() }"
 			})
 		}
 	}
@@ -392,11 +388,18 @@ func (r *rewriter) goStmt(st *ast.GoStmt) {
 			}
 		}
 	}
-	// The spec's form binds a sync method as a method value, which then runs outside sched.
-	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
-		if name, ok := r.syncMethod(sel); ok {
-			r.gap(st, "method value "+name)
-		}
+	// A sync method is bound as its rewritten method value (XTE-041); an interface Lock or Unlock,
+	// or a sync method whose receiver the file cannot name, is bound as a method value, which runs
+	// outside sched (XTE-042).
+	sel, _ := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	name, _ := r.syncMethod(sel)
+	helper := syncFuncs[name]
+	s := r.info.Selections[sel]
+	iface := s != nil && s.Kind() == types.MethodVal && r.ifaceLock(s)
+	if (helper != "" || iface) && r.recvGap(st, sel) {
+		helper = ""
+	} else if iface {
+		r.gap(st, "method value of an interface Lock or Unlock")
 	}
 	r.sched = true
 	names := make([]string, len(ops))
@@ -413,6 +416,14 @@ func (r *rewriter) goStmt(st *ast.GoStmt) {
 				continue
 			}
 			val := r.text(e)
+			if i == 0 && helper != "" {
+				val = "__fl_sched." + helper + "(" + r.recvAddr(sel) + ")"
+			}
+			if i == 2 && sel != nil { // AfterFunc binds its function wrapped, as in a call (XTE-041)
+				if p, n, _ := r.pkgFunc(sel); (p == "time" || p == "context") && n == "AfterFunc" && len(call.Args) == 2 {
+					val = "__fl_sched.Func(" + val + ")"
+				}
+			}
 			if conv[i] != "" {
 				val = conv[i] + "(" + val + ")"
 			}
@@ -923,54 +934,25 @@ func (r *rewriter) syncMethod(sel *ast.SelectorExpr) (string, bool) {
 	if !ok || s.Kind() != types.MethodVal {
 		return "", false
 	}
-	fn, ok := s.Obj().(*types.Func)
-	if !ok || fn.Pkg() == nil || (fn.Pkg().Path() != "sync" && fn.Pkg().Path() != "sync/atomic") {
-		return "", false
-	}
-	sig, ok := fn.Type().(*types.Signature)
-	if !ok || sig.Recv() == nil {
-		return "", false
-	}
-	recv := sig.Recv().Type()
-	if p, ok := recv.(*types.Pointer); ok {
-		recv = p.Elem()
-	}
-	named, ok := recv.(*types.Named)
-	if !ok {
-		return "", false
-	}
-	return named.Obj().Name() + "." + fn.Name(), true
+	return r.syncMethodOf(s)
 }
 
-// recvAddr returns the address expression of the sync value a method selection is called on.
-func (r *rewriter) recvAddr(sel *ast.SelectorExpr) (string, bool) {
-	s := r.info.Selections[sel]
-	expr := "(" + r.text(sel.X) + ")"
-	t := r.info.TypeOf(sel.X)
-	idx := s.Index()
-	for _, i := range idx[:len(idx)-1] {
-		u := t
-		if p, ok := u.Underlying().(*types.Pointer); ok {
-			u = p.Elem()
-		}
-		st, ok := u.Underlying().(*types.Struct)
-		if !ok {
-			return "", false
-		}
-		f := st.Field(i)
-		expr += "." + f.Name()
-		t = f.Type()
-	}
+// recvAddr returns the address expression of the sync value a method selection is called on,
+// for a selection whose receiver the file can name (recvGap).
+func (r *rewriter) recvAddr(sel *ast.SelectorExpr) string {
+	path, t, _ := r.fieldPath(sel)
+	expr := "(" + r.text(sel.X) + ")" + path
 	if _, ok := t.Underlying().(*types.Pointer); ok {
-		return expr, true
+		return expr
 	}
-	return "&" + expr, true
+	return "&" + expr
 }
 
 var syncCalls = map[string]string{
 	"Mutex.Lock": "Lock", "Mutex.Unlock": "Unlock",
 	"RWMutex.Lock": "WLock", "RWMutex.Unlock": "WUnlock", "RWMutex.RLock": "RLock", "RWMutex.RUnlock": "RUnlock",
-	"Once.Do": "OnceDo",
+	"Once.Do": "OnceDo", "RWMutex.RLocker": "RLocker", "WaitGroup.Go": "WaitGroupGo",
+	"Cond.Wait": "CondWait", "Cond.Signal": "CondSignal", "Cond.Broadcast": "CondBroadcast",
 }
 
 var randV1 = map[string]bool{"ExpFloat64": true, "Float32": true, "Float64": true, "Int": true, "Int31": true,
@@ -981,28 +963,27 @@ var randV2 = map[string]bool{"ExpFloat64": true, "Float32": true, "Float64": tru
 	"Int32N": true, "Int64": true, "Int64N": true, "IntN": true, "NormFloat64": true, "Perm": true, "Shuffle": true,
 	"Uint": true, "Uint32": true, "Uint32N": true, "Uint64": true, "Uint64N": true, "UintN": true}
 
-// call rewrites sync method calls and math/rand package-level calls.
+// call rewrites sync method calls, Lock and Unlock calls through interfaces, math/rand
+// package-level calls and the function arguments of AfterFunc; a sync method or interface lock
+// call whose receiver the file cannot name is a gap.
 func (r *rewriter) call(call *ast.CallExpr, sel *ast.SelectorExpr) {
-	if name, ok := r.syncMethod(sel); ok {
-		switch {
-		case strings.HasPrefix(name, "Cond."):
-			r.gap(call, "sync.Cond")
-			return
-		case r.info.Selections[sel].Obj().Pkg().Path() == "sync/atomic":
-			r.gap(call, "sync/atomic")
+	if s := r.info.Selections[sel]; s != nil && s.Kind() == types.MethodVal && r.ifaceLock(s) {
+		if r.recvGap(call, sel) {
 			return
 		}
+		fn := map[string]string{"Lock": "ILock", "Unlock": "IUnlock"}[sel.Sel.Name]
+		r.sched = true
+		r.add(r.off(call.Pos()), r.off(call.End()), func() string { return "__fl_sched." + fn + "(" + r.ifaceRecv(sel) + ")" })
+		return
+	}
+	if name, ok := r.syncMethod(sel); ok {
 		fn, ok := syncCalls[name]
-		if !ok {
+		if !ok || r.recvGap(call, sel) {
 			return
 		}
 		r.sched = true
 		r.add(r.off(call.Pos()), r.off(call.End()), func() string {
-			addr, ok := r.recvAddr(sel)
-			if !ok {
-				return r.render(r.off(call.Pos()), r.off(call.End()))
-			}
-			args := addr
+			args := r.recvAddr(sel)
 			for _, a := range call.Args {
 				args += ", " + r.text(a)
 			}
@@ -1020,15 +1001,20 @@ func (r *rewriter) call(call *ast.CallExpr, sel *ast.SelectorExpr) {
 	}
 	switch path := pn.Imported().Path(); {
 	case path == "math/rand" && randV1[sel.Sel.Name]:
-		r.sched, r.rands[id.Name] = true, true
+		r.sched = true
+		r.keepImport(path, id)
 		r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.RandV1()." + sel.Sel.Name })
 	case path == "math/rand/v2" && randV2[sel.Sel.Name]:
-		r.sched, r.rands[id.Name] = true, true
+		r.sched = true
+		r.keepImport(path, id)
 		r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.Rand()." + sel.Sel.Name })
 	case path == "math/rand/v2" && sel.Sel.Name == "N":
 		r.gap(call, "math/rand/v2.N")
-	case path == "sync/atomic":
-		r.gap(call, "sync/atomic")
+	case (path == "time" || path == "context") && sel.Sel.Name == "AfterFunc" && len(call.Args) == 2:
+		arg := call.Args[1]
+		r.sched = true
+		r.add(r.off(arg.Pos()), r.off(arg.Pos()), func() string { return "__fl_sched.Func(" })
+		r.add(r.off(arg.End()), r.off(arg.End()), func() string { return ")" })
 	case path == "reflect" && sel.Sel.Name == "Select":
 		r.gap(call, "reflect.Select")
 	}

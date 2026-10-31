@@ -10,7 +10,7 @@ import (
 
 // ILock replaces a Lock call through an interface value: mutexes go through Lock and WLock,
 // other lockers are called directly.
-func ILock(l sync.Locker) {
+func ILock(l interface{ Lock() }) {
 	switch m := l.(type) {
 	case *sync.Mutex:
 		Lock(m)
@@ -22,7 +22,7 @@ func ILock(l sync.Locker) {
 }
 
 // IUnlock replaces an Unlock call through an interface value.
-func IUnlock(l sync.Locker) {
+func IUnlock(l interface{ Unlock() }) {
 	switch m := l.(type) {
 	case *sync.Mutex:
 		Unlock(m)
