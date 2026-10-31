@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/hmdsefi/faultline/artifact"
+	"github.com/hmdsefi/faultline/internal/gosched"
 	"github.com/hmdsefi/faultline/kernel"
 )
 
 // watchState is what the driver publishes for the stall watchdog (GOR-080). Atomics only: the
 // watchdog reads it from outside the bubble.
 type watchState struct {
-	progress atomic.Uint64          // incremented at every synctest.Wait return and drain chunk
+	progress atomic.Uint64          // incremented at every synctest.Wait return and drain chunk, except the Wait after a release (XTE-082)
 	phase    atomic.Int32           // watchBody … watchDrain
 	nowNS    atomic.Int64           // Sim.Now() after the last step
 	executed atomic.Uint64          // Sim.Executed() after the last step
@@ -173,6 +174,10 @@ func formatStallReport(timeout time.Duration, test, attempt string, now kernel.T
 	b.WriteString("        bubble, for example a package-level channel made during init\n")
 	b.WriteString("    [IO wait] / [syscall]: real I/O that does not go through netsim or fsx\n")
 	b.WriteString("    [running] / [runnable]: a goroutine that never blocks (busy loop)\n")
+	if gosched.Active != nil { // XTE-082
+		b.WriteString("    [toolexec] goroutines parked in sched.Point and nothing else moving: a goroutine reaches\n")
+		b.WriteString("        scheduling points without ever blocking (a polling loop, for example a select with a default)\n")
+	}
 	fmt.Fprintf(&b, "goroutines of this simulation (synctest bubble %d):\n", bubble)
 	for _, blk := range blocks {
 		b.WriteString(blk)
