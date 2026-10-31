@@ -73,6 +73,7 @@ type scheduler struct {
 	release *rand.Rand
 	user    *rand.Rand
 	waiting []waiter
+	fired   []waiter         // fired Func callbacks; gid holds the callback's registration number
 	mutexes map[any][]waiter // per-mutex waiters, keyed by *sync.Mutex or *sync.RWMutex
 	onces   map[*sync.Once]*onceState
 	conds   map[*sync.Cond][]waiter // per-Cond waiters, in wait order
@@ -104,7 +105,7 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, w := range s.waiting {
+	for _, w := range slices.Concat(s.waiting, s.fired) {
 		close(w.ch)
 	}
 	for _, ws := range s.mutexes { //faultline:maporder every waiter's channel is closed; the order does not matter
@@ -123,7 +124,7 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 		}
 		o.waiters = nil // the caller still running f would close them again
 	}
-	s.waiting, s.mutexes, s.onces = nil, map[any][]waiter{}, map[*sync.Once]*onceState{}
+	s.waiting, s.fired, s.mutexes, s.onces = nil, nil, map[any][]waiter{}, map[*sync.Once]*onceState{}
 	s.conds = map[*sync.Cond][]waiter{}
 	s.release, s.user, s.active, s.driver = release, user, release != nil, id
 	s.on.Store(s.active)
@@ -138,18 +139,26 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 func (s *scheduler) Pending() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.active && len(s.waiting) > 0
+	return s.active && len(s.waiting)+len(s.fired) > 0
 }
 
-// Release implements gosched.Scheduler: the waiting list is ordered by goroutine ID, then one
-// waiter is chosen with the release stream.
+// Release implements gosched.Scheduler: a fired Func callback goes first, in registration order;
+// otherwise the waiting list is ordered by goroutine ID, then one waiter is chosen with the
+// release stream.
 func (s *scheduler) Release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.active || len(s.waiting) == 0 {
+	if !s.active || len(s.waiting)+len(s.fired) == 0 {
 		return
 	}
-	slices.SortFunc(s.waiting, func(a, b waiter) int { return cmp.Compare(a.gid, b.gid) })
+	byID := func(a, b waiter) int { return cmp.Compare(a.gid, b.gid) }
+	if len(s.fired) > 0 {
+		slices.SortFunc(s.fired, byID)
+		close(s.fired[0].ch)
+		s.fired = s.fired[1:]
+		return
+	}
+	slices.SortFunc(s.waiting, byID)
 	i := s.release.IntN(len(s.waiting))
 	w := s.waiting[i]
 	s.waiting = slices.Delete(s.waiting, i, i+1)
@@ -264,7 +273,7 @@ func lockWith(key any, try func() bool, block func()) {
 				s.mu.Unlock()
 				return
 			}
-			pending := len(s.waiting) > 0
+			pending := len(s.waiting)+len(s.fired) > 0
 			s.mu.Unlock()
 			if !pending {
 				panic(deadlock)

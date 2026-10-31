@@ -179,14 +179,30 @@ func WaitGroupGo(wg *sync.WaitGroup, f func()) {
 	})
 }
 
+// funcs numbers Func callbacks in registration order.
+var funcs atomic.Uint64
+
 // Func wraps the function of time.AfterFunc and context.AfterFunc: it starts at a scheduling
-// point. Func(nil) is nil.
+// point. Callbacks that fire together start in the order of their Func calls. Func(nil) is nil.
 func Func(f func()) func() {
 	if f == nil {
 		return nil
 	}
+	seq := funcs.Add(1)
 	return func() {
-		Point()
+		// XTE-061: timers of one instant fire in a random order and a cancel walks its children
+		// in map order, so the callback waits in s.fired and Release starts f in registration
+		// order; f's goroutine ID then follows that order.
+		if s.on.Load() {
+			id := self()
+			s.mu.Lock()
+			if s.parks(id) {
+				s.park(id, func(w waiter) { s.fired = append(s.fired, waiter{seq, w.ch}) }, true)
+				Go(f)
+				return
+			}
+			s.mu.Unlock()
+		}
 		f()
 	}
 }

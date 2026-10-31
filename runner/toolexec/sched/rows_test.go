@@ -4,6 +4,7 @@
 package sched
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -631,6 +632,143 @@ func TestRLockerMovesParkedWriter(t *testing.T) {
 		if !got.Load() {
 			t.Fatal("the writer did not get rw after RLocker's Unlock")
 		}
+		s.Reset(nil, nil)
+	})
+}
+
+// XTE-061, XTE-065: callbacks of time.AfterFunc and context.AfterFunc that fire at one instant
+// start in the order they were registered, so each seed replays. The runtime fires bubble timers of
+// one instant in a random order and context's cancel walks its children in map order, so the
+// callbacks' goroutine IDs alone do not follow a fixed order.
+func TestFuncCallbacksOfOneInstantReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		register func(fs []func())
+	}{
+		{"time.AfterFunc", func(fs []func()) {
+			for _, f := range fs {
+				time.AfterFunc(time.Millisecond, Func(f))
+			}
+		}},
+		{"context.AfterFunc", func(fs []func()) {
+			ctx, cancel := context.WithCancel(context.Background())
+			for _, f := range fs {
+				context.AfterFunc(ctx, Func(f))
+			}
+			cancel()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(seed uint64) string {
+				var out string
+				synctest.Test(t, func(t *testing.T) {
+					var mu sync.Mutex
+					var order []int // under mu
+					var finished atomic.Int32
+					drive(seed, func() {
+						fs := make([]func(), 4)
+						for i := range fs {
+							fs[i] = func() {
+								Lock(&mu)
+								order = append(order, i)
+								Unlock(&mu)
+								finished.Add(1)
+							}
+						}
+						tc.register(fs)
+					}, func() bool { return finished.Load() == 4 })
+					out = fmt.Sprint(order)
+				})
+				return out
+			}
+			distinct := map[string]bool{}
+			for seed := uint64(1); seed <= 10; seed++ {
+				first := run(seed)
+				for range 10 {
+					if got := run(seed); got != first {
+						t.Fatalf("seed %d: the callbacks ran in the order %s, then %s", seed, first, got)
+					}
+				}
+				distinct[first] = true
+			}
+			if len(distinct) < 2 {
+				t.Fatal("one callback order for 10 seeds; the release stream must choose it")
+			}
+		})
+	}
+}
+
+// XTE-061: Release starts fired callbacks lowest number first and draws nothing from the release
+// stream for them, so the draws that follow pick among their goroutines in registration order.
+func TestReleaseStartsFiredCallbacksInOrder(t *testing.T) {
+	for seed := uint64(1); seed <= 10; seed++ {
+		synctest.Test(t, func(t *testing.T) {
+			s.Reset(streams(seed))
+			var mu sync.Mutex // not sched's: f has no scheduling point
+			var got []int
+			for i := range 4 {
+				time.AfterFunc(time.Millisecond, Func(func() {
+					mu.Lock()
+					got = append(got, i)
+					mu.Unlock()
+				}))
+			}
+			time.Sleep(time.Millisecond)
+			for synctest.Wait(); s.Pending(); synctest.Wait() {
+				s.Release()
+			}
+			release, _ := streams(seed)
+			left, want := []int{0, 1, 2, 3}, []int(nil)
+			for len(left) > 0 {
+				i := release.IntN(len(left))
+				want = append(want, left[i])
+				left = slices.Delete(left, i, i+1)
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("seed %d: the callbacks ran in the order %v, want %v", seed, got, want)
+			}
+			s.Reset(nil, nil)
+		})
+	}
+}
+
+// XTE-069: Reset lets a fired Func callback that waits for its start run f unscheduled.
+func TestResetStartsFiredCallback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s.Reset(streams(1))
+		var ran atomic.Bool
+		time.AfterFunc(time.Millisecond, Func(func() { ran.Store(true) }))
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if !s.Pending() || ran.Load() {
+			t.Fatalf("pending %v, ran %v before a release", s.Pending(), ran.Load())
+		}
+		s.Reset(nil, nil)
+		synctest.Wait()
+		if !ran.Load() {
+			t.Fatal("Reset did not start the fired callback")
+		}
+	})
+}
+
+// XTE-062: a Lock on the driver that only a fired Func callback can unblock starts the callback
+// instead of panicking with the deadlock text.
+func TestDriverLockStartsFiredCallback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s.Reset(streams(1))
+		var mu sync.Mutex
+		gate := make(chan struct{})
+		go func() {
+			Lock(&mu)
+			<-gate
+			Unlock(&mu)
+		}()
+		synctest.Wait()
+		s.Release() // the goroutine takes mu and waits on gate
+		time.AfterFunc(time.Millisecond, Func(func() { close(gate) }))
+		time.Sleep(time.Millisecond) // the callback fires and waits for its start
+		Lock(&mu)
+		Unlock(&mu)
 		s.Reset(nil, nil)
 	})
 }
