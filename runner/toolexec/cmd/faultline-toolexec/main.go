@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ import (
 // The line is part of the go command's tool IDs, so change version whenever the rewriter, the
 // rewrite set or a generated file changes (XTE-022): otherwise cached packages compiled by an
 // older rewriter are reused.
-const version = "2"
+const version = "3"
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "faultline-toolexec: "+format+"\n", args...)
@@ -295,9 +296,18 @@ func compile(tool string, args []string) {
 		runCompile(tool, args, []string{gen}, lines, dir)
 	}
 	sel, outside := rewriteFiles(ip, files, roots)
-	if outside { // XTE-030 rule 2
+	if outside { // XTE-030 rule 2, XTE-050
 		logf("compile %s outside-module", ip)
-		run(tool, args)
+		dir := tempDir()
+		abs, _ := filepath.Abs(files[0])
+		f, err := parser.ParseFile(token.NewFileSet(), files[0], nil, parser.PackageClauseOnly)
+		if err != nil {
+			os.RemoveAll(dir)
+			fail("%s: %v", ip, err)
+		}
+		text := "package " + f.Name.Name + "\n\nimport __fl_sched \"" + schedPath + "\"\n\nvar _ = __fl_sched.Gaps(" +
+			strconv.Quote(abs+":1: sources outside a module") + ")\n"
+		runCompile(tool, args, []string{generate(ip, dir, "__fl_gaps.go", text)}, lines, dir)
 	}
 	if len(sel) == 0 {
 		logf("compile %s unchanged", ip)
@@ -340,7 +350,6 @@ func compile(tool string, args []string) {
 		fail("%s: %v", ip, err)
 	}
 	dir := tempDir()
-	var gaps []string
 	changed := false
 	newArgs := append([]string(nil), args...)
 	for i, a := range newArgs {
@@ -351,8 +360,7 @@ func compile(tool string, args []string) {
 		abs, _ := filepath.Abs(a)
 		rw := &rewriter{fset: fset, tf: fset.File(af.Pos()), file: af, src: srcs[af], info: info, pkg: tpkg, path: abs}
 		rw.rewrite()
-		gaps = append(gaps, rw.gaps...)
-		if len(rw.edits) == 0 {
+		if len(rw.edits) == 0 && len(rw.gaps) == 0 {
 			continue
 		}
 		changed = true
@@ -364,7 +372,6 @@ func compile(tool string, args []string) {
 		keep(ip, filepath.Base(a), text, dir)
 		newArgs[i] = out
 	}
-	recordGaps(gaps)
 	if !changed {
 		os.RemoveAll(dir)
 		logf("compile %s unchanged", ip)
@@ -402,27 +409,4 @@ func readImportcfg(name string) (exports, importmap map[string]string) {
 		}
 	}
 	return exports, importmap
-}
-
-// recordGaps appends coverage gaps to gaps.txt in the state directory in one write, so that
-// concurrent compiles do not interleave their lines. The directory exists: prepare created it.
-func recordGaps(gaps []string) {
-	if len(gaps) == 0 {
-		return
-	}
-	dir, err := stateDir()
-	if err != nil {
-		fail("%v", err)
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "gaps.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		fail("recording coverage gaps: %v", err)
-	}
-	_, err = f.WriteString(strings.Join(gaps, "\n") + "\n")
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		fail("recording coverage gaps: %v", err)
-	}
 }

@@ -4,6 +4,8 @@
 package main
 
 import (
+	"bytes"
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -33,11 +35,11 @@ type rewriter struct {
 	path    string // original absolute file name
 	edits   []edit
 	gaps    []string
-	n       int             // temporary-name counter
-	sched   bool            // the file now uses sched
-	reflect bool            // the file now uses reflect
-	rands   map[string]bool // local names of rewritten math/rand imports
-	elseIfs map[*ast.IfStmt]bool
+	n       int                   // temporary-name counter
+	sched   bool                  // the file now uses sched
+	reflect bool                  // the file now uses reflect
+	rands   map[string]bool       // local names of rewritten math/rand imports
+	points  map[int]bool          // offsets where a point was inserted
 	gotos   map[types.Object]bool // labels a goto statement names
 }
 
@@ -59,8 +61,16 @@ func (r *rewriter) add(pos, end int, text func() string) {
 	r.edits = append(r.edits, edit{pos, end, text})
 }
 
+// insert adds s at the position at. A second point before the same statement is dropped, so
+// each statement gets one (XTE-041).
 func (r *rewriter) insert(at token.Pos, s string) {
 	r.sched = true
+	if s == point {
+		if r.points[r.off(at)] {
+			return
+		}
+		r.points[r.off(at)] = true
+	}
 	r.add(r.off(at), r.off(at), func() string { return s })
 }
 
@@ -80,14 +90,20 @@ func (r *rewriter) render(lo, hi int) string {
 			continue
 		}
 		b.Write(r.src[cur:e.pos])
-		b.WriteString(e.text())
+		text := e.text()
+		b.WriteString(text)
+		if strings.Count(text, "\n") != bytes.Count(r.src[e.pos:e.end], []byte("\n")) { // XTE-044
+			p := r.tf.PositionFor(r.tf.Pos(e.end), false)
+			fmt.Fprintf(&b, "/*line :%d:%d*/", p.Line, p.Column)
+		}
 		cur = max(cur, e.end)
 	}
 	b.Write(r.src[cur:hi])
 	return b.String()
 }
 
-// output returns the rewritten file with a //line directive naming the original file.
+// output returns the rewritten file with a //line directive naming the original file and, when the
+// file has gaps, the declaration that registers them with sched (XTE-050).
 func (r *rewriter) output() string {
 	slices.SortStableFunc(r.edits, func(a, b edit) int {
 		if a.pos != b.pos {
@@ -103,6 +119,10 @@ func (r *rewriter) output() string {
 		return b.end - a.end
 	})
 	body := r.render(0, len(r.src))
+	gaps := r.sortedGaps()
+	if len(gaps) > 0 {
+		r.sched = true
+	}
 	var imports []string
 	if r.sched {
 		imports = append(imports, `import __fl_sched "`+schedPath+`"`)
@@ -119,15 +139,35 @@ func (r *rewriter) output() string {
 	for _, n := range names {
 		tail += "\nvar _ " + n + ".Source\n"
 	}
+	if len(gaps) > 0 {
+		tail += "\nvar _ = __fl_sched.Gaps(" + strconv.Quote(strings.Join(gaps, "\n")) + ")\n"
+	}
 	// Insert the imports right after the package clause, on its line.
 	pc := r.off(r.file.Name.End())
 	body = body[:pc] + "; " + strings.Join(imports, "; ") + body[pc:]
 	return "//line " + r.path + ":1\n" + body + tail
 }
 
+// sortedGaps returns the file's gaps sorted by line, then text, without duplicates (XTE-045).
+func (r *rewriter) sortedGaps() []string {
+	line := func(g string) int {
+		n, _, _ := strings.Cut(strings.TrimPrefix(g, r.path+":"), ":")
+		v, _ := strconv.Atoi(n)
+		return v
+	}
+	out := slices.Clone(r.gaps)
+	slices.SortFunc(out, func(a, b string) int {
+		if c := cmp.Compare(line(a), line(b)); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return slices.Compact(out)
+}
+
 // rewrite walks the file once and records the edits of EXB-034.
 func (r *rewriter) rewrite() {
-	r.rands, r.elseIfs, r.gotos = map[string]bool{}, map[*ast.IfStmt]bool{}, map[types.Object]bool{}
+	r.rands, r.points, r.gotos = map[string]bool{}, map[int]bool{}, map[types.Object]bool{}
 	ast.Inspect(r.file, func(n ast.Node) bool {
 		if b, ok := n.(*ast.BranchStmt); ok && b.Tok == token.GOTO && b.Label != nil {
 			if obj := r.info.Uses[b.Label]; obj != nil {
@@ -136,35 +176,18 @@ func (r *rewriter) rewrite() {
 		}
 		return true
 	})
-	var generic []*ast.FuncDecl
-	for _, d := range r.file.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Type.TypeParams != nil && fd.Body != nil {
-			generic = append(generic, fd)
-		}
-	}
-	inGeneric := func(n ast.Node) bool {
-		for _, fd := range generic {
-			if fd.Pos() <= n.Pos() && n.End() <= fd.End() {
-				return true
-			}
-		}
-		return false
-	}
 	calls := map[*ast.SelectorExpr]bool{}
 	ast.Inspect(r.file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.BlockStmt:
-			r.stmts(n.List, inGeneric)
+			r.stmts(n.List)
 		case *ast.CaseClause:
-			r.stmts(n.Body, inGeneric)
+			r.stmts(n.Body)
 		case *ast.CommClause:
-			r.stmts(n.Body, inGeneric)
+			r.stmts(n.Body)
 		case *ast.IfStmt:
-			if e, ok := n.Else.(*ast.IfStmt); ok {
-				r.elseIfs[e] = true
-				if r.hasOp(e.Init) || r.hasOp(e.Cond) {
-					r.gap(e, "channel operation in else-if header")
-				}
+			if e, ok := n.Else.(*ast.IfStmt); ok && (r.hasOp(e.Init) || r.hasOp(e.Cond)) {
+				r.gap(e, "channel operation in else-if header")
 			}
 		case *ast.CallExpr:
 			if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
@@ -180,10 +203,40 @@ func (r *rewriter) rewrite() {
 		}
 		return true
 	})
+	r.gotoPoints()
+}
+
+// gotoPoints puts a scheduling point before every goto whose label names a statement that got
+// a point before it, because the jump skips that point (XTE-041).
+func (r *rewriter) gotoPoints() {
+	pointed := map[types.Object]bool{}
+	ast.Inspect(r.file, func(n ast.Node) bool {
+		l, ok := n.(*ast.LabeledStmt)
+		if !ok || !r.points[r.off(l.Pos())] {
+			return true
+		}
+		for s := ast.Stmt(l); ; {
+			ls, ok := s.(*ast.LabeledStmt)
+			if !ok {
+				break
+			}
+			if obj := r.info.Defs[ls.Label]; obj != nil {
+				pointed[obj] = true
+			}
+			s = ls.Stmt
+		}
+		return true
+	})
+	ast.Inspect(r.file, func(n ast.Node) bool {
+		if b, ok := n.(*ast.BranchStmt); ok && b.Tok == token.GOTO && b.Label != nil && pointed[r.info.Uses[b.Label]] {
+			r.insert(b.Pos(), point)
+		}
+		return true
+	})
 }
 
 // stmts handles the statements of one list: scheduling points, go, select and range.
-func (r *rewriter) stmts(list []ast.Stmt, inGeneric func(ast.Node) bool) {
+func (r *rewriter) stmts(list []ast.Stmt) {
 	for _, s := range list {
 		start := s.Pos()
 		inner := s
@@ -201,10 +254,6 @@ func (r *rewriter) stmts(list []ast.Stmt, inGeneric func(ast.Node) bool) {
 			if r.hasOp(st.Call) {
 				r.insert(start, point)
 			}
-			if inGeneric(st) {
-				r.gap(st, "go statement in generic function")
-				continue
-			}
 			r.goStmt(st)
 		case *ast.SelectStmt:
 			r.selectStmt(start, st, labels)
@@ -220,7 +269,7 @@ func (r *rewriter) stmts(list []ast.Stmt, inGeneric func(ast.Node) bool) {
 				r.insert(start, point)
 			}
 		case *ast.SwitchStmt:
-			if r.hasOp(st.Init) || r.hasOp(st.Tag) {
+			if r.hasOp(st.Init) || r.hasOp(st.Tag) || r.caseOps(st.Body) {
 				r.insert(start, point)
 			}
 		case *ast.TypeSwitchStmt:
@@ -228,9 +277,7 @@ func (r *rewriter) stmts(list []ast.Stmt, inGeneric func(ast.Node) bool) {
 				r.insert(start, point)
 			}
 		case *ast.DeferStmt:
-			if r.hasOp(st.Call) {
-				r.gap(st, "channel operation in defer")
-			}
+			r.deferStmt(start, st)
 		case *ast.BlockStmt, *ast.EmptyStmt, *ast.CaseClause, *ast.CommClause:
 			// clause containers of switch and select bodies; their bodies are lists of their own
 		default:
@@ -238,6 +285,52 @@ func (r *rewriter) stmts(list []ast.Stmt, inGeneric func(ast.Node) bool) {
 				r.insert(start, point)
 			}
 		}
+	}
+}
+
+// caseOps reports whether a case expression of a switch body holds a channel operation.
+func (r *rewriter) caseOps(body *ast.BlockStmt) bool {
+	for _, c := range body.List {
+		if cc, ok := c.(*ast.CaseClause); ok {
+			for _, e := range cc.List {
+				if r.hasOp(e) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// deferStmt gives a deferred close or WaitGroup.Wait a scheduling point when it runs, and a
+// channel operation in the deferred call's function value or arguments, which the defer
+// evaluates, a point before the defer (XTE-041).
+func (r *rewriter) deferStmt(start token.Pos, st *ast.DeferStmt) {
+	call := st.Call
+	ops := r.hasOp(call.Fun)
+	for _, a := range call.Args {
+		ops = ops || r.hasOp(a)
+	}
+	if ops {
+		r.insert(start, point)
+	}
+	d := ""
+	if r.builtin(call.Fun) && ast.Unparen(call.Fun).(*ast.Ident).Name == "close" && len(call.Args) == 1 {
+		d = r.tmp("d")
+		r.add(r.off(st.Pos()), r.off(st.End()), func() string {
+			return "{ " + d + " := " + r.text(call.Args[0]) + "; defer func() { __fl_sched.Point(); close(" + d + ") }() }"
+		})
+	} else if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if name, ok := r.syncMethod(sel); ok && name == "WaitGroup.Wait" {
+			d = r.tmp("d")
+			r.add(r.off(st.Pos()), r.off(st.End()), func() string {
+				addr, _ := r.recvAddr(sel)
+				return "{ " + d + " := " + addr + "; defer func() { __fl_sched.Point(); " + d + ".Wait() }() }"
+			})
+		}
+	}
+	if d != "" {
+		r.sched = true
 	}
 }
 
@@ -279,12 +372,6 @@ func (r *rewriter) hasOp(n ast.Node) bool {
 // goStmt rewrites go f(a, b) to { t0, t1, t2 := f, a, b; sched.Go(func() { t0(t1, t2) }) }.
 func (r *rewriter) goStmt(st *ast.GoStmt) {
 	call := st.Call
-	if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
-		if _, ok := r.info.Uses[id].(*types.Builtin); ok {
-			r.gap(st, "go statement calling a builtin")
-			return
-		}
-	}
 	// An operand a short variable declaration cannot hold with its type (a generic function
 	// without instantiation, nil, a constant) is passed as written: none of them has side
 	// effects, so evaluating it in the new goroutine changes nothing. An untyped operand that
@@ -295,7 +382,7 @@ func (r *rewriter) goStmt(st *ast.GoStmt) {
 	for i, e := range ops {
 		switch {
 		case i == 0:
-			written[i] = r.genericFunc(e)
+			written[i] = r.genericFunc(e) || r.builtin(e)
 		case r.asWritten(e):
 			written[i] = true
 		case r.untyped(e):
@@ -360,6 +447,16 @@ func (r *rewriter) genericFunc(e ast.Expr) bool {
 	}
 	sig, ok := fn.Type().(*types.Signature)
 	return ok && sig.TypeParams().Len() > 0
+}
+
+// builtin reports whether e names a builtin function.
+func (r *rewriter) builtin(e ast.Expr) bool {
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, b := r.info.Uses[id].(*types.Builtin)
+	return b
 }
 
 // asWritten reports whether a go statement's argument e is nil or a constant. A short
@@ -699,7 +796,12 @@ func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt) {
 	switch t := r.info.TypeOf(st.X).Underlying().(type) {
 	case *types.Interface:
 		// Only a type parameter's underlying type is an interface a range accepts.
-		if tp, ok := types.Unalias(r.info.TypeOf(st.X)).(*types.TypeParam); ok && chanOrMapTerm(tp) {
+		tp, ok := types.Unalias(r.info.TypeOf(st.X)).(*types.TypeParam)
+		switch {
+		case ok && allChanTerms(tp):
+			r.insert(start, point)
+			r.insert(st.Body.Lbrace+1, " "+bodyPoint)
+		case ok && chanOrMapTerm(tp):
 			r.gap(st, "range over a channel or map of type-parameter type")
 		}
 	case *types.Chan:
@@ -770,6 +872,31 @@ func chanOrMapTerm(tp *types.TypeParam) bool {
 		}
 	}
 	return false
+}
+
+// allChanTerms reports whether every term of tp's constraint is a channel type.
+func allChanTerms(tp *types.TypeParam) bool {
+	iface, ok := tp.Constraint().Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	n := 0
+	for i := range iface.NumEmbeddeds() {
+		terms := []types.Type{iface.EmbeddedType(i)}
+		if u, ok := terms[0].(*types.Union); ok {
+			terms = terms[:0]
+			for j := range u.Len() {
+				terms = append(terms, u.Term(j).Type())
+			}
+		}
+		for _, t := range terms {
+			if _, ok := t.Underlying().(*types.Chan); !ok {
+				return false
+			}
+			n++
+		}
+	}
+	return n > 0
 }
 
 // isBlank reports whether e is the blank identifier.
