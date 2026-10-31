@@ -39,7 +39,7 @@ import (
 // The line is part of the go command's tool IDs, so change version whenever the rewriter, the
 // rewrite set or a generated file changes (XTE-022): otherwise cached packages compiled by an
 // older rewriter are reused.
-const version = "4"
+const version = "5"
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "faultline-toolexec: "+format+"\n", args...)

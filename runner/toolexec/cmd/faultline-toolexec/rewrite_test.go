@@ -245,9 +245,9 @@ func f(a chan int, b chan string) {
 package p; import __fl_sched "github.com/hmdsefi/faultline/runner/toolexec/sched"
 
 func f(p *map[string]int) (s int) {
-	for _, __fl_k1 := range __fl_sched.Keys(*p) { v, __fl_ok2 := (*p)[__fl_k1]; if !__fl_ok2 { continue }; k := __fl_k1;
+	{ __fl_m1 := *p; for _, __fl_k2 := range __fl_sched.Keys(__fl_m1) { v, __fl_ok3 := __fl_m1[__fl_k2]; if !__fl_ok3 { continue }; k := __fl_k2; {
 		s += len(k) + v
-	}
+	}}}
 	return
 }
 `,
@@ -496,17 +496,17 @@ func f(a chan int, b chan string) int {
 package p; import __fl_sched "github.com/hmdsefi/faultline/runner/toolexec/sched"
 
 func f(m map[string]int) (s int) {
-	for _, __fl_k1 := range __fl_sched.Keys(m) { if _, __fl_ok2 := m[__fl_k1]; !__fl_ok2 { continue }; k := __fl_k1;
+	{ __fl_m1 := m; for _, __fl_k2 := range __fl_sched.Keys(__fl_m1) { if _, __fl_ok3 := __fl_m1[__fl_k2]; !__fl_ok3 { continue }; k := __fl_k2; {
 		s += len(k)
-	}
+	}}}
 	var k string
 	var v int
-	for _, __fl_k3 := range __fl_sched.Keys(m) { if _, __fl_ok4 := m[__fl_k3]; !__fl_ok4 { continue }; v = m[__fl_k3]; k = __fl_k3;
+	{ __fl_m4 := m; for _, __fl_k5 := range __fl_sched.Keys(__fl_m4) { if _, __fl_ok6 := __fl_m4[__fl_k5]; !__fl_ok6 { continue }; v = __fl_m4[__fl_k5]; k = __fl_k5; {
 		s += len(k) + v
-	}
-	for _, __fl_k5 := range __fl_sched.Keys(m) { if _, __fl_ok6 := m[__fl_k5]; !__fl_ok6 { continue };
+	}}}
+	{ __fl_m7 := m; for _, __fl_k8 := range __fl_sched.Keys(__fl_m7) { if _, __fl_ok9 := __fl_m7[__fl_k8]; !__fl_ok9 { continue }; {
 		s++
-	}
+	}}}
 	return
 }
 `,

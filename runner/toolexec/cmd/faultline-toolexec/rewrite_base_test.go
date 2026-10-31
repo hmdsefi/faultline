@@ -227,9 +227,13 @@ func TestATXTE10_BaseRows(t *testing.T) {
 				"{Dir: __fl_reflect.SelectSend, Chan: __fl_reflect.ValueOf(out), Send: __fl_reflect.ValueOf(&[]ev{ev{\n\t\ta: a,\n\t\tb: b,\n\t}}[0]).Elem()}}, false); _, _ = __fl_v2, __fl_ok3; switch __fl_c1 {/*line :6:10*/\n" +
 				"\tcase 0:\n\t\tpanic(a)\n\tcase 1:/*line :12:4*/\n\tdefault: panic(\"faultline-toolexec: sched.Select returned no case\") }}\n}\n",
 		},
-		{ // a map range head that repeats a multi-line map expression: the directive keeps the later lines
+		{ // a labeled map range head repeats a multi-line map expression: the directive keeps the later lines
+			src:  "package p\n\ntype S struct{ m map[string]int }\n\nfunc f(s S) (n int) {\nL:\n\tfor k := range s.\n\t\tm {\n\t\tn += len(k)\n\t\tcontinue L\n\t}\n\tpanic(n)\n}\n",
+			want: header + "\ntype S struct{ m map[string]int }\n\nfunc f(s S) (n int) {\nL:\n\tfor _, __fl_k1 := range __fl_sched.Keys(s.\n\t\tm) { if _, __fl_ok2 := s.\n\t\tm[__fl_k1]; !__fl_ok2 { continue }; k := __fl_k1; {/*line :8:6*/\n\t\tn += len(k)\n\t\tcontinue L\n\t}}\n\tpanic(n)\n}\n",
+		},
+		{ // the bound map expression keeps its line breaks, so no directive is needed
 			src:  "package p\n\ntype S struct{ m map[string]int }\n\nfunc f(s S) (n int) {\n\tfor k := range s.\n\t\tm {\n\t\tn += len(k)\n\t}\n\tpanic(n)\n}\n",
-			want: header + "\ntype S struct{ m map[string]int }\n\nfunc f(s S) (n int) {\n\tfor _, __fl_k1 := range __fl_sched.Keys(s.\n\t\tm) { if _, __fl_ok2 := s.\n\t\tm[__fl_k1]; !__fl_ok2 { continue }; k := __fl_k1;/*line :7:6*/\n\t\tn += len(k)\n\t}\n\tpanic(n)\n}\n",
+			want: header + "\ntype S struct{ m map[string]int }\n\nfunc f(s S) (n int) {\n\t{ __fl_m1 := s.\n\t\tm; for _, __fl_k2 := range __fl_sched.Keys(__fl_m1) { if _, __fl_ok3 := __fl_m1[__fl_k2]; !__fl_ok3 { continue }; k := __fl_k2; {\n\t\tn += len(k)\n\t}}}\n\tpanic(n)\n}\n",
 		},
 		{ // break and continue to a pointed label get no point
 			src:  "package p\n\nfunc f(ch chan int) {\nL:\n\tfor v := range ch {\n\t\tif v > 0 {\n\t\t\tcontinue L\n\t\t}\n\t\tbreak L\n\t}\n}\n",
