@@ -58,6 +58,7 @@ type environment struct {
 	checkDeterminism bool            // FAULTLINE_CHECK_DETERMINISM=1
 	traceFull        bool            // FAULTLINE_TRACE=full
 	minimize         bool            // FAULTLINE_MINIMIZE enables minimization (Phase 3 acts on it)
+	exact            bool            // FAULTLINE_EXACT=1 (XTE-110)
 	seedList         []uint64        // FAULTLINE_SEED_LIST, duplicates removed
 }
 
@@ -122,15 +123,18 @@ func (e *environment) parse(name, v string) error {
 			return fmt.Errorf("faultline: invalid FAULTLINE_SEEDS value %q: want a decimal integer from 1 to %d", v, MaxSeeds)
 		}
 		e.seeds = int(n)
-	case envExplore, envCheckDeterminism:
+	case envExplore, envCheckDeterminism, envExact:
 		b, ok := parseBool(v)
 		if !ok {
 			return fmt.Errorf("faultline: invalid %s value %q: want 0 or 1", name, v)
 		}
-		if name == envExplore {
+		switch name {
+		case envExplore:
 			e.explore = b
-		} else {
+		case envCheckDeterminism:
 			e.checkDeterminism = b
+		default:
+			e.exact = b
 		}
 	case envSchedule:
 		abs, err := filepath.Abs(v)
@@ -176,8 +180,6 @@ func (e *environment) parse(name, v string) error {
 		e.minimize = on
 	case envSwarm, envSwarmConfig:
 		return notInRelease(name, featureSwarm, "unset it")
-	case envExact:
-		return notInRelease(name, featureExact, "unset it")
 	case envSeedList:
 		list, err := parseSeedList(v)
 		if err != nil {
@@ -412,6 +414,7 @@ type resolveInput struct {
 	exploreBase func() uint64
 	runSeeds    bool     // RunSeeds: seeds is the seed list (API-110)
 	seeds       []uint64 // the seeds RunSeeds lists
+	toolexec    bool     // the test binary was built with the toolexec backend (XTE-090)
 }
 
 // resolve applies defaults, the environment, validation and seed derivation (API-001 to
@@ -429,6 +432,9 @@ func resolve(in resolveInput) (*runPlan, error) {
 		return nil, errors.New("faultline: FAULTLINE_SEED and FAULTLINE_SEED_LIST are both set; set only one") // API-011 row 1
 	}
 	if err := validateOptions(o); err != nil {
+		return nil, err
+	}
+	if err := exactCheck(o, env.exact, in.toolexec); err != nil {
 		return nil, err
 	}
 	p := &runPlan{env: env}
@@ -516,6 +522,9 @@ func resolve(in resolveInput) (*runPlan, error) {
 	}
 	if env.minimize {
 		p.logs = append(p.logs, "faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring")
+	}
+	if l := procsLog(o, in.toolexec); l != "" {
+		p.logs = append(p.logs, l)
 	}
 
 	if env.traceFull {

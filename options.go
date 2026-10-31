@@ -213,7 +213,6 @@ const roadmapURL = "https://github.com/hmdsefi/faultline/issues/167"
 
 // The later features of API-005's table, as its messages name them.
 const (
-	featureExact = "exact replay in goroutine mode"
 	featureSwarm = "swarm testing"
 )
 

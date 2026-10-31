@@ -118,8 +118,15 @@ func TestGoroutineConsoleDeterminismLine(t *testing.T) {
 	if !re.MatchString(res.out) {
 		t.Fatalf("no determinism line after the artifacts line\n%s", res.out)
 	}
-	if !strings.Contains(res.artifact(t, 1).Text, gorConsoleLine) {
+	a := res.artifact(t, 1)
+	if !strings.Contains(a.Text, gorConsoleLine) {
 		t.Fatal("report.txt lacks the determinism line")
+	}
+	// Without the toolexec backend there are no coverage gaps and no gaps file (XTE-052).
+	for _, f := range a.Report.Files {
+		if f.Name == gapsFile {
+			t.Fatalf("%s written without the toolexec backend", gapsFile)
+		}
 	}
 }
 

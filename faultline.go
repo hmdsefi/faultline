@@ -157,7 +157,7 @@ func run(t *testing.T, opts Options, body func(w *World), runSeeds bool, seeds [
 		delete(runActive, t)
 		runMu.Unlock()
 	})
-	p, err := resolve(resolveInput{opts: opts, testName: t.Name(), short: testing.Short(), lookup: lookup, exploreBase: exploreBase, runSeeds: runSeeds, seeds: seeds})
+	p, err := resolve(resolveInput{opts: opts, testName: t.Name(), short: testing.Short(), lookup: lookup, exploreBase: exploreBase, runSeeds: runSeeds, seeds: seeds, toolexec: toolexecActive()})
 	if err != nil {
 		r.parentSetupError(err.Error())
 		return
@@ -269,7 +269,7 @@ func hex16(v uint64) string { return fmt.Sprintf("0x%016x", v) }
 // (API-080), and the command for a seed of RunSeeds selects its subtest (API-114).
 func (r *runner) replay(seed uint64, f *failure) artifact.Replay {
 	check := r.plan.envCheck && f != nil && f.determinism != nil && f.determinism.context == "check_determinism"
-	return buildReplay(r.build, r.cwd, r.t.Name(), seed, r.plan.env.schedulePath, check, r.plan.seedSource == "code")
+	return buildReplay(r.build, r.cwd, r.t.Name(), seed, r.plan.env.schedulePath, check, r.plan.seedSource == "code", r.replayToolexec())
 }
 
 // artifactRoot returns the artifact root, or "" when artifacts are off (API-074).
@@ -379,6 +379,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		} else {
 			a3 := r.rerun(st, res, cfg)
 			outcome = newDeterminismFailure("artifact_rerun", seed, []attemptResult{a1, a2, a3}, a1.fail, a2.records, a3.records, a2, goroutine)
+			r.exactMessage(outcome)
 		}
 	} else if r.plan.opts.CheckDeterminism {
 		a2 := r.rerun(st, res, r.plan.opts.Trace)
@@ -388,11 +389,13 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			a3 := r.rerun(st, res, full)
 			a4 := r.rerun(st, res, full)
 			outcome = newDeterminismFailure("check_determinism", seed, []attemptResult{a1, a2, a3, a4}, nil, a3.records, a4.records, a3, goroutine)
+			r.exactMessage(outcome)
 			art = a3
 		case st.Failed(): // t.Error, t.Errorf or t.Fail in the check attempt: API-061 row 8 caught any earlier one (API-072)
 			// Run sees the mark only when the attempt ends, so the time is a bound: by t=<end> (API-072).
 			stop := "marked the test failed (t.Error, t.Errorf or t.Fail) by t=" + a2.now.String()
 			res.status, res.fail = "fail", laterDeterminism(res, "determinism check", stop, a2.now, goroutine)
+			r.exactMessage(res.fail)
 			r.laterNote(st, res, "determinism check", stop)
 			completed = true
 			return
@@ -415,7 +418,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 		warnings = append(warnings, art.warnings...) // about extra files, so only with artifacts on (API-077)
 		a := r.buildArtifact(st, res, outcome, art, warnings)
 		d, err := r.writeArtifact(seed, a, func(dir string) string {
-			return "--- FAIL: " + st.Name() + "\n" + joinLines(consoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true, goroutine), "    ")
+			return "--- FAIL: " + st.Name() + "\n" + joinLines(r.seedConsoleLines(outcome, rep.Command, dir+string(os.PathSeparator), warnings, true, true), "    ")
 		})
 		if err != nil {
 			artifactsLine = "not written: " + err.Error()
@@ -425,7 +428,7 @@ func (r *runner) runSeed(st *testing.T, res *seedResult) {
 			res.artifactDir = d
 		}
 	}
-	fmt.Fprint(st.Output(), joinLines(consoleLines(outcome, rep.Command, artifactsLine, warnings, false, written, goroutine), ""))
+	fmt.Fprint(st.Output(), joinLines(r.seedConsoleLines(outcome, rep.Command, artifactsLine, warnings, false, written), ""))
 	st.Fail()
 	completed = true
 }
@@ -459,6 +462,7 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 	p := r.plan
 	vers := versions(r.build)
 	seedText := hex16(res.seed)
+	level, backend := r.determinism()
 	status := "pass"
 	var rf *artifact.Failure
 	if f != nil {
@@ -469,7 +473,7 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 		Seed: seedText, SeedSource: p.seedSource, SeedIndex: res.index, Failure: rf, Warnings: warnings,
 		Replay: r.replay(res.seed, f), Versions: vers, Options: runOptions(p.opts, p.env),
 		OptionsHash: optionsHash(p.opts, p.env.scheduleHash), Nodes: art.nodes,
-		DeterminismLevel: determinismLevel(p.opts.Mode),
+		DeterminismLevel: level, ExactBackend: backend,
 		Run: artifact.RunInfo{
 			TraceHash: hex16(art.hash), Events: art.executed, Records: art.lastSeq,
 			EndNS: int64(art.now), End: art.now.String(), Stop: art.stop, Planners: art.planners, Attempts: res.attempts,
@@ -510,6 +514,9 @@ func (r *runner) buildArtifact(st *testing.T, res *seedResult, f *failure, art a
 		for _, e := range art.extra {
 			a.Extra[e.name] = e.data
 		}
+	}
+	if f != nil {
+		r.addGapsFile(a)
 	}
 	return a
 }
@@ -650,9 +657,11 @@ func (r *runner) handleGoexit(st *testing.T, res *seedResult) {
 	case res.attempts == 2:
 		name = "determinism check"
 		res.fail = laterDeterminism(res, name, s.text(), s.at, goroutine)
+		r.exactMessage(res.fail)
 	default:
 		name = "diagnostic re-run"
 		res.fail = laterDeterminism(res, name, s.text(), s.at, goroutine)
+		r.exactMessage(res.fail)
 	}
 	r.laterNote(st, res, name, s.text())
 }
@@ -810,7 +819,7 @@ func (r *runner) writeResult(st *testing.T, res *seedResult) {
 		Leaks: res.leaks,
 	}
 	if res.events != nil {
-		line.DeterminismLevel = determinismLevel(r.plan.opts.Mode)
+		line.DeterminismLevel, line.ExactBackend = r.determinism()
 	}
 	if res.status == "fail" && res.fail != nil {
 		f := res.fail
