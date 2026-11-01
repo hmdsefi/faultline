@@ -183,8 +183,9 @@ func runPattern(name string) string {
 // passes -v, so go test prints the output of a seed that passes, and -count=1 with a schedule, so
 // go test runs the test again after the schedule file changed. For a seed of RunSeeds
 // (runSeeds), which ignores FAULTLINE_SEED, the -run pattern names the seed subtest instead
-// (API-114).
-func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check, runSeeds bool) artifact.Replay {
+// (API-114). A non-empty toolexec is the shell-quoted -toolexec value that builds the test binary
+// again with the toolexec backend; the command passes it right after -v (XTE-100).
+func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath string, check, runSeeds bool, toolexec string) artifact.Replay {
 	importPath, modulePath := b.importPath, b.modulePath
 	pkg := "." // the package argument of command
 	var pkgArg, dir string
@@ -219,6 +220,9 @@ func buildReplay(b buildInfo, cwd, testName string, seed uint64, schedulePath st
 		vars = append(vars, envCheckDeterminism+"=1")
 	}
 	command := strings.Join(append(vars, "go test -v"), " ")
+	if toolexec != "" {
+		command += " -toolexec=" + toolexec
+	}
 	if schedulePath != "" {
 		// go test does not track a file outside the module, so after an edit to the schedule file
 		// there, the command without -count=1 could print the old cached pass.

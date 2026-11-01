@@ -66,7 +66,7 @@ func TestBuildReplay(t *testing.T) {
 			"FAULTLINE_SEED=0x0000000000000001 go test -v -run '^TestRaft$' github.com/acme/internal/raft", "./internal/raft", "", "^TestRaft$"},
 	}
 	for _, c := range cases {
-		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule, false, false)
+		got := buildReplay(buildInfo{importPath: c.importPath, modulePath: c.modulePath}, c.cwd, c.test, c.seed, c.schedule, false, false, "")
 		if got.Command != c.command || got.PackageArg != c.pkgArg || got.Dir != c.dir || got.Run != c.run || got.PackageDir != c.cwd {
 			t.Errorf("buildReplay(%q, %q, %q, %q, %q) = %+v\nwant command %s, package_arg %q, dir %q", c.importPath, c.modulePath, c.cwd, c.test, c.schedule, got, c.command, c.pkgArg, c.dir)
 		}
@@ -92,7 +92,7 @@ func TestBuildReplay(t *testing.T) {
 		{"a b", false, "FAULTLINE_SEED=0x0000000000000001 go test -v -tags 'a b' -run '^TestKV$' github.com/acme/kv"},
 	} {
 		b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", tags: c.tags, race: c.race}
-		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "", false, false); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
+		if got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "", false, false, ""); got.Command != c.command || got.PackageArg != "./kv" || got.Dir != "/src/acme" {
 			t.Errorf("buildReplay(tags %q, race %v) = %+v\nwant command %s", c.tags, c.race, got, c.command)
 		}
 	}
@@ -101,7 +101,7 @@ func TestBuildReplay(t *testing.T) {
 	// FAULTLINE_SCHEDULE, -count=1 comes before the build flags: go test does not track a schedule
 	// file outside the module, so without it an edit there could leave a cached pass.
 	b := buildInfo{importPath: "github.com/acme/kv", modulePath: "github.com/acme", race: true}
-	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true, false)
+	got := buildReplay(b, "/src/acme/kv", "TestKV", 1, "/s.json", true, false, "")
 	want := "FAULTLINE_SEED=0x0000000000000001 FAULTLINE_SCHEDULE=/s.json FAULTLINE_CHECK_DETERMINISM=1 go test -v -count=1 -race -run '^TestKV$' github.com/acme/kv"
 	env := map[string]string{"FAULTLINE_SEED": "0x0000000000000001", "FAULTLINE_SCHEDULE": "/s.json", "FAULTLINE_CHECK_DETERMINISM": "1"}
 	if got.Command != want || !maps.Equal(got.Env, env) {
@@ -137,7 +137,7 @@ func TestBuildReplayRunSeeds(t *testing.T) {
 			map[string]string{}, "./kv", "/src/acme/kv"},
 	}
 	for _, c := range cases {
-		got := buildReplay(c.b, "/src/acme/kv", c.test, c.seed, c.schedule, c.check, true)
+		got := buildReplay(c.b, "/src/acme/kv", c.test, c.seed, c.schedule, c.check, true, "")
 		if got.Command != c.command || got.Run != c.run || got.Dir != c.dir || got.PackageArg != c.pkgArg || got.PackageDir != c.packagePath {
 			t.Errorf("buildReplay(%q, %q, RunSeeds) = %+v\nwant command %s, run %s", c.test, c.schedule, got, c.command, c.run)
 		}

@@ -2,7 +2,7 @@
 
 The `FAULTLINE_*` environment variables change how `faultline.Run` runs a test, without a code
 change. They choose the seeds, the faults, the artifact root and the checks. This page lists every
-variable that v0.1.2 reads, its values, its default and how it combines with `Options`.
+variable that faultline reads, its values, its default and how it combines with `Options`.
 
 ## How Run reads them
 
@@ -44,13 +44,24 @@ The variables, in the order `Run` checks them:
 | `FAULTLINE_MINIMIZE` | `0`, `1` or parameters | unset | checked, then ignored with a log line |
 | `FAULTLINE_SWARM` | any | unset | setup error |
 | `FAULTLINE_SWARM_CONFIG` | any | unset | setup error |
-| `FAULTLINE_EXACT` | any | unset | setup error |
+| `FAULTLINE_EXACT` | `0` or `1` | `0` | `1` fails goroutine-mode tests that would not replay exactly: build them with `go test -toolexec=faultline-toolexec` and keep `Options.Procs` at 1 |
 | `FAULTLINE_SEED_LIST` | seeds, or `@file` | unset | runs exactly these seeds, all of them |
 | `FAULTLINE_RESULTS` | file path | unset | appends one JSON line per seed |
 
 A *seed* is a 64-bit unsigned integer, written in decimal (`42`) or in hexadecimal with a `0x`
-prefix (`0x287372ab06f1482e`). The switches `FAULTLINE_EXPLORE` and `FAULTLINE_CHECK_DETERMINISM`
-take exactly `0` or `1`: `true` and `yes` are setup errors.
+prefix (`0x287372ab06f1482e`). The switches `FAULTLINE_EXPLORE`, `FAULTLINE_CHECK_DETERMINISM` and
+`FAULTLINE_EXACT` take exactly `0` or `1`: `true` and `yes` are setup errors.
+
+With `FAULTLINE_EXACT=1`, a goroutine-mode test that would not replay exactly gets a setup error
+before its first seed runs. Event-mode tests always replay exactly and never get it. `Run` and
+`RunSeeds` check two things, in this order, and report the first that fails:
+
+```text
+faultline: FAULTLINE_EXACT=1, but this test binary was built without the toolexec backend; build it with go test -toolexec=faultline-toolexec after running faultline-toolexec prepare
+faultline: FAULTLINE_EXACT=1, but Options.Procs is 2; exact replay needs Procs 1
+```
+
+The second message names the test's `Options.Procs` value.
 
 ## Choosing the seeds
 
@@ -215,8 +226,8 @@ of `-1` and the error as its `message`.
 
 ## Reserved variables
 
-v0.1.2 checks four reserved variables and reports any use, so a command written for another version
-cannot run here unnoticed.
+faultline checks three reserved variables and reports any use, so a command written for another
+version cannot run here unnoticed.
 
 `FAULTLINE_MINIMIZE` accepts `0`, `1`, or a comma-separated list of `runs=<n>`, `time=<duration>`
 and `out=<absolute path>`, with `out` last. An invalid value is a setup error, such as
@@ -227,12 +238,11 @@ turns minimization on changes nothing, and `Run` logs:
 faultline: FAULTLINE_MINIMIZE is set, but minimization is not available in this version; ignoring
 ```
 
-Any value of the other three is a setup error, with these messages:
+Any value of the other two is a setup error, with these messages:
 
 ```text
 faultline: FAULTLINE_SWARM is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
 faultline: FAULTLINE_SWARM_CONFIG is set, but swarm testing is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
-faultline: FAULTLINE_EXACT is set, but exact replay in goroutine mode is not in this release yet; unset it, and see the roadmap at https://github.com/hmdsefi/faultline/issues/167
 ```
 
 ## Options and the environment
