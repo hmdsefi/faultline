@@ -228,7 +228,7 @@ func runSeeds(t *testing.T, bin, dir, test string, n int, env ...string) (map[st
 	}
 	outcomes := map[string]string{}
 	if b, err := os.ReadFile(out); err == nil { //nolint:gosec // a file of the test's directory
-		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		for _, l := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") { // outcomes keep their spaces
 			if f := strings.SplitN(l, "\t", 3); len(f) == 3 {
 				outcomes[f[1]] = f[2]
 			}

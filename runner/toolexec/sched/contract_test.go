@@ -44,8 +44,9 @@ func TestInitSetsActive(t *testing.T) {
 }
 
 // With faultline's goroutine-mode driver, a goroutine that a timer wakes while the driver waits
-// for virtual time is released at that instant: at its own scheduling point, and when the
-// Unlock of a holder that a timer woke moves it from the mutex to the scheduling-point list.
+// for virtual time is released at that instant: at its own scheduling point, when it is a Func
+// callback that waits for its start, and when the Unlock of a holder that a timer woke moves it
+// from the mutex to the scheduling-point list.
 func TestWakeReleasesAtTimerInstant(t *testing.T) {
 	run := func(t *testing.T, proc func(p *faultline.Process, at *atomic.Int64)) time.Duration {
 		var at atomic.Int64
@@ -68,6 +69,15 @@ func TestWakeReleasesAtTimerInstant(t *testing.T) {
 		})
 		if got != time.Millisecond {
 			t.Errorf("a point reached at 1ms was released at %v, want 1ms", got)
+		}
+	})
+	t.Run("func", func(t *testing.T) {
+		got := run(t, func(_ *faultline.Process, at *atomic.Int64) {
+			start := time.Now()
+			time.AfterFunc(time.Millisecond, Func(func() { at.Store(int64(time.Since(start))) }))
+		})
+		if got != time.Millisecond {
+			t.Errorf("an AfterFunc callback that fired at 1ms started at %v, want 1ms", got)
 		}
 	})
 	t.Run("unlock", func(t *testing.T) {
