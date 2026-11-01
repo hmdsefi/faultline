@@ -327,9 +327,10 @@ func TestTypeCheckFailure(t *testing.T) {
 
 // TestCompileAndLink builds a program of a user module through the wrapper, tool by tool as the
 // go command does: the package with a channel operation is rewritten and compiled against
-// sched's prepared export data, a package with nothing to rewrite compiles unchanged, the link
-// finds sched through the prepared lines, and the program runs. The log, the kept file and
-// gaps.txt record it, and no temporary directory is left behind.
+// sched's prepared export data, a package with nothing to rewrite compiles unchanged, a package
+// whose only change is its gap registration is rewritten, the link finds sched through the
+// prepared lines, and the program runs. The log and the kept files record it, and no temporary
+// directory is left behind.
 func TestCompileAndLink(t *testing.T) {
 	tc := currentToolchain(t)
 	state, tmp := stateCopy(t, tc), t.TempDir()
@@ -337,6 +338,7 @@ func TestCompileAndLink(t *testing.T) {
 	dir := userModule(t,
 		"u.go", "package u\n\nimport \"sync\"\n\nfunc F(ch chan int, m *sync.Mutex) func() {\n\tch <- 1\n\treturn m.Lock\n}\n",
 		"v/v.go", "package v\n\nfunc G() int { return 1 }\n",
+		"w/w.go", "package w\n\nfunc H[M ~map[string]int](m M) {\n\tfor range m {\n\t}\n}\n",
 		"cmd/m/main.go", "package main\n\nfunc main() {\n\tch := make(chan int, 1)\n\tch <- 1\n\t<-ch\n}\n",
 		"importcfg.u", "packagefile sync="+prepared["sync"]+"\n",
 		"importcfg.none", "# import config\n")
@@ -346,6 +348,7 @@ func TestCompileAndLink(t *testing.T) {
 	for _, c := range []struct{ ip, pkg, cfg, out, file string }{
 		{"example.com/u", "example.com/u", "importcfg.u", "u.a", "u.go"},
 		{"example.com/u/v", "example.com/u/v", "importcfg.none", "v.a", "v/v.go"},
+		{"example.com/u/w", "example.com/u/w", "importcfg.none", "w.a", "w/w.go"},
 		{"example.com/u/cmd/m", "main", "importcfg.none", "m.a", "cmd/m/main.go"},
 	} {
 		args := compileArgs(tc, c.pkg, in(c.cfg), in(c.out), in(c.file))
@@ -370,7 +373,7 @@ func TestCompileAndLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "compile example.com/u rewritten\ncompile example.com/u/v unchanged\n" +
+	if want := "compile example.com/u rewritten\ncompile example.com/u/v unchanged\ncompile example.com/u/w rewritten\n" +
 		"compile example.com/u/cmd/m rewritten\nlink example.com/u/cmd/m\n"; string(b) != want {
 		t.Errorf("log %q, want %q", b, want)
 	}
@@ -381,12 +384,8 @@ func TestCompileAndLink(t *testing.T) {
 	if !strings.HasPrefix(string(kept), "//line "+in("u.go")+":1\n") || !strings.Contains(string(kept), "__fl_sched.Point(); ch <- 1") {
 		t.Errorf("kept u.go:\n%s", kept)
 	}
-	gaps, err := os.ReadFile(filepath.Join(state, "gaps.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := in("u.go") + ":7: method value Mutex.Lock\n"; string(gaps) != want {
-		t.Errorf("gaps.txt %q, want %q", gaps, want)
+	if kept, err = os.ReadFile(filepath.Join(keep, "example.com_u_w", "w.go")); err != nil || !strings.Contains(string(kept), "\nvar _ = __fl_sched.Gaps(") {
+		t.Errorf("kept w.go (%v):\n%s", err, kept)
 	}
 	entries, err := os.ReadDir(tmp)
 	if err != nil {
