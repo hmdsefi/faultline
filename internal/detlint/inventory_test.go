@@ -17,7 +17,7 @@ import (
 //
 // Later plans extend it: 1.2 adds kernel/simnet and kernel/simdisk; 1.3 adds kernel/fault and
 // check/history; 1.4 adds "" (package faultline), artifact, ui and cmd/faultline; 2.2 adds
-// shims/netsim; 2.3 adds shims/fsx; 2.4 adds internal/gosched (spike/exb branch only); 3.3 adds
+// shims/netsim; 2.3 adds shims/fsx; 2.5 adds internal/gosched; 3.3 adds
 // minimize; 3.4 adds check/linearizability; 3.5 adds check/isolation; 3.6 adds check/liveness; 3.8
 // adds explore and assert. Nested modules are never listed. internal/deps (plan 1.1 until plan
 // 1.2) is not a package directory (DET-011) and never appears here.
@@ -43,6 +43,7 @@ var inventory = []struct {
 	{"1.4", []string{""}},
 	{"2.2", []string{"shims/netsim"}},
 	{"2.3", []string{"shims/fsx"}},
+	{"2.5", []string{"internal/gosched"}},
 }
 
 // TestPackageInventory pins the package directories that exist in this phase.

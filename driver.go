@@ -52,6 +52,7 @@ func newDriver(w *World, ga *goAttempt) *driver {
 	d.lockDriver()
 	w.Sim.OnCrash(d.onCrash) // after simnet's and simdisk's hooks (API-030 created them first)
 	ga.watch.phase.Store(watchBody)
+	d.schedStart()
 	return d
 }
 
@@ -83,13 +84,16 @@ func (d *driver) advance(b kernel.Time) {
 }
 
 // quiesce is step (1) of GOR-020: release the lock, wait until every other bubble goroutine is
-// durably blocked, count progress for the watchdog, take the lock again.
-func (d *driver) quiesce() {
+// durably blocked, count progress for the watchdog unless progress is false (a pass after a
+// release, XTE-082), take the lock again.
+func (d *driver) quiesce(progress bool) {
 	d.unlockDriver()
 	d.waiting.Store(true)
 	synctest.Wait()
 	d.waiting.Store(false)
-	d.ga.watch.progress.Add(1)
+	if progress {
+		d.ga.watch.progress.Add(1)
+	}
 	d.lockDriver()
 }
 
@@ -129,8 +133,12 @@ func (d *driver) drive(until kernel.Time) kernel.StopReason {
 		horizon = mt
 	}
 	d.emitDrive(until)
+	released := false
 	for {
-		d.quiesce() // (1)
+		d.quiesce(!released)                       // (1); the pass after a release adds no watchdog progress (XTE-082)
+		if released = d.schedRelease(); released { // XTE-081: one release per pass, before time and events advance
+			continue
+		}
 		b := bubbleNow()
 		d.advance(b) // GOR-021
 		if d.failNow {
