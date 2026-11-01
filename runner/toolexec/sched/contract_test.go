@@ -6,8 +6,10 @@ package sched
 import (
 	"context"
 	"fmt"
+	mrand "math/rand"
 	"math/rand/v2"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -98,6 +100,77 @@ func TestRandV1ReadPerAttempt(t *testing.T) {
 	}
 	if a, b := read(), read(); a != b {
 		t.Fatalf("seed 1 read %s, then %s in the next attempt", a, b)
+	}
+}
+
+// RandV1().Read, the rewrite of math/rand.Read, is safe for concurrent use as math/rand.Read is:
+// two goroutines read at once outside an attempt and in one. Under -race an unguarded access to
+// Read's buffer fails the test.
+func TestRandV1ReadConcurrent(t *testing.T) {
+	readTwo := func() {
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Go(func() {
+				b := make([]byte, 3)
+				for range 50 {
+					_, _ = RandV1().Read(b)
+				}
+			})
+		}
+		wg.Wait()
+	}
+	readTwo()
+	synctest.Test(t, func(t *testing.T) {
+		drive(1, readTwo, func() bool { return true })
+	})
+}
+
+// Reset drops Read's buffered bytes under the lock Read takes: a goroutine reads while attempts
+// start, and -race reports no data race. (The race detector reports one race per address, so a
+// failure of TestRandV1ReadConcurrent hides this one: run this test alone.)
+func TestRandV1ReadDuringReset(t *testing.T) {
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		b := make([]byte, 3)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				for range 10 {
+					_, _ = RandV1().Read(b)
+				}
+				runtime.Gosched() // on one P, lets the next Reset run between two batches of reads
+			}
+		}
+	}()
+	for seed := range uint64(20) {
+		runtime.Gosched()
+		synctest.Test(t, func(t *testing.T) {
+			drive(seed, func() {}, func() bool { return true })
+		})
+	}
+	close(stop)
+	<-done
+}
+
+// Each math/rand function the rewrite replaces has a method of the same name and type on RandV1().
+func TestRandV1Methods(t *testing.T) {
+	for _, f := range []struct {
+		name string
+		fn   any
+	}{
+		{"ExpFloat64", mrand.ExpFloat64}, {"Float32", mrand.Float32}, {"Float64", mrand.Float64},
+		{"Int", mrand.Int}, {"Int31", mrand.Int31}, {"Int31n", mrand.Int31n}, {"Int63", mrand.Int63},
+		{"Int63n", mrand.Int63n}, {"Intn", mrand.Intn}, {"NormFloat64", mrand.NormFloat64},
+		{"Perm", mrand.Perm}, {"Read", mrand.Read}, {"Shuffle", mrand.Shuffle}, //nolint:staticcheck // the deprecated Read is a rewritten row
+		{"Uint32", mrand.Uint32}, {"Uint64", mrand.Uint64},
+	} {
+		m := reflect.ValueOf(RandV1()).MethodByName(f.name)
+		if !m.IsValid() || m.Type() != reflect.TypeOf(f.fn) {
+			t.Errorf("RandV1().%s is %v, want a method of type %v", f.name, m, reflect.TypeOf(f.fn))
+		}
 	}
 }
 

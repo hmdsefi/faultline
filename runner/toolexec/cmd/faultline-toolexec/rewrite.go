@@ -194,6 +194,15 @@ func (r *rewriter) rewrite() {
 			if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
 				calls[sel] = true
 				r.call(n, sel)
+			} else if sel := indexedSelector(n.Fun); sel != nil {
+				if path, name, _ := r.pkgFunc(sel); path == "maps" {
+					switch name {
+					case "Keys", "Values", "All":
+						r.gap(n, "maps iterator with unordered keys or type arguments")
+					case "DeleteFunc", "EqualFunc":
+						r.gap(n, "maps."+name)
+					}
+				}
 			}
 		case *ast.SelectorExpr:
 			r.selector(n, calls[n])
@@ -255,7 +264,7 @@ func (r *rewriter) stmts(list []ast.Stmt) {
 		case *ast.SelectStmt:
 			r.selectStmt(start, st, labels)
 		case *ast.RangeStmt:
-			r.rangeStmt(start, st)
+			r.rangeStmt(start, st, labels)
 		case *ast.ForStmt:
 			if r.hasOp(st.Init) || r.hasOp(st.Cond) || r.hasOp(st.Post) {
 				r.insert(start, point)
@@ -795,12 +804,16 @@ func (r *rewriter) selectStmt(start token.Pos, st *ast.SelectStmt, labels []*ast
 		if hasDefault {
 			return "}}"
 		}
-		return `default: panic("faultline-toolexec: sched.Select returned no case") }}`
+		sep := "" // a statement before the brace on its line needs a separator
+		if b := bytes.TrimRight(r.src[:r.off(st.Body.Rbrace)], " \t"); b[len(b)-1] != '\n' {
+			sep = "; "
+		}
+		return sep + `default: panic("faultline-toolexec: sched.Select returned no case") }}`
 	})
 }
 
 // rangeStmt handles range over channels (scheduling points) and over maps (sorted keys).
-func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt) {
+func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt, labels []*ast.LabeledStmt) {
 	if r.hasOp(st.X) {
 		r.insert(start, point)
 	}
@@ -819,12 +832,15 @@ func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt) {
 		r.insert(start, point)
 		r.insert(st.Body.Lbrace+1, " "+bodyPoint)
 	case *types.Map:
-		b, ok := t.Key().Underlying().(*types.Basic)
-		if !ok || b.Info()&types.IsOrdered == 0 {
-			r.gap(st, "range over a map with non-ordered keys")
+		order := keyOrder(t.Key())
+		switch {
+		case order == "float":
+			r.gap(st, "range over a map with floating-point keys")
 			return
-		}
-		if !sideEffectFree(st.X) {
+		case order == "":
+			r.gap(st, "range over a map with unordered keys")
+			return
+		case !sideEffectFree(st.X) && len(labels) > 0:
 			r.gap(st, "range over a map expression with side effects")
 			return
 		}
@@ -833,11 +849,22 @@ func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt) {
 			id, ok := e.(*ast.Ident)
 			return e == nil || ok && id.Name == "_"
 		}
+		// Go evaluates the map expression once, so the rewrite binds it before the loop. A labeled
+		// loop stays unbound: the block would separate the label from its for statement.
+		mv := ""
+		if len(labels) == 0 {
+			mv = r.tmp("m")
+			r.add(r.off(st.End()), r.off(st.End()), func() string { return "}" })
+		}
+		// The original body gets a block of its own, as in Go, so that it may redeclare k and v.
+		r.add(r.off(st.Body.Rbrace), r.off(st.Body.Rbrace), func() string { return "}" })
 		k, okName := r.tmp("k"), r.tmp("ok")
 		r.add(r.off(st.For), r.off(st.Body.Lbrace)+1, func() string {
 			m := r.text(st.X)
-			head := "for _, " + k + " := range __fl_sched.Keys(" + m + ") {"
-			if _, ok := st.X.(*ast.StarExpr); ok {
+			head := "for _, " + k + " := range __fl_sched." + order + "(" + m + ") {"
+			if mv != "" {
+				head, m = "{ "+mv+" := "+m+"; for _, "+k+" := range __fl_sched."+order+"("+mv+") {", mv
+			} else if _, ok := st.X.(*ast.StarExpr); ok {
 				m = "(" + m + ")" // *p[k] would index p
 			}
 			switch {
@@ -856,7 +883,7 @@ func (r *rewriter) rangeStmt(start token.Pos, st *ast.RangeStmt) {
 					head += " " + r.text(st.Key) + " = " + k + ";"
 				}
 			}
-			return head
+			return head + " {"
 		})
 	}
 }
@@ -963,9 +990,10 @@ var randV2 = map[string]bool{"ExpFloat64": true, "Float32": true, "Float64": tru
 	"Int32N": true, "Int64": true, "Int64N": true, "IntN": true, "NormFloat64": true, "Perm": true, "Shuffle": true,
 	"Uint": true, "Uint32": true, "Uint32N": true, "Uint64": true, "Uint64N": true, "UintN": true}
 
-// call rewrites sync method calls, Lock and Unlock calls through interfaces, math/rand
-// package-level calls and the function arguments of AfterFunc; a sync method or interface lock
-// call whose receiver the file cannot name is a gap.
+// call rewrites sync method calls, Lock and Unlock calls through interfaces, the maps iterators
+// and the function arguments of AfterFunc, and records sync.Map.Range, the other maps functions
+// that run in map order, and the map and channel methods of reflect.Value (XTE-042); a sync method
+// or interface lock call whose receiver the file cannot name is a gap.
 func (r *rewriter) call(call *ast.CallExpr, sel *ast.SelectorExpr) {
 	if s := r.info.Selections[sel]; s != nil && s.Kind() == types.MethodVal && r.ifaceLock(s) {
 		if r.recvGap(call, sel) {
@@ -975,6 +1003,17 @@ func (r *rewriter) call(call *ast.CallExpr, sel *ast.SelectorExpr) {
 		r.sched = true
 		r.add(r.off(call.Pos()), r.off(call.End()), func() string { return "__fl_sched." + fn + "(" + r.ifaceRecv(sel) + ")" })
 		return
+	}
+	if s := r.info.Selections[sel]; s != nil {
+		switch r.reflectMethod(s) {
+		case "MapKeys", "MapRange":
+			r.gap(call, "reflect map iteration")
+		case "Send", "Recv", "TrySend", "TryRecv", "Close":
+			r.gap(call, "reflect channel operation")
+		}
+		if name, _ := r.syncMethodOf(s); name == "Map.Range" { // a method value or a method expression
+			r.gap(call, "sync.Map.Range")
+		}
 	}
 	if name, ok := r.syncMethod(sel); ok {
 		fn, ok := syncCalls[name]
@@ -1000,22 +1039,12 @@ func (r *rewriter) call(call *ast.CallExpr, sel *ast.SelectorExpr) {
 		return
 	}
 	switch path := pn.Imported().Path(); {
-	case path == "math/rand" && randV1[sel.Sel.Name]:
-		r.sched = true
-		r.keepImport(path, id)
-		r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.RandV1()." + sel.Sel.Name })
-	case path == "math/rand/v2" && randV2[sel.Sel.Name]:
-		r.sched = true
-		r.keepImport(path, id)
-		r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.Rand()." + sel.Sel.Name })
-	case path == "math/rand/v2" && sel.Sel.Name == "N":
-		r.gap(call, "math/rand/v2.N")
+	case path == "maps":
+		r.mapsCall(call, sel, sel.Sel.Name, id)
 	case (path == "time" || path == "context") && sel.Sel.Name == "AfterFunc" && len(call.Args) == 2:
 		arg := call.Args[1]
 		r.sched = true
 		r.add(r.off(arg.Pos()), r.off(arg.Pos()), func() string { return "__fl_sched.Func(" })
 		r.add(r.off(arg.End()), r.off(arg.End()), func() string { return ")" })
-	case path == "reflect" && sel.Sel.Name == "Select":
-		r.gap(call, "reflect.Select")
 	}
 }

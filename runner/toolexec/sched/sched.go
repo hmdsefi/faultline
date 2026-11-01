@@ -99,6 +99,8 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 	var id identity
 	if release != nil {
 		id = self()
+		randV1.mu.Lock() // before s.mu, as in Read, whose draws take s.mu
+		defer randV1.mu.Unlock()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,8 +128,8 @@ func (s *scheduler) Reset(release, user *rand.Rand) {
 	s.release, s.user, s.active, s.driver = release, user, release != nil, id
 	s.on.Store(s.active)
 	if release != nil {
-		// Drop the bytes RandV1().Read buffered in the attempt before. Only at the start: no
-		// goroutine of the attempt runs yet, while at the end woken goroutines may call Read.
+		// Drop the bytes RandV1().Read buffered before this attempt, in the one before or in
+		// pass-through. randV1.mu, taken above, keeps a concurrent Read out.
 		randV1.Seed(0)
 	}
 }
@@ -411,13 +413,28 @@ func (v1Source) Int63() int64   { return int64(userSource{}.Uint64() >> 1) }
 func (v1Source) Uint64() uint64 { return userSource{}.Uint64() }
 func (v1Source) Seed(int64)     {}
 
+// LockedRand is the math/rand generator that RandV1 returns. Read and the drawing methods are safe
+// for concurrent use, as math/rand's package-level functions are: Read holds a lock around the
+// bytes it buffers, and the others draw from a locked source.
+type LockedRand struct {
+	*mrand.Rand
+	mu sync.Mutex // guards the bytes Rand.Read buffers, for Read and Reset's Seed(0)
+}
+
+// Read is math/rand.Rand.Read under r's lock.
+func (r *LockedRand) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Rand.Read(p)
+}
+
 var (
-	randV2 = rand.New(userSource{}) //nolint:gosec // draws from the attempt's seeded user stream
-	randV1 = mrand.New(v1Source{})  //nolint:gosec // draws from the attempt's seeded user stream
+	randV2 = rand.New(userSource{})                   //nolint:gosec // draws from the attempt's seeded user stream
+	randV1 = &LockedRand{Rand: mrand.New(v1Source{})} //nolint:gosec // draws from the attempt's seeded user stream
 )
 
 // Rand replaces the package-level functions of math/rand/v2.
 func Rand() *rand.Rand { return randV2 }
 
 // RandV1 replaces the package-level functions of math/rand.
-func RandV1() *mrand.Rand { return randV1 }
+func RandV1() *LockedRand { return randV1 }

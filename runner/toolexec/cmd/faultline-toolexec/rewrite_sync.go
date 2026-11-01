@@ -50,7 +50,8 @@ func (r *rewriter) pkgFunc(sel *ast.SelectorExpr) (path, name string, id *ast.Id
 	return pn.Imported().Path(), sel.Sel.Name, id
 }
 
-// selector rewrites the functions of pkgFuncs, called or not, and, for a selector that is not
+// selector rewrites the functions of pkgFuncs, the drawing functions of math/rand and
+// math/rand/v2, math/rand/v2.N and reflect.Select, called or not, and, for a selector that is not
 // called, the method values of syncFuncs; method expressions of the methods of syncFuncs and
 // syncCalls, called or not, and method values of interface Lock and Unlock are gaps, and so is a
 // method value of syncFuncs or of an interface Lock or Unlock whose receiver the file cannot name
@@ -58,6 +59,22 @@ func (r *rewriter) pkgFunc(sel *ast.SelectorExpr) (path, name string, id *ast.Id
 func (r *rewriter) selector(sel *ast.SelectorExpr, called bool) {
 	if path, name, id := r.pkgFunc(sel); id != nil {
 		if repl, ok := pkgFuncs[path+"."+name]; ok {
+			r.sched = true
+			r.keepImport(path, id)
+			r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched." + repl })
+			return
+		}
+		switch {
+		case path == "math/rand" && randV1[name]:
+			r.sched = true
+			r.keepImport(path, id)
+			r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.RandV1()." + name })
+		case path == "math/rand/v2" && randV2[name]:
+			r.sched = true
+			r.keepImport(path, id)
+			r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched.Rand()." + name })
+		case path == "math/rand/v2" && name == "N", path == "reflect" && name == "Select":
+			repl := map[string]string{"N": "N", "Select": "ReflectSelect"}[name]
 			r.sched = true
 			r.keepImport(path, id)
 			r.add(r.off(sel.Pos()), r.off(sel.End()), func() string { return "__fl_sched." + repl })
