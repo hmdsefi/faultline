@@ -29,9 +29,11 @@ distributed Go system inside `go test`. It finds the bugs that make distributed 
 appear only when messages are delayed or dropped, the network partitions, nodes crash or an fsync
 fails. The system runs in virtual time on a simulated network and disk, where faultline injects
 those faults. Every random choice comes from one seed, so a failing seed is a reproducible bug
-report: it replays the identical run. In v0.1.2 the code under test is written against faultline's
-[node API](docs/architecture.md#the-node-api), as Go callbacks with no goroutines, or is etcd/raft
-through the included harness.
+report. The code under test can be ordinary Go code that starts goroutines, serves `net/http` or gRPC
+and writes files, in [goroutine mode](docs/guides/goroutine-mode.md). Built through the
+`faultline-toolexec` wrapper, such code replays the identical run from a failing seed. Code written
+as callbacks on faultline's [node API](docs/architecture.md#the-node-api), such as the included
+etcd/raft harness, replays exactly without it.
 
 An agent that changes distributed code gets:
 
@@ -68,17 +70,18 @@ to update the plugin.
 ## Who it is for
 
 faultline is for Go teams, and their agents, that build a distributed system: a consensus or
-replication library, a database, a queue, a controller. Code on the node API consists of boot
-functions, message handlers and timers that use the simulated network and disk. The etcd/raft
-harness ports one real system to that API. faultline is the wrong tool when:
+replication library, a database, a queue, a controller. A service written as ordinary Go code runs
+as a process in goroutine mode, once it takes its listener, dialer and filesystem as values. Code on
+the node API consists of boot functions, message handlers and timers, and the etcd/raft harness
+ports one real system to that API. faultline is the wrong tool when:
 
-- You need to test existing goroutine, `net` or `os` code unchanged. It needs a port to the node API
-  first.
+- Your code calls `net.Dial`, `net.Listen` or `os.Open` directly and cannot take them as values.
+  faultline simulates only the network and the disk it hands to a process.
 - You want to test the deployed system, or inject faults into production as chaos engineering tools
   do. faultline simulates the machines, the network and the disks inside one test process.
-- You want performance numbers. A callback takes zero virtual time.
+- You want performance numbers. Computation takes zero virtual time.
 
-[Limitations and FAQ](docs/faq.md) lists what v0.1.2 does not do, and how faultline relates to
+[Limitations and FAQ](docs/faq.md) lists what faultline does not do, and how it relates to
 FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
 
 ## Example
@@ -151,6 +154,46 @@ sending the acknowledgment for `k169` and crashing 0.3 ms later, before its next
 
 ![The timeline page of seed 0x287372ab06f1482e: the failure headline and the replay command at the top, lanes for global, n1 and c1 with six hatched crash bands on n1, a failure marker at 5.873034010s, and side panels with the failed check and the six crashes](.github/assets/timeline.png)
 
+## Goroutine code
+
+In goroutine mode, a process is ordinary Go code that gets a simulated network in `p.Net` and the
+node's simulated disk in `p.FS`. The following process serves an HTTP key-value store, `kv.Server`,
+whose log lives on `p.FS`:
+
+```go
+w.AddProcess("kv", func(ctx context.Context, p *faultline.Process) error {
+	s, err := kv.Open(p.FS)
+	if err != nil {
+		return err
+	}
+	ln, err := p.Net.Listen("tcp", ":8080")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: s}
+	go func() { <-ctx.Done(); srv.Close() }()
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+})
+```
+
+A client process reaches it at `http://kv:8080/` through `netsim.HTTPClient(p.Net)`. Each run
+happens inside a `testing/synctest` bubble, so `time.Sleep` and timers follow virtual time.
+
+faultline crashes and restarts the process like any node: the context is cancelled, connections
+reset, unsynced writes may be lost, and the process function runs again. In [Test goroutine
+code](docs/guides/goroutine-mode.md), which builds this test, a store without a `SyncDir` call loses
+54 acknowledged writes on one seed, and the timeline shows the crash dropping the log file's
+directory entry.
+
+Without help, the Go runtime decides goroutine order, `select` choices and map order, so a
+goroutine-mode seed replays on a best-effort basis, and faultline's determinism check reports any
+difference it sees. Built through the `faultline-toolexec` wrapper, which rewrites your packages
+so that these choices come from the seed, the same seed replays exactly. [Replay goroutine code
+exactly](docs/guides/exact-replay.md) sets it up.
+
 ## etcd/raft
 
 `harness/etcdraft` runs clusters of [etcd/raft](https://github.com/etcd-io/raft) v3.7.0 inside
@@ -168,24 +211,36 @@ and gives the configurations and timings of those runs.
 
 ## Install
 
-faultline needs Go 1.26 or newer. The first command adds faultline to your module, and the second
-adds the etcd/raft harness. The third installs the `faultline` command, which re-renders an artifact
-directory; your tests do not need it.
+faultline needs Go 1.26 or newer. The first command adds faultline to your module. The second adds
+the etcd/raft harness, and the third gRPC support for goroutine mode. The fourth installs the
+`faultline` command, which re-renders an artifact directory; your tests do not need it.
 
 ```sh
 go get github.com/hmdsefi/faultline
 go get github.com/hmdsefi/faultline/harness/etcdraft
+go get github.com/hmdsefi/faultline/shims/grpcsim
 go install github.com/hmdsefi/faultline/cmd/faultline@latest
+```
+
+For exact replay of goroutine code, add the `faultline-toolexec` wrapper to your module as a tool,
+install it, prepare it for your Go toolchain, and build the tests through it:
+
+```sh
+go get -tool github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec
+go install github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec
+faultline-toolexec prepare
+go test -toolexec=faultline-toolexec ./...
 ```
 
 The root module depends only on the standard library and
 [gograph](https://github.com/hmdsefi/gograph), which it uses for the network topology, the partition
-and quorum queries, and the diagram of a failing run. The harness is a module of its own, so
-etcd/raft and protobuf stay out of your module unless you add it.
+and quorum queries, and the diagram of a failing run. Its packages `shims/netsim` and `shims/fsx`
+give processes the simulated network and disk. The harness, gRPC support and the wrapper are
+modules of their own, so etcd/raft, gRPC and protobuf stay out of your module unless you add them.
 
 ## Status
 
-v0.1.2, early: the API may change before v1.0; artifact formats are versioned. The
+v0.2.0, early: the API may change before v1.0; artifact formats are versioned. The
 [roadmap](https://github.com/hmdsefi/faultline/issues/167) lists what the later phases add.
 
 ## Documentation and help

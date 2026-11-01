@@ -51,7 +51,11 @@ An artifact directory holds these files:
 | `hb.mmd` | always | `faultline causal slice v1` | the records that led to the failure, as a Mermaid flowchart |
 | `timeline.html` | always | `faultline_timeline` 2 | an interactive page of the run |
 
-A check can add [extra files](#extra-files). The `files` field of `report.json` lists every file
+A check can add [extra files](#extra-files), and goroutine mode adds three of its own. A seed with
+goroutines still blocked after the drain gets `goroutines.txt`, their stacks. A seed of a test
+binary built through `faultline-toolexec` that has coverage gaps gets `toolexec-gaps.txt`, one gap
+per line. A stalled goroutine-mode run leaves only `stall.txt`, the stall report, because the stall
+watchdog ends the test binary before an artifact is written. The `files` field of `report.json` lists every file
 except `report.json` itself, with its type, and its format version where the index records one:
 
 ```sh
@@ -155,6 +159,9 @@ The top-level object has these fields, in this order:
 | `options_hash` | string | a hash of the options that change a run, including the replayed schedule |
 | `run` | object | the run that wrote the artifact |
 | `nodes` | array | the node table: `id`, `name` and `tags` of each node |
+| `determinism_level` | string | `exact` or `best-effort`; a report without it is exact |
+| `exact_backend` | string | `toolexec` for a goroutine-mode seed that the toolexec backend ran exactly; absent otherwise |
+| `leaks` | object | for goroutine mode, the goroutines still blocked after the drain: `groups` per node incarnation, with each group's `status`, `count` and stacks in `records`, and `unattributed` |
 | `dir` | string | absolute path of the artifact directory |
 | `files` | array | the file index: `name`, `type` and `version` of each file |
 
@@ -164,7 +171,7 @@ The `failure` object describes one failure:
 
 | Field | Meaning |
 |---|---|
-| `kind` | `invariant`, `final`, `panic`, `fail`, `limit` or `determinism` |
+| `kind` | `invariant`, `final`, `panic`, `fail`, `limit`, `determinism` or `leak` |
 | `check` | the check name; for `panic`, the function that panicked; `max-events` for `limit`; empty for `fail` and `determinism` |
 | `signature` | `kind:check`; seeds that fail the same way share it |
 | `headline` | the first line of the report |
@@ -182,11 +189,14 @@ The kinds mean:
 
 - `invariant`: a function registered with `w.Invariant` returned an error.
 - `final`: a function registered with `w.Final` returned an error after the run.
-- `panic`: a callback, an invariant, a final check or the world function panicked.
-- `fail`: code called `w.Sim.Fail(err)`, or the test was marked failed with `t.Error` during the
-  run.
+- `panic`: a callback, an invariant, a final check, the world function, a process function or a
+  goroutine started with `p.Go` panicked.
+- `fail`: code called `w.Sim.Fail(err)`, a live process returned an error, or the test was marked
+  failed with `t.Error` during the run.
 - `limit`: the run executed more than `Options.MaxEvents` events.
 - `determinism`: two runs of the seed gave different trace hashes.
+- `leak`: goroutines of a goroutine-mode run were still blocked after the drain, and
+  `Options.FailOnLeak` was set.
 
 ### replay, versions and options
 
@@ -207,7 +217,9 @@ current run with these fields and `options_hash`, and warns about each differenc
 `options` holds `seeds`, `duration_ns`, `duration`, `max_events`, `mode`, `trace` (`hash` or
 `full`), `trace_buffer`, `check_determinism`, `keep_going`, `no_crypto_seed`, `allow_limit`, `net`
 and `disk`. `net` and `disk` are the network and disk configurations as JSON. Under
-`FAULTLINE_SCHEDULE`, `schedule` and `schedule_hash` name the replayed file.
+`FAULTLINE_SCHEDULE`, `schedule` and `schedule_hash` name the replayed file. In goroutine mode,
+`mode` is `goroutine`, and `procs`, `drain_ns`, `stall_timeout_ns` (negative when the watchdog is
+off), `fail_on_leak` and `netsim`, the simulated TCP and UDP configuration as JSON, follow.
 
 ### run
 
@@ -288,6 +300,10 @@ The prefix of a kind names the part of faultline that emitted it:
 |---|---|
 | `kernel.` | the run's start (`start`), every executed event (`event`) and deferred event (`defer`), the node lifecycle (`add_node`, `boot`, `crash`, `pause`, `resume`, `clock_jump`, `clock_drift`), node logs (`log`), `panic` and `fail` |
 | `net.` | messages (`send`, `send_raw`, `deliver`, `dup`, `defer`, and `drop` with a `reason` of `partition`, `partition-in-flight`, `loss`, `down` or `no-handler`), handlers (`handle`) and topology changes (`partition`, `isolate`, `cut`, `heal`, `heal_link`, `link_config`, `link_reset`) |
+| `net.conn.` | simulated TCP in goroutine mode: `listen`, `unlisten`, `dial`, `segment`, `arrive`, `established`, `accept`, `refused`, `close`, `rst`, `reset` and `timeout` |
+| `net.udp.` | simulated UDP in goroutine mode: `bind`, `close`, `recv` and `drop` |
+| `driver.` | the goroutine-mode driver: `drive`, a process's `request` and `cancel`, and `process.start`, `process.exit` and `process.panic` |
+| `fsx.` | `latency`, the sampled latency of a file operation of a process |
 | `disk.` | file operations (`create`, `mkdir`, `write`, `write_durable`, `truncate`, `rename`, `remove`, `sync`, `sync_dir`), their failures (`sync_fail`, `sync_dir_fail`, `nospace`, `stale`), crash effects (`crash_apply`, `crash_meta`) and disk faults (`fail_syncs`, `capacity`, `corrupt`) |
 | `fault.` | one record per applied fault, named after its kind with `_` for `-` (`fault.crash`, `fault.heal_link`), and planner records (`target`, `skip`, `recover`, `suppressed`, `error`) |
 | `history.` | client operations: `invoke` and `complete` |
@@ -498,7 +514,9 @@ func (e stateErr) ArtifactFiles() map[string][]byte { return map[string][]byte{"
 
 A final check that returns a `stateErr` adds `state.txt`, listed in `report.json` with the type
 `extra`. A file name starts with a lowercase letter or a digit, and holds only lowercase letters,
-digits, `.`, `_` and `-`. It cannot be the name of a standard file.
+digits, `.`, `_` and `-`. It cannot be the name of a standard file. When a check adds
+`goroutines.txt` or `toolexec-gaps.txt`, its file wins, and faultline adds a warning for a dropped
+`goroutines.txt`.
 
 ## Next steps
 

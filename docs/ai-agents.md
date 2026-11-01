@@ -2,7 +2,7 @@
 
 This guide shows how an AI coding agent finds a distributed-systems bug with faultline. The agent
 checks its fix against the seed that failed, and pins that seed as a regression test. The guide
-covers the loop, which artifact file answers which question, and what v0.1.2 cannot do. It ends
+covers the loop, which artifact file answers which question, and what faultline cannot do. It ends
 with a block to paste into your agent's instruction file, which also holds the rules for code
 inside the simulation. The agent needs only a shell that runs `go test`, so the guide applies to
 Claude Code, Codex, Cursor and other coding agents.
@@ -23,7 +23,8 @@ From a shell, run `claude plugin marketplace add hmdsefi/faultline`, then
 - The `faultline` skill. Claude loads it when a distributed Go test is flaky or fails once, when a
   faultline test fails, when output shows a seed or an artifact directory, or when it writes a
   simulation test. It follows the loop on this page. For a flaky test with no faultline test yet, it
-  offers to write one and says what v0.1.x cannot run unchanged.
+  offers to write one, in goroutine mode when the code starts goroutines, and says what the code
+  must take as values first: its listener, dialer and filesystem.
 - The `faultline:triage` agent. It reads an artifact directory and answers in at most 20 lines: the
   failed check, the events that led to it, the replay command and one next step, so the main
   session does not read `trace.jsonl`.
@@ -53,8 +54,9 @@ once, a passing re-run proves nothing. faultline answers both inside `go test`:
 - The seed then becomes a short regression test.
 - Invariants are Go functions that run after every event. A property such as "no acknowledged write
   is lost" is something the agent executes and checks.
-- Code inside the simulation gets time, randomness, messages and files only from the node API. The
-  agent can see every input the code depends on.
+- Code inside the simulation gets time, randomness, the network and files only from faultline: the
+  node API in event mode, and `p.Net`, `p.FS` and the bubble's clock in goroutine mode. The agent
+  can see every input the code depends on.
 
 ## Prerequisites
 
@@ -192,6 +194,27 @@ ok  	example.com/kv	0.316s
 
 On the code from before the fix, the same test fails with the original failure.
 
+## Goroutine-mode tests
+
+A test with `Options.Mode` set to `faultline.ModeGoroutine` runs ordinary Go code as processes, as
+[Test goroutine code](guides/goroutine-mode.md) shows. The loop is the same, except for these
+points:
+
+- Without the toolexec backend, the report says
+  `determinism: level 3 (goroutine mode, best-effort replay)` below its `artifacts:` line. A replay usually fails the same way,
+  but the Go runtime still picks goroutine order, map order and `select` cases. Build the tests
+  through `faultline-toolexec`, as [Replay goroutine code exactly](guides/exact-replay.md) shows,
+  and the report says `determinism: exact (toolexec backend)`.
+- A test binary built through the wrapper prints replay commands with
+  `-toolexec=faultline-toolexec`. Run them as printed: without the flag, the replay builds another
+  binary and loses exact replay.
+- A determinism failure of a goroutine-mode seed shows the first record where two runs differ, and
+  when it can, the event before or during which the first run diverged. The usual causes are a
+  direct `net` or `os` call, global `math/rand`, map order, `select`, or a coverage gap that
+  `toolexec-gaps.txt` lists.
+
+Pin a goroutine-mode seed with `faultline.RunSeeds`, the same way.
+
 ## Which file answers which question
 
 Each failing seed leaves one artifact directory. These are the questions an agent asks while it
@@ -212,6 +235,10 @@ debugs, and the file that answers each one:
   per line, for `grep` or `jq`.
 - What chain of events caused the failure? `hb.mmd`, a Mermaid flowchart of the records that led to
   it.
+- Which constructs did the toolexec backend leave unchanged? `toolexec-gaps.txt`, in the artifact
+  of a binary built through `faultline-toolexec` that has coverage gaps.
+- Why did a goroutine-mode run stop making progress? `stall.txt`, which the stall watchdog writes
+  with the stacks of the blocked goroutines before it ends the test binary.
 
 `timeline.html` shows the same run as an interactive page for a person.
 
@@ -220,19 +247,23 @@ debugs, and the file that answers each one:
 The block in [Instructions for your agent](#instructions-for-your-agent) lists the rules, and [How
 faultline works](how-it-works.md#the-determinism-rules-your-code-follows) explains each one.
 
-## What v0.1.2 cannot do
+## What faultline cannot do
 
-v0.1.2 tests code written against faultline's node API: boot functions, `w.Net` for messages and
-the node's volume for files. Plan an agent's work around these limits:
+faultline tests code on its node API and, in goroutine mode, ordinary Go code that takes its
+network and disk from a process. Plan an agent's work around these limits:
 
-- It does not run existing code unchanged. Code that starts goroutines, uses `net` or opens files
-  with `os` needs a port to the node API. A harness, such as the one for etcd/raft, does that port
-  for one system.
+- It does not redirect direct calls to `net` or `os`. Code that dials, listens or opens files
+  itself needs a listener, dialer or `fsx.FS` passed in before it runs in goroutine mode.
+- Goroutine-mode seeds replay on a best-effort basis unless the tests are built through
+  `faultline-toolexec`, and even then the standard library, the module cache and `sync/atomic` stay
+  outside its control.
 - It does not shrink a failing run. To narrow one down, delete faults from `schedule.json` and
   replay the rest.
 - It has no linearizability or isolation checker. Your invariants and final checks are the checks.
 - It does not inspect code for the determinism rules. The determinism check finds their effects.
 - It has one ready-made harness, for etcd/raft.
+- It has no TLS, IPv6, DNS or Unix sockets on the simulated network, and no links or file locks on
+  the simulated disk.
 
 The [roadmap](https://github.com/hmdsefi/faultline/issues/167) lists what the later phases add.
 
@@ -276,7 +307,11 @@ A determinism failure means that two runs of one seed differed: code under test 
 outside the simulation, or kept state from an earlier run. Find the cause from the first differing
 record in the report, and remove it.
 
-Code inside the simulation (boot functions, message handlers, timers, invariants, final checks):
+If the replay command contains `-toolexec=faultline-toolexec`, keep that flag in every command you
+run for that test, and run `faultline-toolexec prepare` once if the build asks for it.
+
+Event-mode code inside the simulation (boot functions, message handlers, timers, invariants, final
+checks):
 
 - reads time with `n.Now()` and waits with `n.After`, never `time.Now`, `time.Sleep`, timers or
   tickers;
@@ -289,6 +324,19 @@ Code inside the simulation (boot functions, message handlers, timers, invariants
 - reports failures with `w.Invariant`, `w.Final` or `w.Sim.Fail(err)`, never `t.Fatal`: a seed
   stopped by `t.Fatal` writes no artifact. `n.Sim()` is the same simulator as `w.Sim`, so a boot
   function calls `n.Sim().Fail(err)`. `w.T().Fatal` suits only setup errors in the world function.
+
+Goroutine-mode code (processes added with `w.AddProcess` or `w.AddClientProcess`, with
+`Options.Mode: faultline.ModeGoroutine`):
+
+- reaches the network only through `p.Net` (or `netsim.HTTPClient(p.Net)`, `grpcsim.NewClient`) and
+  files only through `p.FS`, never `net.Dial`, `net.Listen` or `os.Open`;
+- may start goroutines and use `time.Sleep`, timers and contexts, which follow virtual time;
+- draws randomness from `p.Rand()`;
+- returns from the process function when `ctx` is done, and starts goroutines that may panic with
+  `p.Go`;
+- calls `p.Do` to touch the world (history, faults) from a process, and never holds a mutex across a
+  blocking network or file call that a check also locks;
+- never calls `os.Exit` or `log.Fatal`, which end the whole test binary.
 
 Do not add `t.Parallel` to a test that calls `faultline.Run` or `faultline.RunSeeds`: both seed
 `crypto/rand` for every run, and a parallel test fails with a setup error.

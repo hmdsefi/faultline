@@ -29,6 +29,10 @@ Each guide covers one task:
   read a determinism failure, and fix the usual causes.
 - [Run faultline in CI](guides/ci.md): fixed seeds on every pull request, fresh seeds every night,
   artifacts and one result line per seed.
+- [Test goroutine code](guides/goroutine-mode.md): run a service that starts goroutines, serves
+  `net/http` or gRPC and writes files, crash it, and read what goes wrong.
+- [Replay goroutine code exactly](guides/exact-replay.md): build a goroutine-mode test through
+  `faultline-toolexec`, so that its seeds replay exactly.
 - [Test etcd/raft with the harness](guides/etcd-raft.md): run the harness, configure it, write a
   scenario, and prove that its checks catch real mistakes.
 
@@ -43,16 +47,18 @@ in the code.
 - [Artifact files](reference/artifacts.md): the artifact directory and the format of every file in
   it.
 - [The `faultline` command](reference/cli.md): `render` and `version`, their flags and exit codes.
+- [The `faultline-toolexec` command](reference/toolexec.md): the wrapper of exact replay, its
+  variables, what it rewrites, the coverage gaps and its error messages.
 
 ## Concepts
 
 These pages explain how faultline works and why:
 
 - [How faultline works](how-it-works.md): virtual time, the seeded scheduler, nodes, the simulated
-  network and disk, faults, checks, seeds, replay, and the rules your code follows.
-- [Architecture](architecture.md): what the node API is, the packages, how one seed runs through
-  them, and the design choices behind them.
-- [Limitations and FAQ](faq.md): what v0.1.2 does not do, the known issues, and how faultline
+  network and disk, goroutine mode, faults, checks, seeds, replay, and the rules your code follows.
+- [Architecture](architecture.md): the node API and goroutine mode, the packages, how one seed runs
+  through them, and the design choices behind them.
+- [Limitations and FAQ](faq.md): what faultline does not do, the known issues, and how faultline
   relates to other tools.
 
 ## Contributing

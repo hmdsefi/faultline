@@ -1,9 +1,10 @@
 # How faultline works
 
 faultline is deterministic simulation testing for Go: it turns one Go test into many simulated
-runs, and each run replays exactly from its seed.
-This page explains what faultline controls in a run and which rules your code follows inside it. It
-ends with the files a failing run leaves behind for you to debug.
+runs, and each run replays from its seed, exactly in event mode.
+This page explains what faultline controls in a run, in event mode and in goroutine mode, and which
+rules your code follows inside it. It ends with the files a failing run leaves behind for you to
+debug.
 
 ## One test, many runs
 
@@ -42,7 +43,9 @@ the server acknowledges it, and remembers what was acknowledged. The server appe
 
 `faultline.Run` turns the 50 seeds into 50 subtests named `seed=0x` plus 16 hex digits. For each run
 it creates a fresh `World`, calls `kvWorld` to add nodes, faults and checks, and then advances
-virtual time to `Options.Duration`. The whole run happens on one goroutine, the seed's subtest.
+virtual time to `Options.Duration`. In event mode, the default, the whole run happens on one
+goroutine, the seed's subtest. [Goroutine mode](#goroutine-mode) runs ordinary goroutine code
+instead.
 
 ## Virtual time
 
@@ -209,6 +212,56 @@ started](getting-started.md#fix-the-bug) survives a failed `Sync`: under a `faul
 rule, each loses an acknowledged put. The server above keeps the acknowledgments of a failed sync
 and sends them after the next sync succeeds, but the writes of the failed sync never become durable.
 
+## Goroutine mode
+
+Goroutine mode runs ordinary Go code. A test sets `Options.Mode` to `faultline.ModeGoroutine` and
+adds *processes* with `w.AddProcess` or `w.AddClientProcess`. A process is a node like any other,
+with a name, tags, a clock and a volume, but its code is a function
+`func(ctx context.Context, p *faultline.Process) error`. The function runs on its own goroutine and
+can start more. [Test goroutine code](guides/goroutine-mode.md) builds such a test.
+
+Each run happens inside a [`testing/synctest`](https://pkg.go.dev/testing/synctest) bubble, a group
+of goroutines with a fake clock. `time.Now`, `time.Sleep`, timers and context deadlines in the bubble
+follow virtual time. One goroutine, the *driver*, runs the kernel's events, the world function and
+the checks. It takes a step only when every other goroutine in the bubble is durably blocked, which
+means that only another goroutine in the bubble can wake it. Then the driver executes the next
+event, and the goroutines that the event wakes run until they block again.
+
+A process reaches the simulated world through its `Process`:
+
+- `p.Net` is a `*netsim.Host` from `shims/netsim`. It implements TCP and UDP on the simulated
+  network, with a handshake, segments, retransmission, flow control, half-close, resets and
+  deadlines, and returns `net.Conn`, `net.Listener` and `net.PacketConn` values. Node names
+  resolve as host names.
+- `p.FS` is an `fsx.FS` from `shims/fsx` on the node's volume, with the crash behavior of [the
+  simulated disk](#the-simulated-disk).
+- `p.Rand()`, `p.Clock()`, `p.Logf` and `p.Do` give the node's random stream, its local clock, a
+  trace line, and a function call on the driver.
+
+A call that must wait for the simulation, such as a dial, becomes a request to the driver. Requests
+that processes make at the same virtual instant run in an order fixed by node and by a key the call
+chooses; only requests with the same node and key keep their arrival order. The trace records every
+connection, segment and datagram, and every change to a file, so the trace hash covers what each
+process sends, receives and writes.
+
+A crash cancels the process's context with the cause `faultline.ErrCrashed`, resets its
+connections and makes its open files stale. Go cannot stop a goroutine, so the goroutines of the
+crashed incarnation keep running as *ghosts*: every network and file call they make fails, and they
+cannot change the world. A restart runs the process function again.
+
+When the run ends, processes get `Options.Drain` of virtual time, 60 seconds by default, to return.
+Goroutines still blocked after that are a leak, which faultline logs, and which fails the seed with
+`Options.FailOnLeak`. A stall watchdog ends the test binary with a report when the simulation makes
+no progress for `Options.StallTimeout` of wall-clock time.
+
+What the Go runtime decides stays outside the seed: which of several woken goroutines runs first,
+global `math/rand`, map order and `select` choices. A goroutine-mode run is therefore best-effort,
+labeled level 3, unless the test binary is built through the toolexec backend. That backend
+rewrites the code under test so that these choices come from the seed, and the run is exact.
+[Replay goroutine code exactly](guides/exact-replay.md) describes it.
+
+Processes and event-mode nodes can share a world and exchange UDP datagrams.
+
 ## Faults and fault schedules
 
 A *fault* is something going wrong on purpose. faultline has 16 kinds of fault:
@@ -280,10 +333,18 @@ A replay is exact while four things stay the same: the faultline version, the Go
 code and the options. `report.json` records all four. When you replay a seed with `FAULTLINE_SEED`,
 faultline compares them with the artifact that seed left behind and warns about each difference.
 
+Event-mode runs are exact. A goroutine-mode run is exact only when the test binary was built through
+`faultline-toolexec` and `Options.Procs` is 1; the replay command then carries the same
+`-toolexec` flag. Otherwise it is best-effort: most seeds replay, and the determinism check reports
+the ones that do not. Every goroutine-mode report says which, below its `artifacts:` line, and
+`report.json` records it as `determinism_level`, `exact` or `best-effort`.
+
 ## The determinism rules your code follows
 
 faultline controls time, scheduling, the network, the disk and its own random streams. It cannot see
-what the rest of your Go code does, so code that runs inside the simulation follows these rules:
+what the rest of your Go code does, so code that runs inside the simulation follows rules.
+
+In event mode:
 
 - Read time with `n.Now()` and wait with `n.After`. Never call `time.Now`, `time.Sleep` or
   `time.After`, and never use Go timers or tickers.
@@ -298,6 +359,20 @@ what the rest of your Go code does, so code that runs inside the simulation foll
   state from one run into the next.
 - Give each message type a `Describe() string` method, so the trace shows what the message holds.
   Without one, the trace shows only the type name of a struct.
+
+In goroutine mode:
+
+- Reach the network only through `p.Net`, or values built on it such as `netsim.HTTPClient(p.Net)`,
+  and files only through `p.FS`. `net.Dial`, `net.Listen` and `os.Open` do real I/O.
+- Use `time.Sleep`, timers and contexts freely: they follow virtual time. Read the node's skewed
+  clock with `p.Clock()`.
+- Draw random numbers from `p.Rand()`. Without the toolexec backend, global `math/rand`, map order
+  and `select` with several ready cases make runs differ; with it, they come from the seed.
+- Return from the process function when its context is done, and start goroutines that can panic
+  with `p.Go`, so their panic fails the run instead of ending the test binary.
+- Never hold a mutex across a blocking network or file call while another goroutine, or a check,
+  waits for it. The simulation stalls until the watchdog ends it.
+- Keep state inside the world function, as in event mode. Never call `os.Exit` or `log.Fatal`.
 
 `crypto/rand` is the one outside source faultline handles for you. `faultline.Run` and
 `faultline.RunSeeds` seed it for every run through `testing/cryptotest`. Go does not allow that in a

@@ -22,8 +22,10 @@ const (
 	// on the kernel's event loop. A run is exactly reproducible from its seed.
 	ModeEvent Mode = iota
 	// ModeGoroutine runs goroutine code as processes inside a testing/synctest bubble, one bubble
-	// per run. A run is reproducible from its seed only on a best-effort basis, and report.json
-	// says so with determinism_level "best-effort".
+	// per run. A run is reproducible from its seed on a best-effort basis, and report.json says so
+	// with determinism_level "best-effort". A test binary built with the toolexec backend
+	// (go test -toolexec=faultline-toolexec, module runner/toolexec) runs it exactly when Procs
+	// is 1.
 	ModeGoroutine
 )
 
