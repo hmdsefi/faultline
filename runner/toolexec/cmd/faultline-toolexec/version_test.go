@@ -18,8 +18,8 @@ import (
 // file of this package needs a new version: raise version in main.go, then set these two to the
 // values the failing test prints.
 const (
-	stampVersion = "1"
-	stampHash    = "c51658109af20b88c9d675cb79a74739a1eb2f9a2a85e753d8b6ebe3c387bbe4"
+	stampVersion = "2"
+	stampHash    = "18405745f0076fae8700dda495b5cca852694a9158c669785404e3305222af65"
 )
 
 // AT-XTE-04

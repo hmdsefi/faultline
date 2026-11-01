@@ -38,7 +38,7 @@ import (
 // The line is part of the go command's tool IDs, so change version whenever the rewriter, the
 // rewrite set or a generated file changes (XTE-022): otherwise cached packages compiled by an
 // older rewriter are reused.
-const version = "1"
+const version = "2"
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "faultline-toolexec: "+format+"\n", args...)
@@ -147,19 +147,119 @@ func flagValue(args []string, name string) (string, int) {
 	return "", -1
 }
 
-// link adds the prepared packages to the link importcfg (EXB-032).
+// staleState is XTE-014's message after a fingerprint mismatch of sched or internal/gosched.
+const staleState = `the prepared sched does not match this build (another checkout or version of faultline, or other build flags); run "faultline-toolexec prepare" in this module with the build's flags, or give each checkout its own FAULTLINE_TOOLEXEC_STATE`
+
+// tempDir creates the directory of a compile's or link's files.
+func tempDir() string {
+	dir, err := os.MkdirTemp("", "faultline-toolexec-")
+	if err != nil {
+		fail("%v", err)
+	}
+	return dir
+}
+
+// keep copies a file the wrapper wrote for package ip to FAULTLINE_TOOLEXEC_KEEP, if set; a
+// failure removes dir and fails the compile.
+func keep(ip, name string, text []byte, dir string) {
+	k := os.Getenv("FAULTLINE_TOOLEXEC_KEEP")
+	if k == "" {
+		return
+	}
+	kd := filepath.Join(k, strings.NewReplacer("/", "_", " ", "_", "[", "", "]", "").Replace(ip))
+	err := os.MkdirAll(kd, 0o750) //nolint:gosec // the directory FAULTLINE_TOOLEXEC_KEEP names
+	if err == nil {
+		err = os.WriteFile(filepath.Join(kd, name), text, 0o600) //nolint:gosec // the directory FAULTLINE_TOOLEXEC_KEEP names
+	}
+	if err != nil {
+		os.RemoveAll(dir)
+		fail("%v", err)
+	}
+}
+
+// generate writes a generated file of package ip into dir, keeps a copy, and returns its path.
+func generate(ip, dir, name, text string) string {
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+		os.RemoveAll(dir)
+		fail("%v", err)
+	}
+	keep(ip, name, []byte(text), dir)
+	return p
+}
+
+// runCompile runs compile with args, the extra files appended and an importcfg that adds the
+// prepared lines; it removes dir and exits with the tool's exit code.
+func runCompile(tool string, args, extra, lines []string, dir string) {
+	args = append(append([]string(nil), args...), extra...)
+	if cfg, i := flagValue(args, "-importcfg"); i >= 0 {
+		merged, err := mergeImportcfg(cfg, lines, dir)
+		if err != nil {
+			os.RemoveAll(dir)
+			fail("%v", err)
+		}
+		if args[i] == cfg {
+			args[i] = merged
+		} else {
+			args[i] = "-importcfg=" + merged
+		}
+	}
+	runIn(dir, tool, args, false)
+}
+
+// runIn runs tool, removes dir and exits with the tool's exit code. For a link, a fingerprint
+// mismatch of sched or internal/gosched adds the stale-state message (XTE-014).
+func runIn(dir, tool string, args []string, linking bool) {
+	var stderr bytes.Buffer
+	cmd := exec.Command(tool, args...) //nolint:gosec // runs the tool the go command names, as -toolexec does
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, io.MultiWriter(os.Stderr, &stderr)
+	err := cmd.Run()
+	os.RemoveAll(dir)
+	var ee *exec.ExitError
+	switch {
+	case errors.As(err, &ee):
+		if e := stderr.String(); linking && strings.Contains(e, "fingerprint mismatch") &&
+			(strings.Contains(e, schedPath) || strings.Contains(e, goschedPath)) {
+			fail("%s", staleState)
+		}
+		os.Exit(ee.ExitCode())
+	case err != nil:
+		fail("%v", err)
+	}
+	os.Exit(0)
+}
+
+// wrapperValue is the -toolexec value of this wrapper for replay commands (XTE-024): its base
+// name when PATH finds the same file, else its absolute path.
+func wrapperValue() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if e, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = e
+	}
+	base := filepath.Base(exe)
+	if p, err := exec.LookPath(base); err == nil {
+		if q, err := filepath.EvalSymlinks(p); err == nil && q == exe {
+			return base
+		}
+	}
+	return exe
+}
+
+// link links with the prepared packages added to importcfg.link and the wrapper's path stored
+// for replay commands (XTE-020, XTE-024).
 func link(tool string, args []string) {
 	cfg, i := flagValue(args, "-importcfg")
 	if i < 0 {
 		run(tool, args)
 	}
 	lines, _ := prepared(toolGoVersion(tool), slices.Contains(args, "-race"))
-	dir, err := os.MkdirTemp("", "faultline-toolexec-link-")
-	if err != nil {
-		fail("%v", err)
-	}
+	dir := tempDir()
 	merged, err := mergeImportcfg(cfg, lines, dir)
 	if err != nil {
+		os.RemoveAll(dir)
 		fail("%v", err)
 	}
 	args = append([]string(nil), args...)
@@ -168,16 +268,10 @@ func link(tool string, args []string) {
 	} else {
 		args[i] = "-importcfg=" + merged
 	}
-	cmd := exec.Command(tool, args...) //nolint:gosec // runs the tool the go command names, as -toolexec does
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err = cmd.Run()
-	os.RemoveAll(dir)
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		os.Exit(ee.ExitCode())
-	} else if err != nil {
-		fail("%v", err)
+	if w := wrapperValue(); w != "" {
+		args = append([]string{"-X", goschedPath + ".Wrapper=" + w}, args...)
 	}
+	runIn(dir, tool, args, true)
 }
 
 // compile rewrites the selected files of a compile in the rewrite set and runs compile.
@@ -194,12 +288,22 @@ func compile(tool string, args []string) {
 		run(tool, args)
 	}
 	lines, roots := prepared(goVersion, slices.Contains(args, "-race"))
-	sel := rewriteFiles(ip, files, roots)
+	if pkg, _, _ := strings.Cut(ip, " "); strings.HasSuffix(pkg, ".test") { // XTE-023
+		logf("compile %s testmain", ip)
+		dir := tempDir()
+		gen := generate(ip, dir, "__fl_testmain.go", "package main\n\nimport _ \""+schedPath+"\"\n")
+		runCompile(tool, args, []string{gen}, lines, dir)
+	}
+	sel, outside := rewriteFiles(ip, files, roots)
+	if outside { // XTE-030 rule 2
+		logf("compile %s outside-module", ip)
+		run(tool, args)
+	}
 	if len(sel) == 0 {
 		logf("compile %s unchanged", ip)
 		run(tool, args)
 	}
-	cfg, ci := flagValue(args, "-importcfg")
+	cfg, _ := flagValue(args, "-importcfg")
 	pkgPath, _ := flagValue(args, "-p")
 	lang, _ := flagValue(args, "-lang")
 	exports, importmap := readImportcfg(cfg)
@@ -235,10 +339,7 @@ func compile(tool string, args []string) {
 	if err != nil {
 		fail("%s: %v", ip, err)
 	}
-	dir, err := os.MkdirTemp("", "faultline-toolexec-")
-	if err != nil {
-		fail("%v", err)
-	}
+	dir := tempDir()
 	var gaps []string
 	changed := false
 	newArgs := append([]string(nil), args...)
@@ -257,17 +358,10 @@ func compile(tool string, args []string) {
 		changed = true
 		out, text := filepath.Join(dir, fmt.Sprintf("%d_%s", i, filepath.Base(a))), []byte(rw.output())
 		if err := os.WriteFile(out, text, 0o600); err != nil {
+			os.RemoveAll(dir)
 			fail("%v", err)
 		}
-		if keep := os.Getenv("FAULTLINE_TOOLEXEC_KEEP"); keep != "" {
-			kd := filepath.Join(keep, strings.NewReplacer("/", "_", " ", "_", "[", "", "]", "").Replace(ip))
-			if err := os.MkdirAll(kd, 0o750); err != nil { //nolint:gosec // the directory FAULTLINE_TOOLEXEC_KEEP names
-				fail("%v", err)
-			}
-			if err := os.WriteFile(filepath.Join(kd, filepath.Base(a)), text, 0o600); err != nil { //nolint:gosec // the directory FAULTLINE_TOOLEXEC_KEEP names
-				fail("%v", err)
-			}
-		}
+		keep(ip, filepath.Base(a), text, dir)
 		newArgs[i] = out
 	}
 	recordGaps(gaps)
@@ -277,25 +371,7 @@ func compile(tool string, args []string) {
 		run(tool, args)
 	}
 	logf("compile %s rewritten", ip)
-	merged, err := mergeImportcfg(cfg, lines, dir)
-	if err != nil {
-		fail("%v", err)
-	}
-	if newArgs[ci] == cfg {
-		newArgs[ci] = merged
-	} else {
-		newArgs[ci] = "-importcfg=" + merged
-	}
-	cmd := exec.Command(tool, newArgs...) //nolint:gosec // runs the tool the go command names, as -toolexec does
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err = cmd.Run()
-	os.RemoveAll(dir)
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		os.Exit(ee.ExitCode())
-	} else if err != nil {
-		fail("%v", err)
-	}
+	runCompile(tool, newArgs, nil, lines, dir)
 }
 
 func indexOf(list []string, s string) int {

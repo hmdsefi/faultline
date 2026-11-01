@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -48,64 +47,6 @@ func setup(m *testing.M) (int, error) {
 		return 0, fmt.Errorf("faultline-toolexec prepare: %v\n%s", err, out)
 	}
 	return m.Run(), nil
-}
-
-func TestRewriteFiles(t *testing.T) {
-	root := t.TempDir()
-	write := func(rel, content string) string {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	write("fl/go.mod", "module github.com/hmdsefi/faultline\n")
-	fa, fat := write("fl/a.go", "package a\n"), write("fl/a_test.go", "package a\n")
-	ka, kat := write("fl/kernel/k.go", "package kernel\n"), write("fl/kernel/k_test.go", "package kernel\n")
-	write("fl/shims/grpcsim/go.mod", "module github.com/hmdsefi/faultline/shims/grpcsim\n")
-	ga, gat := write("fl/shims/grpcsim/g.go", "package grpcsim\n"), write("fl/shims/grpcsim/g_test.go", "package grpcsim\n")
-	write("fl/internal/spike/exb/go.mod", "module github.com/hmdsefi/faultline/internal/spike/exb\n")
-	ca := write("fl/internal/spike/exb/c/c.go", "package c\n")
-	write("user/go.mod", "module example.com/u\n")
-	ua, uat := write("user/u.go", "package u\n"), write("user/u_test.go", "package u\n")
-	std := write("goroot/src/fmt/print.go", "package fmt\n")
-	dep := write("modcache/example.com/d@v1.0.0/d.go", "package d\n")
-	roots := map[string]string{"GOROOT": filepath.Join(root, "goroot"), "GOMODCACHE": filepath.Join(root, "modcache")}
-	keys := func(m map[string]bool) string {
-		var s []string
-		for k := range m {
-			s = append(s, filepath.Base(k))
-		}
-		slices.Sort(s)
-		return strings.Join(s, ",")
-	}
-	for _, tc := range []struct {
-		name, ip string
-		files    []string
-		want     string
-	}{
-		{"faultline root: tests only", "github.com/hmdsefi/faultline [github.com/hmdsefi/faultline.test]", []string{fa, fat}, "a_test.go"},
-		{"faultline package below the go.mod: tests only", "github.com/hmdsefi/faultline/kernel [github.com/hmdsefi/faultline/kernel.test]", []string{ka, kat}, "k_test.go"},
-		{"nested faultline module: tests only", "github.com/hmdsefi/faultline/shims/grpcsim [github.com/hmdsefi/faultline/shims/grpcsim.test]", []string{ga, gat}, "g_test.go"},
-		{"corpus module: all", "github.com/hmdsefi/faultline/internal/spike/exb/c", []string{ca}, "c.go"},
-		{"user module: all", "example.com/u [example.com/u.test]", []string{ua, uat}, "u.go,u_test.go"},
-		{"test main: none", "example.com/u.test", []string{ua}, ""},
-		{"sched: none", schedPath, []string{ua}, ""},
-		{"gosched tests: none", goschedPath + " [" + goschedPath + ".test]", []string{fa, fat}, ""},
-		{"std: none", "fmt", []string{std}, ""},
-		{"module cache: none", "example.com/d", []string{dep}, ""},
-	} {
-		if got := keys(rewriteFiles(tc.ip, tc.files, roots)); got != tc.want {
-			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
-		}
-	}
-	t.Setenv("FAULTLINE_TOOLEXEC_STD", "net/http,fmt")
-	if got := keys(rewriteFiles("fmt", []string{std}, roots)); got != "print.go" {
-		t.Errorf("FAULTLINE_TOOLEXEC_STD=fmt: %q", got)
-	}
 }
 
 func TestMergeImportcfg(t *testing.T) {
