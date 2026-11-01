@@ -1,5 +1,5 @@
 ---
-description: "The faultline skill loads for a flaky replication test built on goroutines and net with no faultline test, and the reply says faultline v0.1.x cannot run that code unchanged and offers a faultline test. Needs --scaffold."
+description: "The faultline skill loads for a flaky replication test built on goroutines and net with no faultline test, and the reply says the code must take its listener and dialer as values before faultline can run it in goroutine mode, and offers a faultline test. Needs --scaffold."
 tags: [trigger]
 max_turns: 10
 allowed_tools: [Read, Glob, Grep, Skill]

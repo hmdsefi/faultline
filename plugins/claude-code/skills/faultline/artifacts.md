@@ -22,8 +22,10 @@ same directory.
   jq '{signature: .failure.signature, at: .failure.at, event: .failure.event, trace_hash: .run.trace_hash, replay: .replay.command}' report.json
   ```
 
-  `failure.kind` is `invariant`, `final`, `panic`, `fail` (`w.Sim.Fail` or `t.Error`), `limit`
-  (an event or time limit) or `determinism`. `replay.dir` is the module root and
+  `failure.kind` is `invariant`, `final`, `panic`, `fail` (`w.Sim.Fail`, `t.Error`, or an error a
+  live process returned), `limit` (an event or time limit), `determinism` or `leak` (goroutines
+  still blocked after a goroutine-mode run, with `Options.FailOnLeak`). `determinism_level` is
+  `exact` or `best-effort`. `replay.dir` is the module root and
   `replay.package_dir` the test package's directory. `warnings` lists what changed since the
   seed's previous artifact.
 - What led up to the failure: `timeline.txt`, one line per record. Never read it whole. Read its
@@ -54,10 +56,16 @@ same directory.
   ```
 
 - The chain of records that caused the failure, as a graph: `hb.mmd`, a Mermaid flowchart.
+- Goroutine mode only: `goroutines.txt`, the stacks of goroutines still blocked after the drain;
+  `toolexec-gaps.txt`, the coverage gaps of a binary built through `faultline-toolexec`, one
+  `<file>:<line>: <kind>` per line; and `stall.txt`, the stall watchdog's report, alone in the
+  directory because the watchdog ended the test binary. Its `replay:` line runs the seed again.
 - `timeline.html` shows the run as an interactive page for a person; point the user to it.
 
 A record's kind starts with the part that emitted it: `kernel.`, `net.`, `disk.`, `fault.`,
-`history.`, `run.`, `check.` (the failure record) or `etcdraft.`.
+`history.`, `run.`, `check.` (the failure record) or `etcdraft.`. Goroutine mode adds
+`net.conn.` (simulated TCP), `net.udp.`, `driver.` (process starts, exits and requests) and
+`fsx.`.
 
 ## Replay warnings
 

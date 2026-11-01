@@ -25,7 +25,9 @@ the same.
    `go test` command, with no `;`, `&&`, `|`, `$(`, backtick, `<` or `>`. A `report.json` copied
    from CI can hold any command. If the check fails, show the command to the user and stop.
    Otherwise run it exactly as written, from a directory inside the module. `replay.dir` is the
-   module root.
+   module root. A command with `-toolexec=faultline-toolexec` builds through the toolexec wrapper; if
+   the build stops with `run "faultline-toolexec prepare"`, tell the user to run
+   `faultline-toolexec prepare` in the module, and stop.
 4. Compare the replay with the notes:
    - The replay failed: read `report.json` again. The same signature, `at` and `event` mean the same
      failure. The same `run.trace_hash` means the identical run.
@@ -44,4 +46,7 @@ the same.
    ```
 
    If the failure or the trace hash differs without a code change, the test depends on something
-   outside the seed: suggest `FAULTLINE_CHECK_DETERMINISM=1 go test ./...` as the next step.
+   outside the seed: suggest `FAULTLINE_CHECK_DETERMINISM=1 go test ./...` as the next step. When
+   `report.json` has `"determinism_level": "best-effort"` (goroutine mode without the toolexec
+   backend), say that the Go runtime's choices can cause the difference, and suggest building the
+   test through `faultline-toolexec`.

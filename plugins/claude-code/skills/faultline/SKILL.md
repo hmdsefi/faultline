@@ -11,6 +11,12 @@ injected faults. Every random choice comes from one seed, so a failing seed repl
 run: the same check fails at the same virtual time and event number. faultline settings are
 `FAULTLINE_*` environment variables, never test flags.
 
+A test with `Options.Mode: faultline.ModeGoroutine` runs ordinary goroutine code as processes
+(`w.AddProcess`). Its report ends with a `determinism:` line: `exact (toolexec backend)` when the
+test binary was built with `-toolexec=faultline-toolexec`, else `level 3 (goroutine mode,
+best-effort replay)`, where the Go runtime still picks goroutine order, map order and `select`
+cases, so a replay usually but not always fails the same way.
+
 When `superpowers:systematic-debugging` or `superpowers:test-driven-development` is loaded, this
 loop is their reproduce, root-cause and red-green steps for a faultline test. It needs neither.
 
@@ -35,12 +41,13 @@ below.
    code runs the same seeds as CI. A CI job with `FAULTLINE_EXPLORE=1` ran fresh seeds: take the
    seed and the replay command from its log.
 
-   A faultline seed does not fail by chance: on the same code and Go minor version, it fails
-   again on every run. So a re-run that passed ran other seeds (`-short` caps the count;
+   A faultline seed does not fail by chance: on the same code and Go minor version, an event-mode
+   or exact seed fails again on every run. So a re-run that passed ran other seeds (`-short` caps the count;
    `FAULTLINE_EXPLORE`, `FAULTLINE_BASE_SEED`, `FAULTLINE_SEED` and `FAULTLINE_SEEDS` change the
-   list), ran changed code or another Go minor version, or the test is not deterministic. Check
-   the last case with `FAULTLINE_CHECK_DETERMINISM=1 go test -run '^TestKV$' .`. Never tell the
-   user that a random fault happened to miss the re-run.
+   list), ran changed code or another Go minor version, ran a best-effort goroutine-mode seed, or
+   the test is not deterministic. Check the last two cases with
+   `FAULTLINE_CHECK_DETERMINISM=1 go test -run '^TestKV$' .`. Never tell the user that a random
+   fault happened to miss the re-run.
 
 2. **Triage in a subagent.** Give the `artifacts:` path, or the seed, to the `faultline:triage`
    agent and ask why the seed failed. It returns the failed check, the events that led to it, the
@@ -50,7 +57,10 @@ below.
 
 3. **Reproduce.** Run the replay command (the user's `/faultline:replay <seed>` does the same). It
    must fail the same check at the same virtual time and event before you change any code. Any
-   other result is a determinism problem: read [rules.md](rules.md).
+   other result is a determinism problem: read [rules.md](rules.md). Keep
+   `-toolexec=faultline-toolexec` when the command has it; if the build stops with
+   `run "faultline-toolexec prepare"`, run `faultline-toolexec prepare` in the module and replay
+   again.
 
 4. **Fix the code under test**, following [rules.md](rules.md). Never weaken, skip or delete an
    invariant or final check to make a seed pass.
@@ -101,6 +111,14 @@ Done when the replay passes, fails again with the fix undone, both `go test` run
 For etcd/raft, use `etcdraft.Test` or `etcdraft.Setup` from the
 [harness guide](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/etcd-raft.md).
 
+For code that starts goroutines, serves `net/http` or gRPC, or writes files, write a goroutine-mode
+test instead, from
+[Test goroutine code](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/goroutine-mode.md):
+set `Mode: faultline.ModeGoroutine`, add the service with `w.AddProcess`, and pass it `p.Net` and
+`p.FS` in place of its listener, dialer and filesystem. It needs faultline v0.2.0 or later in
+`go.mod`. For exact replay, build it through `faultline-toolexec`, from
+[Replay goroutine code exactly](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/guides/exact-replay.md).
+
 Done when `go test ./...` and `FAULTLINE_CHECK_DETERMINISM=1 go test ./...` print `ok`, and the
 planted bug made a seed fail.
 
@@ -119,14 +137,16 @@ Its failures do not replay from a seed. If the module already has a faultline te
 code, use the loop above with that test. Otherwise, answer the user's question about the flaky
 test, and in the same reply:
 
-- Say plainly what faultline v0.1.x cannot run unchanged: code that starts goroutines, uses `net`
-  or opens files with `os` needs a port to the node API first ([rules.md](rules.md) has the rules
-  for ported code). etcd/raft v3.7.0 runs through `harness/etcdraft` (`etcdraft.Test`), which does
-  that port.
+- Say plainly that faultline cannot replay the existing test: it uses the real network, disk and
+  clock. Say what the code needs to run inside faultline. Goroutine code runs in goroutine mode
+  (faultline v0.2.0 or later) once it takes its listener, dialer and filesystem as values instead
+  of calling `net.Listen`, `net.Dial` or `os.Open` itself; name the functions that call them.
+  etcd/raft v3.7.0 runs through `harness/etcdraft` (`etcdraft.Test`).
 - Offer to write a faultline test of the behavior the flaky test checks, following "Write a new
   simulation test" above. Write it only when the user agrees.
 
-Done when the reply states that limit for this code and offers the faultline test.
+Done when the reply states what this code needs before faultline can run it and offers the
+faultline test.
 
 ## Reference
 
