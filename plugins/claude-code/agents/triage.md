@@ -36,7 +36,12 @@ The task names an artifact directory, or a seed such as `0x287372ab06f1482e`.
 
 For a determinism failure (the headline starts with `determinism failure`), the report names the
 first differing record and both versions of it. Find that record in `timeline.txt` and follow its
-cause to the choice that came from outside the seed.
+cause to the choice that came from outside the seed. If the report mentions coverage gaps, read
+`toolexec-gaps.txt` and list the gaps in the code under test: they are the first places to look.
+
+If the directory holds only `stall.txt`, a goroutine-mode run stalled and the watchdog ended the
+test binary. Read its first lines (the virtual time, the last event, the replay command) and the
+goroutine states it marks without `(durable)`. Put `stall` as the kind on the `check:` line.
 
 ## Answer
 
