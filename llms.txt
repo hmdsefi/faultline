@@ -35,7 +35,7 @@
 
 - [How faultline works](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/how-it-works.md): when you write code that runs inside the simulation, or need to know why a run behaves as it does. Virtual time, the seeded scheduler, named random streams, nodes, the simulated network and disk, goroutine mode, faults and fault schedules, checks, seeds and replay, and the determinism rules for code under test in each mode.
 - [Architecture](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/architecture.md): when you need to know what the node API is or which package does what. The node API and goroutine mode, the packages and modules, how one seed runs through them, and the design choices behind them, including the toolexec backend.
-- [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): before you decide whether faultline fits a system, or when a feature seems to be missing. What faultline does not do, the known issues, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
+- [Limitations and FAQ](https://raw.githubusercontent.com/hmdsefi/faultline/main/docs/faq.md): before you decide whether faultline fits a system, when a feature seems to be missing, or when `go get` of a nested module fails with "does not contain package". What faultline does not do, the known issues, how to add a nested module at a specific version, and how faultline relates to FoundationDB's simulation testing, TigerBeetle's VOPR, Antithesis, Jepsen and `testing/synctest`.
 
 ## Optional
 

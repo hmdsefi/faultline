@@ -189,6 +189,42 @@ Yes. Package `kernel` is a plain Go API: `kernel.New` creates a simulator, and y
 `Run`, `RunUntil` or `RunFor`. Without `faultline.Run` you give up the seed list, the subtests, the
 checks, the second run of failing seeds and the artifacts.
 
+### Why does `go get` say the module "does not contain package"?
+
+`go get` of a nested module at an explicit version can fail when your `go.mod` already requires
+`github.com/hmdsefi/faultline`. You see it only while the module cache does not hold the nested
+module yet, as on a new machine or a clean CI runner:
+
+```sh
+go get github.com/hmdsefi/faultline/harness/etcdraft@v0.2.0
+```
+
+```text
+go: module github.com/hmdsefi/faultline@v0.2.0 found, but does not contain package github.com/hmdsefi/faultline/harness/etcdraft
+```
+
+`harness/etcdraft`, `shims/grpcsim` and `runner/toolexec`, which holds the `faultline-toolexec`
+wrapper, are nested modules with their own version tags, such as `harness/etcdraft/v0.2.0`. When the
+error appears, the go command has searched only the root module. It never asked the module proxy
+for the nested one.
+
+Leave the version off, and `go get` adds the nested module's latest release:
+
+```sh
+go get github.com/hmdsefi/faultline/harness/etcdraft
+```
+
+To add a specific release, download the nested module into the module cache first. For the wrapper,
+download `runner/toolexec`, then add the wrapper with `go get -tool`. The following commands add the
+harness and the wrapper at v0.2.0:
+
+```sh
+go mod download github.com/hmdsefi/faultline/harness/etcdraft@v0.2.0
+go get github.com/hmdsefi/faultline/harness/etcdraft@v0.2.0
+go mod download github.com/hmdsefi/faultline/runner/toolexec@v0.2.0
+go get -tool github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec@v0.2.0
+```
+
 ### Does faultline make network calls?
 
 No. `shims/netsim` implements `net.Conn` and `net.Listener` on the simulated network and never
