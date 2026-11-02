@@ -5,14 +5,18 @@
 // the packages of a test binary so that goroutine starts, channel operations, select, sync
 // primitives, map ranges and math/rand calls go through the seeded scheduler in package sched.
 //
-// In the module under test, add the command as a tool, prepare the scheduler, then build through
-// the wrapper:
+// In the module under test, add the command as a tool, install it, prepare the scheduler, then
+// build through the wrapper:
 //
 //	go get -tool github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec
-//	go tool faultline-toolexec prepare
-//	go test -toolexec="go tool faultline-toolexec" ./...
+//	go install github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec
+//	faultline-toolexec prepare
+//	go test -toolexec=faultline-toolexec ./...
 //
-// Run prepare again after you change the Go toolchain or the faultline version.
+// Pass the installed command to -toolexec, not "go tool faultline-toolexec": the go command runs
+// the assembler for standard-library packages with assembly files in their own directories, outside
+// the module, where go tool finds no tool of the module. Run prepare again after you change the Go
+// toolchain or the faultline version.
 package main
 
 import (
@@ -39,7 +43,7 @@ import (
 // The line is part of the go command's tool IDs, so change version whenever the rewriter, the
 // rewrite set or a generated file changes (XTE-022): otherwise cached packages compiled by an
 // older rewriter are reused.
-const version = "5"
+const version = "6"
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "faultline-toolexec: "+format+"\n", args...)
