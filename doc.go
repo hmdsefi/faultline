@@ -46,10 +46,12 @@
 // time. It must take time from the kernel (Node.Now, Node.After) and randomness from World.Rand or
 // Node.Rand, and it must not start goroutines. In goroutine mode (Options.Mode = ModeGoroutine),
 // World.AddProcess also runs ordinary goroutine code inside a testing/synctest bubble, where
-// time.Sleep and timers follow virtual time; a failing seed then replays on a best-effort basis. A
-// node's BootFunc runs again at every restart, so a node rebuilds its state there, from its disk if
-// it has one. Packages kernel, simnet, simdisk and fault describe the event loop, the network, the
-// disks and the faults.
+// time.Sleep and timers follow virtual time. A failing seed then replays on a best-effort basis, or
+// exactly when the test binary is built with the faultline-toolexec wrapper of module
+// runner/toolexec (go test -toolexec=faultline-toolexec) and Options.Procs is 1. A node's BootFunc
+// runs again at every restart, so a node rebuilds its state there, from its disk if it has one.
+// Packages kernel, simnet, simdisk and fault describe the event loop, the network, the disks and the
+// faults.
 //
 // Each seed runs as a subtest named seed=0x followed by 16 hex digits. By default the seeds come
 // from the test's name (NameBase, DeriveSeed), so they are the same on every machine. When a seed

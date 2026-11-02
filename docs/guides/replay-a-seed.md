@@ -52,6 +52,12 @@ jq -r .replay.command /tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e/
 FAULTLINE_SEED=0x287372ab06f1482e go test -v -run '^TestKV$' example.com/kv
 ```
 
+A goroutine-mode test built through `faultline-toolexec` prints a replay command with
+`-toolexec=faultline-toolexec` after `go test -v`. Run it as printed: the flag builds the same
+rewritten test binary, which replays the seed exactly. Without the backend, a goroutine-mode replay
+is best-effort, and the report says `determinism: level 3`. [Replay goroutine code
+exactly](exact-replay.md) explains the difference.
+
 ## Confirm that it is the same run
 
 A replay that fails the same check at the same virtual time and event number is the same failure. To
@@ -117,6 +123,10 @@ FAULTLINE_SEED=0x287372ab06f1482e ./kv.test -test.run '^TestKV$' -test.v
 The run fails at the same virtual time and event, with the same trace hash. Only the test binary
 warning appears, because the build flags changed. A breakpoint does not change the run: virtual time
 moves only when the event loop runs the next event.
+
+For a goroutine-mode test, add `-toolexec=faultline-toolexec` to the `go test -c` command when the
+replay command has it. The stall watchdog measures wall-clock time, so a long stop at a breakpoint
+can end the test binary; set `Options.StallTimeout` to a negative value while you debug.
 
 For a pinned test that calls `RunSeeds` ([Keep the seed as a regression
 test](#keep-the-seed-as-a-regression-test)), pass the replay command's `-run` pattern instead.

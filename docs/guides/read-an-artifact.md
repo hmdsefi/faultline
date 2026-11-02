@@ -207,6 +207,21 @@ jq -c 'select(.input == "k169=v169")' history.jsonl
 `schedule.json` lists the faults. [Replay a failing
 seed](replay-a-seed.md#narrow-a-failure-by-editing-its-schedule) shows how to edit and replay it.
 
+## Goroutine-mode artifacts
+
+A goroutine-mode seed leaves the same files, and its trace has more record kinds: `net.conn.` and
+`net.udp.` for the simulated TCP and UDP, `disk.` for the file operations of processes, and
+`driver.` for process starts, exits and requests. [Test goroutine
+code](goroutine-mode.md#when-a-seed-fails) reads such a timeline. Three files can join them:
+
+- `goroutines.txt` holds the stacks of goroutines still blocked after the drain.
+- `toolexec-gaps.txt` lists the coverage gaps of a test binary built through `faultline-toolexec`.
+- `stall.txt` is the stall watchdog's report. When it is there, it is the only file: the watchdog
+  ended the test binary before faultline wrote the rest. Its `replay:` line runs the seed again.
+
+Below the `artifacts:` line, `report.txt` says how the seed replays: `determinism: level 3 (goroutine mode,
+best-effort replay)` or `determinism: exact (toolexec backend)`.
+
 ## Render the files again
 
 `timeline.txt`, `hb.mmd` and `timeline.html` are built from `report.json` and `trace.jsonl`. The

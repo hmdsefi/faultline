@@ -122,6 +122,40 @@ the simulation:
 The first differing record usually points at the cause. A `kernel.log` record with different text
 points at a log line. A timer that fires at different times points at the code that scheduled it.
 
+## Goroutine-mode tests
+
+In goroutine mode, the Go runtime makes some choices the seed does not control, so a determinism
+failure is more likely. A message of a goroutine-mode seed adds a line that names them. The
+following message comes from a client that draws its wait from the global `math/rand/v2`
+generator, as in [Replay goroutine code exactly](exact-replay.md#make-a-nondeterministic-test-exact):
+
+```text
+        faultline: determinism failure: two runs of seed 0xfb9241718877d7f3 gave trace hashes 0xfa813712552db3f4 and 0x14ca9b950d3c018b
+          first difference at record #20:
+            run 3: #20 t=0.035000000s node=2#1 driver.request cause=19 "net.dial dial:10.0.0.1:8080" req="2" kind="net.dial" key="dial:10.0.0.1:8080"
+            run 4: #20 t=0.004000000s node=2#1 driver.request cause=19 "net.dial dial:10.0.0.1:8080" req="2" kind="net.dial" key="dial:10.0.0.1:8080"
+          determinism level 3 (goroutine mode): replay is best-effort; divergence comes from goroutines woken together, global math/rand, map iteration, select, or state shared between runs
+          ...
+```
+
+Record 20 is the client's dial, which it made at different virtual times in the two runs. In
+goroutine mode the message can also name the event before or during which the first run diverged,
+which narrows the search to what the processes did around it.
+
+The common causes in goroutine mode, and their fixes:
+
+- A direct `net` or `os` call. Pass the code `p.Net` and `p.FS` instead.
+- Global `math/rand`, map order and `select` with several ready cases. Draw from `p.Rand()` and sort
+  map keys, or build the test through `faultline-toolexec`, which takes these choices from the seed.
+- Goroutines woken together whose order changes what they send or write. Build the test through
+  `faultline-toolexec`, which releases them one at a time, in seeded order, at every lock, channel
+  operation and `select`.
+- State kept between runs, as in event mode.
+
+[Replay goroutine code exactly](exact-replay.md) sets up the backend. Under it, this test passes the
+check for all five of its seeds, and a determinism failure says `determinism: exact (toolexec backend)` with the
+number of coverage gaps instead of `level 3`.
+
 ## Parallel tests and crypto/rand
 
 faultline seeds `crypto/rand` for every run, through Go's `testing/cryptotest`. Go does not allow
@@ -133,9 +167,10 @@ that in a parallel test, so a test that calls `t.Parallel` and then `faultline.R
 ```
 
 With `faultline.RunSeeds`, the message names `RunSeeds` instead of `Run`. Remove `t.Parallel` from
-tests that call either one. `Options.NoCryptoSeed` turns the seeding off instead, and allows a
-parallel test. Then `crypto/rand` in the code under test is no longer deterministic, and the check
-reports it when a read changes the trace.
+tests that call either one. In event mode, `Options.NoCryptoSeed` turns the seeding off instead, and
+allows a parallel test. Then `crypto/rand` in the code under test is no longer deterministic, and
+the check reports it when a read changes the trace. A goroutine-mode test must not call
+`t.Parallel` either way.
 
 ## Verify it works
 
@@ -155,3 +190,4 @@ ok  	example.com/kv	1.500s
   code inside the simulation, and why each one matters.
 - [Run faultline in CI](ci.md): run the check on every pull request.
 - [Replay a failing seed](replay-a-seed.md): replay a seed once it is deterministic.
+- [Replay goroutine code exactly](exact-replay.md): make goroutine-mode seeds exact.

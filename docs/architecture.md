@@ -1,8 +1,9 @@
 # Architecture
 
-faultline is a Go library built around one single-threaded simulator, plus a command-line tool and a
-separate module for etcd/raft. This page shows what each package owns, how one seed moves through
-them, and why the design looks the way it does. It covers the packages in v0.1.2.
+faultline is a Go library built around one simulator, with two ways to run the code under test:
+callbacks on the node API, and ordinary goroutine code. Around it sit two commands and nested
+modules for etcd/raft, gRPC and exact replay. This page shows what each package owns, how one seed
+moves through them, and why the design looks the way it does.
 
 ## The node API
 
@@ -39,6 +40,20 @@ etcd/raft, so you can test raft without writing the port yourself. etcd/raft cam
 `RawNode` holds the raft algorithm alone. It starts no goroutines and does no I/O, so the harness
 supplies the messages, the write-ahead log and the timers from the node API.
 
+## Processes in goroutine mode
+
+Goroutine mode runs code that was not written for the node API. A *process* is a node whose code is a
+function `func(ctx context.Context, p *faultline.Process) error`, which runs on its own goroutine and
+may start more. It gets the network and the disk as values: `p.Net`, a host on the simulated
+network with TCP and UDP sockets that implement the `net` interfaces, and `p.FS`, the node's volume
+behind an interface modelled on package `os`. Code that takes its listener, dialer and filesystem as
+values runs unchanged, with `net/http` and gRPC on top.
+
+Each run happens inside a `testing/synctest` bubble. A driver goroutine runs the kernel's events, one
+at a time, only when every process goroutine is durably blocked. [How faultline
+works](how-it-works.md#goroutine-mode) describes what a process sees, and [Test goroutine
+code](guides/goroutine-mode.md) shows how to write one.
+
 ## The packages
 
 A test calls `faultline.Run`, which builds a fresh simulated world for every run from the kernel and
@@ -48,12 +63,18 @@ with.
 ```mermaid
 flowchart TB
     accTitle: How faultline's packages fit together
-    accDescr: go test runs your test or the etcd/raft harness, and both call faultline.Run in the root package. Both run their nodes on the node API of the world's packages, and the harness drives etcd/raft's RawNode. For every run, Run builds a world from kernel, simnet, simdisk, fault and history. On a failure, Run passes the run to package artifact, which writes the artifact directory and inlines the timeline renderer from package ui. The faultline command re-renders the files of an artifact directory.
+    accDescr: go test runs your test or the etcd/raft harness, and both call faultline.Run in the root package. With the toolexec backend, go test builds the test binary through faultline-toolexec, which rewrites your packages to call its scheduler. Event-mode code and the harness run their nodes on the node API of the world's packages, and the harness drives etcd/raft's RawNode. Goroutine-mode processes use shims/netsim and shims/fsx, and gRPC through shims/grpcsim, on top of the same world. For every run, Run builds a world from kernel, simnet, simdisk, fault and history. On a failure, Run passes the run to package artifact, which writes the artifact directory and inlines the timeline renderer from package ui. The faultline command re-renders the files of an artifact directory.
     go_test["The go test command"]
+    toolexec["runner/toolexec (own module): faultline-toolexec, sched"]
     your_test["Your simulation test"]
     harness["harness/etcdraft (own module)"]
     rawnode["etcd/raft: RawNode"]
-    run["faultline: Run, World, Options"]
+    run["faultline: Run, World, Options, Process"]
+    subgraph shims["Goroutine-mode shims"]
+        netsim["shims/netsim: TCP, UDP, net/http"]
+        fsx["shims/fsx: files"]
+        grpcsim["shims/grpcsim (own module): gRPC"]
+    end
     subgraph world["One simulated world per run"]
         kernel["kernel: time, events, nodes, trace"]
         simnet["kernel/simnet: messages and partitions"]
@@ -69,11 +90,15 @@ flowchart TB
     dir[("The artifact directory on disk")]
     go_test -->|runs| your_test
     go_test -->|runs| harness
+    go_test -.->|builds through| toolexec
     your_test -->|calls| run
     harness -->|calls| run
     harness -->|drives| rawnode
     your_test -->|node API| world
+    your_test -->|processes| shims
     harness -->|node API| world
+    grpcsim --> netsim
+    shims --> world
     run -->|builds per run| world
     run -->|on failure| artifact
     artifact -->|inlines| ui
@@ -83,11 +108,11 @@ flowchart TB
 
 The packages do these jobs:
 
-- `faultline`, the module root, is the test entry point: `Run`, `RunSeeds`, `Options` and
-  `World`. It reads the `FAULTLINE_*` environment variables, derives the seed list and runs each
-  seed as a subtest. It runs the checks, classifies failures, runs failing seeds a second time and
-  prints the report. It and the etcd/raft harness are the only packages on this page that import
-  `testing`.
+- `faultline`, the module root, is the test entry point: `Run`, `RunSeeds`, `Options`, `World`
+  and, for goroutine mode, `Process`. It reads the `FAULTLINE_*` environment variables, derives the
+  seed list and runs each seed as a subtest. It runs the checks, classifies failures, runs failing
+  seeds a second time and prints the report. In goroutine mode it also owns the driver, the stall
+  watchdog and the leak report.
 - `kernel` is the discrete-event simulator. It owns virtual time, the event queue and its seeded
   tie-break, the named random streams, and nodes with their incarnations, crashes, pauses and
   clocks. It also keeps the trace and its running hash. It starts no goroutines and imports only the
@@ -106,14 +131,23 @@ The packages do these jobs:
 - `ui` embeds the web assets that `timeline.html` inlines, and imports only the standard library.
 - `cmd/faultline` is the `faultline` command. `faultline render <dir>` regenerates the three
   rendered files of an artifact directory, and `faultline version` prints the version.
+- `shims/netsim` gives each process a host on the simulated network: TCP connections and
+  listeners, UDP sockets, name resolution for node names, and an `http.Transport` that dials
+  through the host.
+- `shims/fsx` defines `fsx.FS`, a filesystem interface modelled on package `os`, with `fsx.OS` on a
+  real directory and `fsx.Sim` on a simulated volume.
+- `shims/grpcsim` is a separate Go module. It connects gRPC clients and servers to `netsim`.
+- `runner/toolexec` is a separate Go module, the toolexec backend. Its command
+  `faultline-toolexec` rewrites the packages of a test binary at build time, and its package
+  `sched` is the scheduler the rewritten code calls.
 - `harness/etcdraft` is a separate Go module. It runs clusters of `go.etcd.io/raft/v3` v3.7.0 inside
   faultline, with a write-ahead log on the simulated disk and a key-value state machine. It adds
   clients recorded in the history, fault presets, and safety and liveness checks. Most tests call
   `etcdraft.Test`.
 
 Imports go in one direction. `simnet` and `simdisk` build on `kernel`, and `fault` builds on those
-three. Nothing in the simulation imports `faultline` or `artifact`. A test in faultline's suite
-checks these import rules.
+three. The shims build on the kernel packages, and the root package on the shims. Nothing in the
+simulation imports `faultline` or `artifact`. A test in faultline's suite checks these import rules.
 
 ## How one seed runs
 
@@ -132,6 +166,13 @@ trace hash fails the seed. When two attempts differ, faultline runs the seed wit
 it has two traces to compare. It reports the first record where they differ, and a list of common
 causes.
 
+In goroutine mode, each attempt runs inside its own `testing/synctest` bubble. The driver goroutine
+calls the world function, starts the processes, and then loops: it waits until every other
+goroutine in the bubble is durably blocked, runs the requests and the next event, and runs the
+invariants. When the run ends, it cancels the processes' contexts and gives them the drain time to
+return. With the toolexec backend, the driver also releases one goroutine waiting at a scheduling
+point per pass, chosen from the seed, before it lets virtual time move.
+
 ## Design choices
 
 The first two choices follow from one requirement: a seed gives the same run on every supported
@@ -143,7 +184,28 @@ The kernel runs every callback on one goroutine, one at a time, in an order fixe
 and the seed. A simulator with real goroutines would need the Go scheduler to make the same choices
 in every run, and the Go scheduler takes no seed. With one thread and an event queue, the queue is
 the only source of ordering, and the queue is seeded. The cost is that code under test is written as
-callbacks. v0.1.2 does not run goroutine code.
+callbacks.
+
+### A driver goroutine for goroutine code
+
+Goroutine mode keeps the single-threaded kernel and puts real goroutines around it. Only the driver
+runs kernel events, and only when every process goroutine is durably blocked, so the kernel still
+runs one event at a time in seeded order. A process's own network and file calls change the world
+under one lock, on the process's goroutine. `testing/synctest` supplies the fake clock and tells the driver when
+the bubble is idle. What a woken goroutine does before it blocks again is up to the Go runtime,
+which is why goroutine-mode replay is best-effort without the next choice.
+
+### A source rewriter for exact goroutine order
+
+The Go runtime offers no hook to seed its scheduler, its map order or its `select` choices.
+faultline compared two ways around that. One ran the test binary under WebAssembly, where the guest
+is single-threaded; the other rewrote the source at build time through `go test -toolexec`. The
+criteria were fixed before either was built: exact replay on every test program, slowdown, and
+working on both supported Go versions, among others. The rewriter met all of them and was chosen. The rewritten
+code parks at every operation that can block or wake another goroutine, and the driver releases one
+parked goroutine at a time with a seeded choice. The standard library and the module cache stay
+unchanged by default, and you opt a package in when your test depends on the order of its
+goroutines.
 
 ### Named streams and integer decisions
 
@@ -167,7 +229,9 @@ environment variable reaches every test binary, and the ones that do not use fau
 
 The root module depends on the standard library and [gograph](https://github.com/hmdsefi/gograph)
 only. Anything heavier lives in a nested module with its own `go.mod`. `harness/etcdraft` requires
-etcd/raft and protobuf, and a project that does not import the harness does not depend on them.
+etcd/raft and protobuf, and `shims/grpcsim` requires gRPC. A project that does not import them does
+not depend on them. `runner/toolexec` is a module of its own too, and requires only faultline. The
+root module never imports the nested modules.
 
 ## How faultline checks its own determinism
 
@@ -184,6 +248,8 @@ checks them:
   runs twice and must give the same trace hash.
 - Golden trace hashes pin the exact runs of a set of small scenarios. CI computes them on Linux on
   amd64 and macOS on arm64, with Go 1.26 and Go 1.27, and fails when any two disagree.
+- The toolexec backend's tests build test programs through the wrapper on the same platforms and Go
+  versions, and check that every seed gives the same trace hash and the same goroutine order twice.
 
 ## Next steps
 

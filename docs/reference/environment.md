@@ -2,7 +2,9 @@
 
 The `FAULTLINE_*` environment variables change how `faultline.Run` runs a test, without a code
 change. They choose the seeds, the faults, the artifact root and the checks. This page lists every
-variable that faultline reads, its values, its default and how it combines with `Options`.
+variable that `Run` and `RunSeeds` read, its values, its default and how it combines with `Options`.
+The `faultline-toolexec` wrapper reads variables of its own, which [The `faultline-toolexec`
+command](toolexec.md#variables) lists.
 
 ## How Run reads them
 
@@ -198,8 +200,8 @@ hashes. Different hashes fail the seed with a determinism failure. Its replay co
 and creates the file when it is missing. Here are the lines of a failing seed and a passing one:
 
 ```json
-{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"fail","kind":"invariant","check":"acked puts survive","signature":"invariant:acked puts survive","message":"k169=v169 was acknowledged, but n1 holds \"\"","at_ns":5873034010,"at":"5.873034010s","events":1455,"trace_hash":"0x34d831a670e30100","wall_ns":21706292}
-{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x0000000000000001","index":1,"status":"pass","events":2424,"trace_hash":"0x88694ecd14e9de1f","wall_ns":24765084}
+{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"fail","kind":"invariant","check":"acked puts survive","signature":"invariant:acked puts survive","message":"k169=v169 was acknowledged, but n1 holds \"\"","at_ns":5873034010,"at":"5.873034010s","events":1455,"trace_hash":"0x34d831a670e30100","wall_ns":21706292,"determinism_level":"exact"}
+{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x0000000000000001","index":1,"status":"pass","events":2424,"trace_hash":"0x88694ecd14e9de1f","wall_ns":24765084,"determinism_level":"exact"}
 ```
 
 The fields of a line, in order:
@@ -220,6 +222,9 @@ The fields of a line, in order:
 | `artifact` | string | artifact directory, when one was written |
 | `artifact_error` | string | why the artifact could not be written |
 | `wall_ns` | integer | wall-clock time the seed took, in nanoseconds |
+| `determinism_level` | string | `exact` or `best-effort`: how the seed replays; left out when the seed did not finish its first run |
+| `exact_backend` | string | `toolexec` for a goroutine-mode seed that the toolexec backend ran exactly |
+| `leaks` | object | goroutines still blocked after a goroutine-mode run, as in `report.json` |
 
 A field without a value is left out. A setup error writes one line with `"kind":"setup"`, an `index`
 of `-1` and the error as its `message`.

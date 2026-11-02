@@ -36,13 +36,13 @@ Set `FAULTLINE_RESULTS` to a file, and faultline appends one JSON line to it for
 A passing seed's line holds its trace hash and its number of events:
 
 ```json
-{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"pass","events":680,"trace_hash":"0x3db7c81cc7771d70","wall_ns":11602833}
+{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"pass","events":680,"trace_hash":"0x3db7c81cc7771d70","wall_ns":11602833,"determinism_level":"exact"}
 ```
 
 A failing seed's line adds the failure and its artifact directory:
 
 ```json
-{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"fail","kind":"invariant","check":"acked puts survive","signature":"invariant:acked puts survive","message":"k169=v169 was acknowledged, but n1 holds \"\"","at_ns":5873034010,"at":"5.873034010s","events":1455,"trace_hash":"0x34d831a670e30100","artifact":"/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e","wall_ns":51237500}
+{"faultline_result":1,"package":"example.com/kv","test":"TestKV","seed":"0x287372ab06f1482e","index":0,"status":"fail","kind":"invariant","check":"acked puts survive","signature":"invariant:acked puts survive","message":"k169=v169 was acknowledged, but n1 holds \"\"","at_ns":5873034010,"at":"5.873034010s","events":1455,"trace_hash":"0x34d831a670e30100","artifact":"/tmp/faultline-501/example.com_kv/TestKV/287372ab06f1482e","wall_ns":51237500,"determinism_level":"exact"}
 ```
 
 faultline creates the file, but not its directory. When it cannot write a line, the seed fails, so
@@ -76,6 +76,22 @@ started](../getting-started.md#pin-the-seed) shows.
 runs. A run's wall-clock time grows with its events. On an Apple M4 Max, one test that ran 10,000
 seeds of a three-node etcd/raft cluster took 692 seconds, more than the default limit. [Results of
 40,000 seeds](etcd-raft.md#results-of-40000-seeds) gives the time per seed.
+
+## Build goroutine-mode tests for exact replay
+
+A goroutine-mode test replays exactly only when its test binary is built through the
+`faultline-toolexec` wrapper. Install and prepare the wrapper in the job, pass it to `go test`, and
+set `FAULTLINE_EXACT=1`, so that a job that lost the wrapper fails instead of running best-effort:
+
+```sh
+go install github.com/hmdsefi/faultline/runner/toolexec/cmd/faultline-toolexec
+faultline-toolexec prepare
+FAULTLINE_EXACT=1 FAULTLINE_CHECK_DETERMINISM=1 go test -count=1 -toolexec=faultline-toolexec ./...
+```
+
+The module must require the wrapper as a tool, and `$(go env GOPATH)/bin` must be on `PATH`.
+[Replay goroutine code exactly](exact-replay.md#run-it-in-ci) sets that up and gives the GitHub
+Actions steps.
 
 ## A GitHub Actions workflow
 

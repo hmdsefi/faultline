@@ -130,8 +130,9 @@ func load(vol *simdisk.Volume) map[string]string {
 }
 ```
 
-The server is code written against faultline's node API, which is what faultline runs. [Limitations
-and FAQ](faq.md) lists the code it does not run. Here is what each part does:
+The server runs in event mode: code written against faultline's node API, in which every seed
+replays exactly. Code that starts goroutines runs in goroutine mode instead, as [Test goroutine
+code](guides/goroutine-mode.md) shows. Here is what each part does:
 
 - `Boot` is the server's *boot function*. faultline calls it when the node first starts and again
   after every restart, and memory starts empty each time. `Boot` rebuilds the map from the log.
@@ -512,5 +513,7 @@ replay:    go test -v -run '^TestKVSeed287372ab$/^seed=0x287372ab06f1482e$' exam
   timeline page.
 - [Replay a failing seed](guides/replay-a-seed.md): replay warnings, and how to narrow a failure by
   editing its fault schedule.
+- [Test goroutine code](guides/goroutine-mode.md): the same kind of store written as ordinary Go
+  code, served over HTTP, in goroutine mode.
 - [How faultline works](how-it-works.md): virtual time, the simulated network and disk, faults, and
   the rules your code follows.
