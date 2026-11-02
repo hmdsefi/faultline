@@ -3,7 +3,7 @@ module github.com/hmdsefi/faultline/shims/grpcsim
 go 1.26.0
 
 require (
-	github.com/hmdsefi/faultline v0.1.2
+	github.com/hmdsefi/faultline v0.2.0
 	google.golang.org/grpc v1.84.0
 )
 
